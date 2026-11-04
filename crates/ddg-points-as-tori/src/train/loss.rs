@@ -249,7 +249,7 @@ pub fn build_plan(q: &[[f64; 3]], truth: &[f64], p: &[[f64; 3]], o: &LossOptions
         })
         .collect();
     let mut plan = BlendPlan { offset: vec![0], ..Default::default() };
-    for (j, qp) in per.into_iter().enumerate() {
+    for (j, qp) in per.iter().enumerate() {
         let Some(qp) = qp else {
             plan.dropped += 1;
             continue;
@@ -261,11 +261,29 @@ pub fn build_plan(q: &[[f64; 3]], truth: &[f64], p: &[[f64; 3]], o: &LossOptions
         plan.max_pairs = plan.max_pairs.max(qp.idx.len());
         plan.max_dropped_mass = plan.max_dropped_mass.max(qp.dropped_mass);
         plan.guarded += qp.guarded as usize;
-        plan.idx.extend(qp.idx);
-        plan.w.extend(qp.w);
-        plan.c.extend(qp.c);
-        plan.offset.push(plan.idx.len() as u32);
+        plan.offset.push(plan.offset[plan.offset.len() - 1] + qp.idx.len() as u32);
     }
+    // the pair arrays, filled in parallel (same values and order as appending query by query)
+    let total = plan.offset[plan.offset.len() - 1] as usize;
+    plan.idx = vec![0; total];
+    plan.w = vec![0.0; total];
+    plan.c = vec![[0.0; 3]; total];
+    let kept: Vec<&QueryPlan> = per.iter().flatten().collect();
+    let mut parts = Vec::with_capacity(kept.len());
+    let (mut ri, mut rw, mut rc) = (&mut plan.idx[..], &mut plan.w[..], &mut plan.c[..]);
+    for qp in &kept {
+        let l = qp.idx.len();
+        let (a, b) = std::mem::take(&mut ri).split_at_mut(l);
+        let (x, y) = std::mem::take(&mut rw).split_at_mut(l);
+        let (u, v) = std::mem::take(&mut rc).split_at_mut(l);
+        parts.push((a, x, u));
+        (ri, rw, rc) = (b, y, v);
+    }
+    parts.into_par_iter().zip(kept.par_iter()).for_each(|((a, x, u), qp)| {
+        a.copy_from_slice(&qp.idx);
+        x.copy_from_slice(&qp.w);
+        u.copy_from_slice(&qp.c);
+    });
     Ok(plan)
 }
 

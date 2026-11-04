@@ -24,14 +24,17 @@ use super::net::NetParams;
 use super::npz::Npz;
 use super::optim::{AdamOptions, AdamTrainer, Schedule, learning_rate};
 use super::queries::row_rng;
-use super::step::{StepOptions, evaluate_shape, prepare_shape, step};
+use super::data::TrainShape;
+use super::step::{PreparedShape, SlicePlan, StepOptions, StepOut, on_gpu, plan_slice, prepare_shape, step_planned};
 use super::tfit::Ctx;
 use crate::{Model, ModelConfig, PatError};
 use burn::tensor::DType;
 use rand_chacha::rand_core::RngCore;
 use std::collections::HashMap;
 use std::io::Write;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, mpsc};
 
 /// One phase of the curriculum.
 #[derive(Debug, Clone, PartialEq)]
@@ -410,13 +413,54 @@ fn load_checkpoint(dir: &Path, ctx: &Ctx, opts: &AdamOptions) -> Result<Option<(
 
 /// Mean validation (distance, eikonal) over the shapes of `file`, as the reference: per shape the
 /// mean over its batches, then the mean over shapes; queries keyed by `(seed, epoch, 10000 + i)`.
+/// Runs on the current rayon pool.
 #[allow(clippy::too_many_arguments)]
 pub fn validate(params: &NetParams, ctx: &Ctx, file: &Path, data: &DataOptions, o: &StepOptions, batch: usize, seed: u64, epoch: u64) -> Result<(f64, f64), PatError> {
     let (shapes, _) = load_file(file, data)?;
+    validate_shapes(params, ctx, &shapes, o, batch, seed, epoch, &|f| f())
+}
+
+/// [`validate`] with the host work on `pool`; on a CUDA device the network runs on the calling
+/// thread (one dispatching thread), on the CPU inside `pool`.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_on(params: &NetParams, ctx: &Ctx, pool: &rayon::ThreadPool, file: &Path, data: &DataOptions, o: &StepOptions, batch: usize, seed: u64, epoch: u64) -> Result<(f64, f64), PatError> {
+    let (shapes, _) = pool.install(|| load_file(file, data))?;
+    let host = |f: &(dyn Fn() -> Result<(), PatError> + Sync)| pool.install(f);
+    if on_gpu(ctx) {
+        validate_shapes(params, ctx, &shapes, o, batch, seed, epoch, &host)
+    } else {
+        pool.install(|| validate_shapes(params, ctx, &shapes, o, batch, seed, epoch, &|f| f()))
+    }
+}
+
+type HostRunner<'a> = dyn Fn(&(dyn Fn() -> Result<(), PatError> + Sync)) -> Result<(), PatError> + 'a;
+
+#[allow(clippy::too_many_arguments)]
+fn validate_shapes(params: &NetParams, ctx: &Ctx, shapes: &[TrainShape], o: &StepOptions, batch: usize, seed: u64, epoch: u64, host: &HostRunner<'_>) -> Result<(f64, f64), PatError> {
     let (mut sd, mut se, mut c) = (0.0, 0.0, 0usize);
+    let gpu = on_gpu(ctx);
     for (i, s) in shapes.iter().enumerate() {
-        let Ok(prep) = prepare_shape(s, o, (seed, epoch, 10_000 + i as u64)) else { continue };
-        let v = evaluate_shape(params, ctx, &prep, batch, o)?;
+        let cell = std::sync::Mutex::new(None);
+        host(&|| {
+            let p = prepare_shape(s, o, (seed, epoch, 10_000 + i as u64)).ok();
+            let mut v = Vec::new();
+            if let Some(p) = &p {
+                let mut lo = 0;
+                while lo < p.rows {
+                    if lo < p.n {
+                        v.push(plan_slice(p, lo, lo + batch, o, gpu)?);
+                    }
+                    lo += batch;
+                }
+            }
+            *cell.lock().map_err(|_| PatError::Backend { reason: "poisoned lock".into() })? = Some((p, v));
+            Ok(())
+        })?;
+        let Some((Some(prep), plans)) = cell.into_inner().map_err(|_| PatError::Backend { reason: "poisoned lock".into() })? else { continue };
+        let mut v = Vec::new();
+        for sp in plans.iter().flatten() {
+            v.push(step_planned(params, ctx, &prep, sp, o, false)?.value);
+        }
         if v.is_empty() {
             continue;
         }
@@ -436,8 +480,119 @@ pub fn train(data_dir: &Path, init: Option<&Model>, opts: &TrainOptions, progres
     train_on(data_dir, init, opts, &ctx, &pool, progress)
 }
 
-/// [`train`] on a given burn device and dtype (WP10 passes a CUDA device); the parallel host work
-/// runs on `pool`.
+/// Messages of the loader thread (whole shuffle buffers) to the preparer.
+enum LoadMsg {
+    Phase { pi: usize, phase_steps: u64 },
+    Buffer { pi: usize, epoch: u64, items: Vec<(usize, usize, usize)>, shapes: HashMap<usize, Vec<TrainShape>>, report: DataReport },
+    EpochEnd { pi: usize, epoch: u64 },
+    PhaseEnd { pi: usize },
+}
+
+/// Events of the preparer thread to the training loop, in data order.
+enum Ev {
+    Phase { pi: usize, phase_steps: u64 },
+    Data(DataReport),
+    Skipped(String),
+    Shape { rows_without_faces: usize },
+    Slice { pi: usize, epoch: u64, pos: usize, name: String, lo: usize, prep: Arc<PreparedShape>, plan: Option<Box<SlicePlan>>, empty: bool, t_prep: f64 },
+    ShapeDone { pi: usize, epoch: u64, pos: usize },
+    EpochEnd { pi: usize, epoch: u64 },
+    PhaseEnd { pi: usize },
+}
+
+/// Slices prepared ahead of the training loop (queries, ground truth and plans).
+const PREFETCH_SLICES: usize = 4;
+
+/// The loader: per phase and epoch the data order, and every shuffle buffer's files (in parallel on
+/// `pool`), one buffer ahead of the preparer.
+fn loader(data_dir: &Path, opts: &TrainOptions, start: Cursor, pool: &rayon::ThreadPool, tx: &mpsc::SyncSender<Result<LoadMsg, PatError>>) -> Result<(), PatError> {
+    let send = |m: LoadMsg| tx.send(Ok(m)).map_err(|_| PatError::Backend { reason: "stopped".into() });
+    for (pi, ph) in opts.curriculum.phases.iter().enumerate().skip(start.phase) {
+        let files = phase_files(data_dir, ph)?;
+        let counts = shape_counts(&files)?;
+        let steps_per_epoch: u64 = counts.iter().map(|&(s, p)| (s * p.div_ceil(ph.batch_rows)) as u64).sum();
+        send(LoadMsg::Phase { pi, phase_steps: steps_per_epoch * ph.epochs })?;
+        let first_epoch = if pi == start.phase { start.epoch } else { 0 };
+        for epoch in first_epoch..ph.epochs {
+            let (seq, bufs) = epoch_order(&counts, opts.seed, pi, epoch, opts.files_in_buffer);
+            let skip = if pi == start.phase && epoch == start.epoch { start.done } else { 0 };
+            for &(blo, bhi) in &bufs {
+                if bhi <= skip {
+                    continue;
+                }
+                let mut want: Vec<usize> = seq[blo..bhi].iter().map(|x| x.0).collect();
+                want.sort_unstable();
+                want.dedup();
+                let loaded: Vec<Result<(Vec<TrainShape>, DataReport), PatError>> = pool.install(|| want.par_iter().map(|&f| load_file(&files[f], &opts.data)).collect());
+                let mut shapes = HashMap::new();
+                let mut report = DataReport::default();
+                for (&f, l) in want.iter().zip(loaded) {
+                    let (s, dr) = l?;
+                    report.merge(&dr);
+                    shapes.insert(f, s);
+                }
+                let items = (blo.max(skip)..bhi).map(|pos| (pos, seq[pos].0, seq[pos].1)).collect();
+                send(LoadMsg::Buffer { pi, epoch, items, shapes, report })?;
+            }
+            send(LoadMsg::EpochEnd { pi, epoch })?;
+        }
+        send(LoadMsg::PhaseEnd { pi })?;
+    }
+    Ok(())
+}
+
+/// The preparer: queries, ground truth and the host plan of every slice, a few slices ahead.
+fn preparer(opts: &TrainOptions, gpu: bool, pool: &rayon::ThreadPool, rx: mpsc::Receiver<Result<LoadMsg, PatError>>, tx: &mpsc::SyncSender<Result<Ev, PatError>>) -> Result<(), PatError> {
+    let send = |e: Ev| tx.send(Ok(e)).map_err(|_| PatError::Backend { reason: "stopped".into() });
+    let mut batch_rows = 1024;
+    for m in rx {
+        match m? {
+            LoadMsg::Phase { pi, phase_steps } => {
+                batch_rows = opts.curriculum.phases[pi].batch_rows;
+                send(Ev::Phase { pi, phase_steps })?;
+            }
+            LoadMsg::EpochEnd { pi, epoch } => send(Ev::EpochEnd { pi, epoch })?,
+            LoadMsg::PhaseEnd { pi } => send(Ev::PhaseEnd { pi })?,
+            LoadMsg::Buffer { pi, epoch, items, shapes, report } => {
+                send(Ev::Data(report))?;
+                for (pos, f, si) in items {
+                    let shape = &shapes[&f][si];
+                    let name = format!("{}:{}", shape.source.0, si);
+                    let tp = std::time::Instant::now();
+                    let gid = 100_000 * f as u64 + si as u64;
+                    let prep = match pool.install(|| prepare_shape(shape, &opts.step, (opts.seed, 1_000_000 * pi as u64 + epoch, gid))) {
+                        Ok(p) => Arc::new(p),
+                        Err(_) => {
+                            send(Ev::Skipped(name))?;
+                            send(Ev::ShapeDone { pi, epoch, pos })?;
+                            continue;
+                        }
+                    };
+                    send(Ev::Shape { rows_without_faces: prep.queries.rows_without_faces })?;
+                    let mut t_prep = tp.elapsed().as_secs_f64();
+                    for lo in (0..shape.rows).step_by(batch_rows) {
+                        let empty = lo >= shape.n;
+                        let plan = if empty { None } else { pool.install(|| plan_slice(&prep, lo, lo + batch_rows, &opts.step, gpu))?.map(Box::new) };
+                        send(Ev::Slice { pi, epoch, pos, name: name.clone(), lo, prep: prep.clone(), plan, empty, t_prep })?;
+                        t_prep = 0.0;
+                    }
+                    send(Ev::ShapeDone { pi, epoch, pos })?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`train`] on a given burn device and dtype (a CUDA context from
+/// [`super::gpu::cuda_ctx`] with the feature `cuda`); the parallel host work runs on `pool`.
+///
+/// The data are prefetched: a loader thread reads the next shuffle buffer's files while the current
+/// one trains, and a preparer thread computes the queries, ground truth and blend plans
+/// ([`plan_slice`]) up to [`PREFETCH_SLICES`] steps ahead, so the device does not wait for the host
+/// work, which does not depend on the parameters. The steps run on the calling thread on a CUDA
+/// device (one dispatching thread) and inside `pool` on the CPU. Results do not depend on the
+/// prefetching.
 pub fn train_on(
     data_dir: &Path,
     init: Option<&Model>,
@@ -463,72 +618,77 @@ pub fn train_on(
         Some(m) => NetParams::from_model(m, ctx),
         None => NetParams::init(&cfg, opts.seed, ctx),
     };
-    let mut gstep = 0u64;
-    let start_phase = resume.as_ref().map(|r| r.2.phase).unwrap_or(0);
-    // weights of the phase before the resumed one
-    if start_phase > 0 && resume.is_none() {
-        return Err(PatError::InvalidOption { what: "cannot start at a later phase without a checkpoint".into() });
+    let start = resume.as_ref().map(|r| r.2).unwrap_or_default();
+    if start.phase >= opts.curriculum.phases.len() {
+        report.seconds = t0.elapsed().as_secs_f64();
+        if let Some((p, _, _)) = resume {
+            params = p;
+        }
+        return Ok((params.to_model(), report));
     }
-    let mut stop = false;
-    for (pi, ph) in opts.curriculum.phases.iter().enumerate().skip(start_phase) {
-        let files = phase_files(data_dir, ph)?;
-        let counts = shape_counts(&files)?;
-        let steps_per_epoch: u64 = counts.iter().map(|&(s, p)| (s * p.div_ceil(ph.batch_rows)) as u64).sum();
-        let phase_steps = steps_per_epoch * ph.epochs;
-        let (mut adam, mut cur) = match resume.take() {
-            Some((p, a, c)) => {
-                params = p;
-                gstep = c.step;
-                (a, c)
+    let gpu = on_gpu(ctx);
+    let mut gstep = start.step;
+    let (ltx, lrx) = mpsc::sync_channel::<Result<LoadMsg, PatError>>(1);
+    let (etx, erx) = mpsc::sync_channel::<Result<Ev, PatError>>(PREFETCH_SLICES);
+    std::thread::scope(|sc| -> Result<(Model, TrainReport), PatError> {
+        let etx2 = etx.clone();
+        sc.spawn(move || {
+            if let Err(e) = loader(data_dir, opts, start, pool, &ltx) {
+                let _ = ltx.send(Err(e));
             }
-            None => {
-                if ph.from_scratch && pi > 0 {
-                    params = match init {
-                        Some(m) => NetParams::from_model(m, ctx),
-                        None => NetParams::init(&cfg, opts.seed, ctx),
-                    };
-                }
-                (AdamTrainer::new(&params, opts.optimizer), Cursor { phase: pi, step: gstep, ..Default::default() })
+        });
+        sc.spawn(move || {
+            if let Err(e) = preparer(opts, gpu, pool, lrx, &etx2) {
+                let _ = etx2.send(Err(e));
             }
-        };
+        });
+        drop(etx);
+        let mut adam = AdamTrainer::new(&params, opts.optimizer);
+        let mut cur = start;
+        let mut phase_steps = 0u64;
         let mut since_ckpt = 0u64;
-        for epoch in cur.epoch..ph.epochs {
-            let (seq, bufs) = epoch_order(&counts, opts.seed, pi, epoch, opts.files_in_buffer);
-            let skip = if epoch == cur.epoch { cur.done } else { 0 };
-            for &(blo, bhi) in &bufs {
-                if bhi <= skip {
-                    continue;
-                }
-                // load the buffer's files
-                let mut want: Vec<usize> = seq[blo..bhi].iter().map(|x| x.0).collect();
-                want.sort_unstable();
-                want.dedup();
-                let mut loaded = HashMap::new();
-                for f in want {
-                    let (shapes, dr) = pool.install(|| load_file(&files[f], &opts.data))?;
-                    report.data.merge(&dr);
-                    loaded.insert(f, shapes);
-                }
-                for (pos, &(f, si)) in seq.iter().enumerate().take(bhi).skip(blo.max(skip)) {
-                    let shape = &loaded[&f][si];
-                    let sname = format!("{}:{}", shape.source.0, si);
-                    let tp = std::time::Instant::now();
-                    let gid = 100_000 * f as u64 + si as u64;
-                    let prep = match pool.install(|| prepare_shape(shape, &opts.step, (opts.seed, 1_000_000 * pi as u64 + epoch, gid))) {
-                        Ok(p) => p,
-                        Err(_) => {
-                            report.skipped_shapes.push(sname);
-                            continue;
+        // a burn-cuda failure (out of memory, a lost device) surfaces as a panic at the next read
+        // back: it is caught here and returned as an error (the run resumes from its checkpoint)
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), PatError> {
+            for ev in &erx {
+                let ev = match ev {
+                    Ok(ev) => ev,
+                    Err(PatError::Backend { reason }) if reason == "stopped" => break,
+                    Err(e) => return Err(e),
+                };
+                match ev {
+                    Ev::Phase { pi, phase_steps: ps } => {
+                        phase_steps = ps;
+                        let ph = &opts.curriculum.phases[pi];
+                        match resume.take() {
+                            Some((p, a, c)) => {
+                                params = p;
+                                gstep = c.step;
+                                adam = a;
+                                cur = c;
+                            }
+                            None => {
+                                if ph.from_scratch && pi > 0 {
+                                    params = match init {
+                                        Some(m) => NetParams::from_model(m, ctx),
+                                        None => NetParams::init(&cfg, opts.seed, ctx),
+                                    };
+                                }
+                                adam = AdamTrainer::new(&params, opts.optimizer);
+                                cur = Cursor { phase: pi, step: gstep, ..Default::default() };
+                            }
                         }
-                    };
-                    report.rows_without_faces += prep.queries.rows_without_faces;
-                    let mut t_prep = tp.elapsed().as_secs_f64();
-                    for lo in (0..shape.rows).step_by(ph.batch_rows) {
-                        let hi = lo + ph.batch_rows;
-                        let mut rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, shape: sname.clone(), row: lo, ..Default::default() };
+                        since_ckpt = 0;
+                    }
+                    Ev::Data(dr) => report.data.merge(&dr),
+                    Ev::Skipped(name) => report.skipped_shapes.push(name),
+                    Ev::Shape { rows_without_faces } => report.rows_without_faces += rows_without_faces,
+                    Ev::Slice { pi, epoch, pos, name, lo, prep, plan, empty, t_prep } => {
+                        let ph = &opts.curriculum.phases[pi];
+                        let mut rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, shape: name, row: lo, ..Default::default() };
                         let lr = learning_rate(opts.schedule, adam.count, ph.lr, ph.warmup, phase_steps);
                         rec.lr = lr;
-                        if lo >= shape.n {
+                        if empty {
                             if !opts.keep_empty_slices {
                                 report.skipped_empty += 1;
                                 continue;
@@ -536,7 +696,11 @@ pub fn train_on(
                             let zero: Vec<_> = params.items.iter().map(|p| p.value.scale(0.0)).collect();
                             params = adam.update(&params, &zero, lr)?;
                         } else {
-                            let out = pool.install(|| step(&params, ctx, &prep, lo, hi, &opts.step, true))?;
+                            let out = match &plan {
+                                Some(sp) if gpu => step_planned(&params, ctx, &prep, sp, &opts.step, true)?,
+                                Some(sp) => pool.install(|| step_planned(&params, ctx, &prep, sp, &opts.step, true))?,
+                                None => StepOut::default(),
+                            };
                             rec.loss = out.value.loss;
                             rec.distance = out.value.distance;
                             rec.eikonal = out.value.eikonal;
@@ -555,7 +719,6 @@ pub fn train_on(
                             }
                         }
                         rec.seconds[0] = t_prep;
-                        t_prep = 0.0;
                         gstep += 1;
                         since_ckpt += 1;
                         report.steps += (!rec.skipped) as u64;
@@ -563,51 +726,58 @@ pub fn train_on(
                         let _ = writeln!(log, "{}", rec.json());
                         progress(&rec);
                         if opts.max_steps.is_some_and(|m| gstep >= m) {
-                            stop = true;
+                            // as an interrupted shape: the checkpoint resumes at the next one
+                            cur = Cursor { phase: pi, epoch, done: pos + 1, step: gstep, ..cur };
+                            save_checkpoint(&opts.checkpoint_dir, &params, &adam, &cur, "")?;
                             break;
                         }
                     }
-                    cur = Cursor { phase: pi, epoch, done: pos + 1, step: gstep, ..cur };
-                    if since_ckpt >= opts.checkpoint_every || stop {
+                    Ev::ShapeDone { pi, epoch, pos } => {
+                        cur = Cursor { phase: pi, epoch, done: pos + 1, step: gstep, ..cur };
+                        if since_ckpt >= opts.checkpoint_every {
+                            save_checkpoint(&opts.checkpoint_dir, &params, &adam, &cur, "")?;
+                            since_ckpt = 0;
+                        }
+                    }
+                    Ev::EpochEnd { pi, epoch } => {
+                        let ph = &opts.curriculum.phases[pi];
+                        cur = Cursor { phase: pi, epoch: epoch + 1, done: 0, step: gstep, ..cur };
                         save_checkpoint(&opts.checkpoint_dir, &params, &adam, &cur, "")?;
                         since_ckpt = 0;
+                        if opts.validate
+                            && let Some(v) = &opts.curriculum.validation
+                        {
+                            let val = validate_on(&params, ctx, pool, &data_dir.join(v), &opts.data, &opts.step, 1024, opts.seed, epoch)?;
+                            report.validation = Some(val);
+                            let rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, step: gstep, validation: Some(val), ..Default::default() };
+                            let _ = writeln!(log, "{}", rec.json());
+                            progress(&rec);
+                        }
                     }
-                    if stop {
-                        break;
+                    Ev::PhaseEnd { pi } => {
+                        let ph = &opts.curriculum.phases[pi];
+                        // end of phase: keep its weights, the next phase starts at its first epoch
+                        let w = params.to_safetensors(&HashMap::from([("source".to_string(), format!("ddg-points-as-tori training, phase {}", ph.name))]))?;
+                        write_atomic(&opts.checkpoint_dir.join(format!("phase-{}.safetensors", ph.name)), &w)?;
+                        let next = Cursor { phase: pi + 1, epoch: 0, done: 0, step: gstep, ..Default::default() };
+                        save_checkpoint(&opts.checkpoint_dir, &params, &AdamTrainer::new(&params, opts.optimizer), &next, "")?;
                     }
                 }
-                if stop {
-                    break;
-                }
             }
-            if stop {
-                break;
-            }
-            // end of epoch
-            cur = Cursor { phase: pi, epoch: epoch + 1, done: 0, step: gstep, ..cur };
-            save_checkpoint(&opts.checkpoint_dir, &params, &adam, &cur, "")?;
-            since_ckpt = 0;
-            if opts.validate
-                && let Some(v) = &opts.curriculum.validation
-            {
-                let val = pool.install(|| validate(&params, ctx, &data_dir.join(v), &opts.data, &opts.step, 1024, opts.seed, epoch))?;
-                report.validation = Some(val);
-                let rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, step: gstep, validation: Some(val), ..Default::default() };
-                let _ = writeln!(log, "{}", rec.json());
-                progress(&rec);
+            Ok(())
+        }));
+        // stop the producers (they see the closed channel at their next send)
+        drop(erx);
+        match caught {
+            Ok(r) => r?,
+            Err(e) => {
+                let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+                return Err(PatError::Backend { reason: format!("the training step panicked (device error?): {msg}") });
             }
         }
-        if stop {
-            break;
-        }
-        // end of phase: keep its weights, the next phase starts at its first epoch
-        let w = params.to_safetensors(&HashMap::from([("source".to_string(), format!("ddg-points-as-tori training, phase {}", ph.name))]))?;
-        write_atomic(&opts.checkpoint_dir.join(format!("phase-{}.safetensors", ph.name)), &w)?;
-        let next = Cursor { phase: pi + 1, epoch: 0, done: 0, step: gstep, ..Default::default() };
-        save_checkpoint(&opts.checkpoint_dir, &params, &AdamTrainer::new(&params, opts.optimizer), &next, "")?;
-    }
-    report.seconds = t0.elapsed().as_secs_f64();
-    Ok((params.to_model(), report))
+        report.seconds = t0.elapsed().as_secs_f64();
+        Ok((params.to_model(), report))
+    })
 }
 
 /// The model of a checkpoint directory (its `checkpoint.safetensors`).

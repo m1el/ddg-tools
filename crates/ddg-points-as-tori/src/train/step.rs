@@ -182,16 +182,19 @@ pub struct StepOut {
 /// (positions in `prep.net_rows`), without the tape.
 fn coefficients(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32], order: FeatureOrder, chunk: usize) -> Result<(Vec<f64>, Vec<[f64; 6]>), PatError> {
     let (net, _) = params.build(ctx, false)?;
-    let k = prep.feats.k;
     // gather the selected rows' features into one buffer
     let sub = select_rows(&prep.feats, sel);
     let chunks: Vec<(usize, usize)> = (0..sel.len()).step_by(chunk).map(|lo| (lo, (lo + chunk).min(sel.len()))).collect();
     let raw: Vec<Vec<f64>> = chunks.par_iter().map(|&(lo, hi)| to_f64(forward(&net, ctx, &sub, lo, hi))).collect();
-    let _ = k;
-    let mut a = Vec::with_capacity(6 * sel.len());
-    let mut da = Vec::with_capacity(sel.len());
-    for (r, y) in raw.concat().chunks_exact(6).enumerate() {
-        let s = sub.sigma[r];
+    Ok(scale_raw(&raw.concat(), &sub.sigma, ctx, order))
+}
+
+/// Coefficients `a` and `∂a/∂y` from raw outputs `y` (6 per row) and the rows' `σ`.
+pub(crate) fn scale_raw(raw: &[f64], sigma: &[f64], ctx: &Ctx, order: FeatureOrder) -> (Vec<f64>, Vec<[f64; 6]>) {
+    let mut a = Vec::with_capacity(raw.len());
+    let mut da = Vec::with_capacity(raw.len() / 6);
+    for (r, y) in raw.chunks_exact(6).enumerate() {
+        let s = sigma[r];
         let y6 = [y[0], y[1], y[2], y[3], y[4], y[5]];
         let v = if ctx.dtype == DType::F64 {
             scale_outputs_f64(y6, s)
@@ -201,10 +204,11 @@ fn coefficients(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32]
         a.extend(v);
         da.push([s, 1.0, 1.0, 1.0 / s, 1.0 / s, 1.0 / s]);
     }
-    Ok((a, da))
+    (a, da)
 }
 
-fn select_rows(f: &RowFeatures, sel: &[u32]) -> RowFeatures {
+/// The features of network rows `sel` (positions in the shape's network rows), in that order.
+pub(crate) fn select_rows(f: &RowFeatures, sel: &[u32]) -> RowFeatures {
     let k = f.k;
     let mut out = RowFeatures { b: sel.len(), k, feats: Vec::with_capacity(sel.len() * k * 6), sigma: Vec::with_capacity(sel.len()), pad: None };
     let mut pad = Vec::with_capacity(sel.len() * k);
@@ -277,29 +281,93 @@ fn batch_queries(prep: &PreparedShape, lo: usize, hi: usize) -> (Vec<[f64; 3]>, 
     (prep.queries.points[lo * m..hi * m].to_vec(), prep.queries.truth[lo * m..hi * m].to_vec())
 }
 
-/// The loss of query rows `[lo, hi)` with the current parameters, and the parameter gradients if
-/// `want_grad`. `ctx` is the plain device and dtype (autodiff is enabled on the leaves).
-pub fn step(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, lo: usize, hi: usize, o: &StepOptions, want_grad: bool) -> Result<StepOut, PatError> {
-    let mut out = StepOut::default();
+/// The host part of a step (parameter independent, so it can be computed ahead on CPU threads
+/// while the device trains): the blend plan of the slice's queries and the network rows it needs.
+#[derive(Debug, Clone)]
+pub struct SlicePlan {
+    /// The blend constants.
+    pub plan: BlendPlan,
+    /// Network rows (positions in `prep.net_rows`) whose tori the plan references.
+    pub sel_net: Vec<u32>,
+    /// The pair layout of the GPU loss (feature `cuda`, built when asked for).
+    #[cfg(feature = "cuda")]
+    pub gpu: Option<super::gpu::PairLayout>,
+    /// Seconds spent building it.
+    pub seconds: f64,
+}
+
+/// The host part of the step on query rows `[lo, hi)`; `None` when the slice has no queries.
+/// `gpu_layout` also builds the GPU loss's pair layout (ignored without the feature `cuda`).
+/// Runs on the current rayon pool.
+pub fn plan_slice(prep: &PreparedShape, lo: usize, hi: usize, o: &StepOptions, gpu_layout: bool) -> Result<Option<SlicePlan>, PatError> {
     let t0 = std::time::Instant::now();
     let (q, truth) = batch_queries(prep, lo, hi);
     if q.is_empty() {
-        return Ok(out);
+        return Ok(None);
     }
     let vp: Vec<[f64; 3]> = prep.valid.iter().map(|&r| prep.fit_p[r as usize]).collect();
     let plan: BlendPlan = build_plan(&q, &truth, &vp, &o.loss, None)?;
-    out.pairs = plan.pairs();
-    out.plan_dropped = plan.dropped;
-    out.max_dropped_mass = plan.max_dropped_mass;
     // tori the loss sees (valid-list positions) → network rows
     let mut used = vec![false; vp.len()];
     plan.idx.iter().for_each(|&i| used[i as usize] = true);
     let sel_valid: Vec<u32> = if o.reference_padding { (0..vp.len() as u32).collect() } else { (0..vp.len() as u32).filter(|&i| used[i as usize]).collect() };
     let sel_net: Vec<u32> = if o.reference_padding { (0..prep.net_rows.len() as u32).collect() } else { sel_valid.iter().map(|&i| prep.valid[i as usize]).collect() };
-    out.seconds[0] = t0.elapsed().as_secs_f64();
+    #[cfg(feature = "cuda")]
+    let gpu = if gpu_layout { Some(super::gpu::pair_layout(&plan, vp.len(), &o.loss)) } else { None };
+    #[cfg(not(feature = "cuda"))]
+    let _ = gpu_layout;
+    Ok(Some(SlicePlan {
+        plan,
+        sel_net,
+        #[cfg(feature = "cuda")]
+        gpu,
+        seconds: t0.elapsed().as_secs_f64(),
+    }))
+}
+
+/// True when `ctx` is a CUDA device (feature `cuda`): the step then runs the GPU passes of
+/// [`super::gpu`] (fixed batch shapes, one dispatching thread, gathers only).
+pub fn on_gpu(ctx: &Ctx) -> bool {
+    #[cfg(feature = "cuda")]
+    {
+        super::gpu::is_cuda(&ctx.dev)
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        let _ = ctx;
+        false
+    }
+}
+
+/// The loss of query rows `[lo, hi)` with the current parameters, and the parameter gradients if
+/// `want_grad`. `ctx` is the plain device and dtype (autodiff is enabled on the leaves).
+/// [`plan_slice`] followed by [`step_planned`].
+pub fn step(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, lo: usize, hi: usize, o: &StepOptions, want_grad: bool) -> Result<StepOut, PatError> {
+    match plan_slice(prep, lo, hi, o, on_gpu(ctx))? {
+        Some(sp) => step_planned(params, ctx, prep, &sp, o, want_grad),
+        None => Ok(StepOut::default()),
+    }
+}
+
+/// [`step`] with its host part computed ahead. On a CUDA device ([`on_gpu`]) the network passes
+/// and the loss run through [`super::gpu`]; call it from one thread (the dispatching thread).
+pub fn step_planned(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sp: &SlicePlan, o: &StepOptions, want_grad: bool) -> Result<StepOut, PatError> {
+    let mut out = StepOut::default();
+    let plan = &sp.plan;
+    let sel_net = &sp.sel_net;
+    let gpu = on_gpu(ctx);
+    out.pairs = plan.pairs();
+    out.plan_dropped = plan.dropped;
+    out.max_dropped_mass = plan.max_dropped_mass;
+    out.seconds[0] = sp.seconds;
+    let vp: Vec<[f64; 3]> = prep.valid.iter().map(|&r| prep.fit_p[r as usize]).collect();
 
     let t1 = std::time::Instant::now();
-    let (a_net, da_net) = coefficients(params, ctx, prep, &sel_net, o.feature_order, o.network_chunk.max(1))?;
+    let (a_net, da_net) = if gpu {
+        gpu_coefficients(params, ctx, prep, sel_net, o)?
+    } else {
+        coefficients(params, ctx, prep, sel_net, o.feature_order, o.network_chunk.max(1))?
+    };
     out.rows_forward = sel_net.len();
     out.seconds[1] = t1.elapsed().as_secs_f64();
 
@@ -317,7 +385,7 @@ pub fn step(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, lo: usize, hi: 
     }
     let vn: Vec<[f64; 3]> = prep.valid.iter().map(|&r| prep.fit_n[r as usize]).collect();
     let cloud = CloudFit { p: &vp, n: &vn };
-    let (value, ga) = loss_and_grad(ctx, &cloud, &a_valid, &plan, &o.loss, want_grad)?;
+    let (value, ga) = if gpu { gpu_loss(ctx, &cloud, &a_valid, sp, &o.loss, want_grad)? } else { loss_and_grad(ctx, &cloud, &a_valid, plan, &o.loss, want_grad)? };
     out.value = value;
     out.seconds[2] = t2.elapsed().as_secs_f64();
     let Some(ga) = ga else {
@@ -348,7 +416,7 @@ pub fn step(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, lo: usize, hi: 
         out.seconds[3] = t3.elapsed().as_secs_f64();
         return Ok(out);
     }
-    let mut grads = backprop(params, ctx, prep, &rows, &gy, o)?;
+    let mut grads = if gpu { gpu_backprop(params, ctx, prep, &rows, &gy, o)? } else { backprop(params, ctx, prep, &rows, &gy, o)? };
     // non-finite entries
     let mut bad = bad_gy;
     for g in grads.iter_mut() {
@@ -380,4 +448,37 @@ pub fn evaluate_shape(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, batch
         lo = hi;
     }
     Ok(out)
+}
+
+#[cfg(feature = "cuda")]
+fn gpu_coefficients(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32], o: &StepOptions) -> Result<(Vec<f64>, Vec<[f64; 6]>), PatError> {
+    super::gpu::coefficients(params, ctx, prep, sel, o)
+}
+
+#[cfg(feature = "cuda")]
+fn gpu_loss(ctx: &Ctx, cloud: &CloudFit<'_>, a: &[f64], sp: &SlicePlan, o: &LossOptions, want_grad: bool) -> Result<(LossValue, Option<Vec<f64>>), PatError> {
+    match &sp.gpu {
+        Some(l) => super::gpu::loss_and_grad(ctx, cloud, a, &sp.plan, l, o, want_grad),
+        None => super::gpu::loss_and_grad(ctx, cloud, a, &sp.plan, &super::gpu::pair_layout(&sp.plan, cloud.p.len(), o), o, want_grad),
+    }
+}
+
+#[cfg(feature = "cuda")]
+fn gpu_backprop(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, rows: &[u32], gy: &[f64], o: &StepOptions) -> Result<Vec<PT>, PatError> {
+    super::gpu::backprop(params, ctx, prep, rows, gy, o)
+}
+
+#[cfg(not(feature = "cuda"))]
+fn gpu_coefficients(_: &NetParams, _: &Ctx, _: &PreparedShape, _: &[u32], _: &StepOptions) -> Result<(Vec<f64>, Vec<[f64; 6]>), PatError> {
+    Err(PatError::Gpu { reason: "built without the feature cuda".into() })
+}
+
+#[cfg(not(feature = "cuda"))]
+fn gpu_loss(_: &Ctx, _: &CloudFit<'_>, _: &[f64], _: &SlicePlan, _: &LossOptions, _: bool) -> Result<(LossValue, Option<Vec<f64>>), PatError> {
+    Err(PatError::Gpu { reason: "built without the feature cuda".into() })
+}
+
+#[cfg(not(feature = "cuda"))]
+fn gpu_backprop(_: &NetParams, _: &Ctx, _: &PreparedShape, _: &[u32], _: &[f64], _: &StepOptions) -> Result<Vec<PT>, PatError> {
+    Err(PatError::Gpu { reason: "built without the feature cuda".into() })
 }

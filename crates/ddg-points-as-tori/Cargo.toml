@@ -36,3 +36,8 @@ safetensors = { version = "0.6", default-features = false, features = ["std"] }
 zip = { version = "0.6", optional = true, default-features = false, features = ["deflate"] }
 rand_chacha = { version = "0.9", optional = true, default-features = false, features = ["std"] }
 toml = { version = "1", optional = true, default-features = false, features = ["std", "parse"] }
+
+# The training driver (WP10, TRAINING.md) needs the training module.
+[[example]]
+name = "train"
+required-features = ["train"]
