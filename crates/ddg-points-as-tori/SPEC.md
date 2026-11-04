@@ -1292,3 +1292,14 @@ proposals accepted).**
    Classical fit defaults: k = 16, Gaussian bandwidth 0.6 d_k.
 4. Learned 2D predictor plugs in through `QuadraticPredictor` (`Pat2d::build`), coefficients
    in world units in the frame `t = (−n_y, n_x)`, `n` (WP9b).
+
+**Resolutions after the Python bindings (WP12, 2026-11-04; accepted).**
+1. Module `ddg_tools.points_as_tori` (a submodule in `sys.modules`), with the same objects flat
+   in `ddg_tools` (`pat_*` functions, `PointsAsTori`, `PatCsgField`, `PatMeshTruth`, `Pat2d`,
+   `PointsAsToriError` ⊂ `ValueError`, `DdgError`), because the repo ships one `.pyi`.
+2. Outputs are flat `array('d')` (repo convention; numpy is never required); inputs accept numpy
+   `(n, 3)` arrays or flat buffers.
+3. Crate items for the audit (WP15): re-export `EigenRule` and `GpuMatmul` at the crate root;
+   make `Morph::levels` public; `morphology()` returns the sampled cloud with the field;
+   `TorusField` accessors for the cloud/normals hash; a sign-rule marker in the tori export.
+   The bindings work around all of these today.
