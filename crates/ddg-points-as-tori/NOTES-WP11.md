@@ -60,8 +60,8 @@ by the blend's measured `exp` tolerance.
 
 Build of the fields (2048 points) 2.6 s; 12,917 points 13 s. Most pixels miss: the mean steps are
 over traversed rays only (`clipped` rays are not traversed). Shadow rays cost about as much as
-primary rays. The paper's 40-step shader runs in real time on a laptop GPU; ours is a CPU
-path tracer-free reference at 3 to 9 s per megapixel. The CUDA path was **not run** (see below).
+primary rays. The paper's 40-step shader runs in real time on a laptop GPU; ours on the CPU takes
+3 to 9 s per megapixel. The CUDA path was **not run** (see below).
 
 **Safety study** (`showcase/points-as-tori/render/safety-study.txt`, 256², vs a reference render with
 safety 0.5 and 2048 steps), three clouds: safety 0.9 / 128 steps differs from the reference in 2 to 12
