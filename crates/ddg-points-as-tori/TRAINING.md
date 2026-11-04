@@ -140,6 +140,10 @@ WP14 at ≤ 24 threads, nice 19):
 | `d7a8200` (graphs, fixed loss shapes, GPU ground truth) | 34–41 | **0.48** |
 | `801b3c9`, load 75–140 | | 0.6–0.95 (pretraining) |
 
-**Expected end:** see the status line in NOTES-WP10 / the orchestrator's message; at 0.48 s/step the 493,762
-steps after step 4,096 take ≈ 66 h, i.e. about **2026-11-07 00:30 UTC**; heavier outside load lengthens it
-(watch `t_wait` and `t_fwd`/`t_loss` in `log.jsonl`).
+In the live run (`d7a8200`, load 35–45): 0.48 s/step for the first ~500 phase-0 steps, then 0.52 s/step
+(`t_loss` 0.11 → 0.14 s as more loss shapes appear). GPU memory of the trainer: 14.0 GB, flat (graph pools, the
+ground-truth context and the loss chunks); other GPU users have ~2 GB.
+
+**Expected end:** the 493,762 steps after step 4,096 take ≈ 66–71 h at 0.48–0.52 s/step, i.e.
+**2026-11-07 between 00:30 and 05:40 UTC**; heavier outside load lengthens it (watch `t_wait` and
+`t_fwd`/`t_loss` in `log.jsonl`).
