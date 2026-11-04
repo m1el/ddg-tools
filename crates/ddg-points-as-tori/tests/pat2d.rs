@@ -173,7 +173,7 @@ fn bitwise_independent_of_the_thread_count() {
     let s = shape(Kind::Heart, &[]);
     let cloud = cloud_of(&s, 500, 7);
     let mut reference: Option<(Vec<u64>, Vec<u64>)> = None;
-    for threads in [1usize, 3, 8, 16] {
+    for threads in [1usize, 3, 8, 32] {
         let (field, _) = build(&cloud, &ClassicalFit::default(), threads, Eval2dOptions::default());
         let g = evaluate_grid(&field, padded(s.bbox(), 0.2), 90, 90).unwrap();
         let mut grad = vec![[0.0; 2]; g.values.len()];

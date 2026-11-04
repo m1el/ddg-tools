@@ -165,7 +165,7 @@ fn narrow_band_equals_dense_and_is_sparse() {
 fn deterministic_across_thread_counts() {
     let u = Csg::leaf(Sphere(0.5)).union(Csg::leaf(Torus(0.5, 0.15))).offset(0.02);
     let base = marching_cubes(&u, &McOptions { threads: Some(1), refine_steps: 2, normals: true, ..opts(48) }).unwrap().0;
-    for th in [3, 8, 16] {
+    for th in [3, 8, 32] {
         let m = marching_cubes(&u, &McOptions { threads: Some(th), refine_steps: 2, normals: true, ..opts(48) }).unwrap().0;
         assert_eq!(m.faces, base.faces);
         for (a, b) in m.positions.iter().zip(&base.positions) {
