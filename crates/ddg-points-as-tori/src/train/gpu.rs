@@ -416,3 +416,111 @@ pub fn backprop(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32]
     }))
     .map_err(gpu_err("the backward pass"))?
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fit::{EigenRule, SignRule};
+    use crate::train::loss::build_plan;
+
+    fn lcg(s: &mut u64) -> f64 {
+        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (*s >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// An ellipsoid-like cloud with outward normals, random coefficients near the tangent sphere,
+    /// and queries around it.
+    fn synthetic(n: usize, nq: usize, seed: u64) -> (Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<f64>, Vec<[f64; 3]>, Vec<f64>) {
+        let mut s = seed;
+        let mut p = Vec::new();
+        let mut nr = Vec::new();
+        for _ in 0..n {
+            let (u, v) = (2.0 * std::f64::consts::PI * lcg(&mut s), (2.0 * lcg(&mut s) - 1.0).acos());
+            let d = [v.sin() * u.cos(), v.sin() * u.sin(), v.cos()];
+            p.push([0.6 * d[0], 0.45 * d[1], 0.3 * d[2]]);
+            let g = [d[0] / 0.6, d[1] / 0.45, d[2] / 0.3];
+            let l = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+            nr.push([g[0] / l, g[1] / l, g[2] / l]);
+        }
+        let a: Vec<f64> = (0..6 * n).map(|i| if i % 6 >= 4 { -0.5 + 0.3 * (lcg(&mut s) - 0.5) } else { 0.1 * (lcg(&mut s) - 0.5) }).collect();
+        let q: Vec<[f64; 3]> = (0..nq).map(|_| [1.6 * lcg(&mut s) - 0.8, 1.2 * lcg(&mut s) - 0.6, 0.8 * lcg(&mut s) - 0.4]).collect();
+        let truth: Vec<f64> = q.iter().map(|x| (x[0] * x[0] / 0.36 + x[1] * x[1] / 0.2025 + x[2] * x[2] / 0.09).sqrt() - 1.0).collect();
+        (p, nr, a, q, truth)
+    }
+
+    #[test]
+    fn pair_layout_transposes_the_plan() {
+        let (p, _, _, q, truth) = synthetic(500, 900, 3);
+        for budget in [1usize, 700, 1 << 20] {
+            let o = LossOptions { pair_chunk: budget, ..Default::default() };
+            let plan = build_plan(&q, &truth, &p, &o, None).unwrap();
+            let l = pair_layout(&plan, p.len(), &o);
+            assert_eq!(l.order.len(), plan.len());
+            // every real pair appears once, at its torus, and the padded ones carry zero weight
+            let mut seen = vec![Vec::new(); p.len()];
+            for d in &l.chunks {
+                assert!(d.qn * d.kk <= budget.max(d.kk));
+                for (k, (&t, &w)) in d.idx.iter().zip(&d.w).enumerate() {
+                    if w != 0.0 {
+                        seen[t as usize].push((d.base + k) as i32);
+                    }
+                }
+            }
+            let mut back = vec![Vec::new(); p.len()];
+            let mut r0 = 0usize;
+            let mut rows: Vec<Vec<i32>> = Vec::new();
+            for tc in &l.tchunks {
+                for r in 0..tc.tn {
+                    rows.push(tc.pos[r * tc.kk..(r + 1) * tc.kk].iter().copied().filter(|&x| x != l.m_pad as i32).collect());
+                }
+                r0 += tc.tn;
+            }
+            assert_eq!(r0, p.len());
+            for t in 0..p.len() {
+                back[t] = rows[l.inv[t] as usize].clone();
+            }
+            assert_eq!(seen, back, "budget {budget}");
+            assert_eq!(seen.iter().map(Vec::len).sum::<usize>(), plan.pairs() - plan.w.iter().filter(|&&w| (w as f32) == 0.0).count());
+        }
+    }
+
+    #[test]
+    fn gpu_loss_matches_cpu_and_repeats() {
+        let Ok(gctx) = cuda_ctx(0) else {
+            assert!(std::env::var_os("DDG_REQUIRE_GPU").is_none(), "DDG_REQUIRE_GPU is set but no GPU");
+            eprintln!("SKIP: no usable CUDA device");
+            return;
+        };
+        let cctx = Ctx { dev: crate::network::burn::cpu_device(), dtype: DType::F32 };
+        let (p, nr, a, q, truth) = synthetic(800, 3000, 7);
+        // the f32 reference eigenvector form cancels near v2 = 0 (NOTES-WP7.md), so CPU and GPU f32
+        // differ there by more than round-off of a well-conditioned fit; the robust form is the
+        // training default
+        for (sign, eigen, tol) in [
+            (SignRule::Reference, EigenRule::Robust, 1e-4),
+            (SignRule::Geometric, EigenRule::Robust, 1e-4),
+            (SignRule::Reference, EigenRule::Reference, 0.1),
+            (SignRule::Geometric, EigenRule::Reference, 0.1),
+        ] {
+            let mut o = LossOptions::default();
+            o.fit.sign_rule = sign;
+            o.fit.eigen_rule = eigen;
+            let plan = build_plan(&q, &truth, &p, &o, None).unwrap();
+            let cloud = CloudFit { p: &p, n: &nr };
+            let (vc, gc) = super::super::loss::loss_and_grad(&cctx, &cloud, &a, &plan, &o, true).unwrap();
+            let mut og = o;
+            og.pair_chunk = 1 << 14;
+            let lay = pair_layout(&plan, p.len(), &og);
+            let (vg, gg) = loss_and_grad(&gctx, &cloud, &a, &plan, &lay, &og, true).unwrap();
+            let (vg2, gg2) = loss_and_grad(&gctx, &cloud, &a, &plan, &lay, &og, true).unwrap();
+            let (gc, gg, gg2) = (gc.unwrap(), gg.unwrap(), gg2.unwrap());
+            assert!(vg.loss.to_bits() == vg2.loss.to_bits() && gg.iter().zip(&gg2).all(|(x, y)| x.to_bits() == y.to_bits()), "GPU loss not repeatable");
+            let gmax = gc.iter().fold(0f64, |m, x| m.max(x.abs()));
+            let dmax = gc.iter().zip(&gg).fold(0f64, |m, (x, y)| m.max((x - y).abs()));
+            let rl = (vc.loss - vg.loss).abs() / vc.loss;
+            eprintln!("{sign:?}/{eigen:?}: loss CPU {} GPU {} (rel {rl:.2e}), ∂L/∂a max|Δ|/max|g| {:.2e}, {} pairs", vc.loss, vg.loss, dmax / gmax, plan.pairs());
+            assert!(rl < 1e-5 && dmax / gmax < tol, "GPU loss differs from the CPU");
+            assert_eq!(vc.nonfinite, vg.nonfinite);
+        }
+    }
+}

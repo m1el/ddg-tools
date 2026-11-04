@@ -401,7 +401,48 @@ fn read_log(p: &Path) -> Vec<(u64, f64, f64, f64)> {
 }
 
 /// The same short run (phases given by --phases, default pretraining) on the CPU and the GPU.
+/// One step from the same parameters on the CPU and the GPU: loss and gradient differences.
+fn compare_step(a: &Args, file: &str, batch: usize) -> Result<(), PatError> {
+    let (cpu, gpu) = (ctx_for("cpu")?, ctx_for(&a.device)?);
+    let pool = ddg_points_as_tori::pool::make_pool(host_threads(a, true))?;
+    let (shapes, _) = pool.install(|| load_file(&a.data.join(file), &DataOptions::default()))?;
+    let shape = shapes.get(a.shape).ok_or_else(|| bad(format!("{file} has {} shapes", shapes.len())))?;
+    let (oc, og) = (step_options(a, false), step_options(a, true));
+    let prep = pool.install(|| prepare_shape(shape, &oc, (a.seed, 0, a.shape as u64)))?;
+    let sp = pool.install(|| plan_slice(&prep, 0, batch, &og, true))?.ok_or_else(|| bad("empty slice".into()))?;
+    for (name, model) in [("authors", Model::reference()?), ("init", NetParams::init(&Default::default(), a.seed, &cpu).to_model())] {
+        let t = std::time::Instant::now();
+        let c = pool.install(|| step_planned(&NetParams::from_model(&model, &cpu), &cpu, &prep, &sp, &oc, true))?;
+        let tc = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let g = step_planned(&NetParams::from_model(&model, &gpu), &gpu, &prep, &sp, &og, true)?;
+        let tg = t.elapsed().as_secs_f64();
+        let flat = |o: &ddg_points_as_tori::train::StepOut| -> Vec<f64> { o.grads.as_ref().map(|g| g.iter().flat_map(|t| t.to_f64()).collect()).unwrap_or_default() };
+        let (gc, gg) = (flat(&c), flat(&g));
+        let norm = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let diff: Vec<f64> = gc.iter().zip(&gg).map(|(x, y)| x - y).collect();
+        let gmax = gc.iter().fold(0f64, |m, x| m.max(x.abs()));
+        let dmax = diff.iter().fold(0f64, |m, x| m.max(x.abs()));
+        let cos = gc.iter().zip(&gg).map(|(x, y)| x * y).sum::<f64>() / (norm(&gc) * norm(&gg)).max(1e-300);
+        eprintln!(
+            "step {file} shape {} rows 0..{batch}, {name}: loss CPU {:.9} GPU {:.9} (rel {:.2e}; distance rel {:.2e}, eikonal rel {:.2e}); gradient |Δ|/|g| {:.2e}, max|Δ|/max|g| {:.2e}, cosine {:.8}; CPU {tc:.2} s, GPU {tg:.2} s",
+            a.shape,
+            c.value.loss,
+            g.value.loss,
+            (c.value.loss - g.value.loss).abs() / c.value.loss.abs(),
+            (c.value.distance - g.value.distance).abs() / c.value.distance.abs(),
+            (c.value.eikonal - g.value.eikonal).abs() / c.value.eikonal.abs(),
+            norm(&diff) / norm(&gc).max(1e-300),
+            dmax / gmax.max(1e-300),
+            cos
+        );
+    }
+    Ok(())
+}
+
 fn compare(a: &Args) -> Result<(), PatError> {
+    compare_step(a, "pretraining_blob.npz", 32)?;
+    compare_step(a, &a.file, 1024)?;
     let mut a = a.clone();
     if a.phases.is_none() {
         a.phases = Some(vec!["pretrain".into()]);
