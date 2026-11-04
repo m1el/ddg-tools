@@ -250,14 +250,20 @@ pub enum Device {
 ///
 /// CubeCL's f32 matmul on `sm_80+` is a TF32 tensor-core kernel (10 explicit mantissa bits per
 /// operand), which moves the raw outputs by ~1.5e-4 relative against the CPU.
+///
+/// The default is [`GpuMatmul::Tf32`] (user decision 2026-11-04, SPEC.md §18 WP4 item 1): it meets
+/// the paper's time (1M points in ~27 s on an RTX 4080), and the authors' own GPU path differs from
+/// their CPU path by ~1e-4 as well. [`GpuMatmul::Split3`] is the option for results that agree with
+/// the CPU (coefficients within 1e-5·(1 + |a|)); comparison tables use it or the CPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GpuMatmul {
-    /// f32 accuracy (default): every matmul as three TF32 products of exactly split operands
-    /// (`a_h b_h + a_h b_l + a_l b_h`); raw outputs within ~4e-7 of the CPU.
+    /// One TF32 product per matmul (default): ~2.5× faster than `Split3`, coefficients within
+    /// ~2e-4·(1 + |a|) of the CPU.
     #[default]
-    Split3,
-    /// One TF32 product per matmul: ~2.8× faster, raw outputs within ~2e-4 of the CPU.
     Tf32,
+    /// f32 accuracy: every matmul as three TF32 products of exactly split operands
+    /// (`a_h b_h + a_h b_l + a_l b_h`); raw outputs within ~4e-7 of the CPU.
+    Split3,
 }
 
 /// Options of [`predict_coefficients`].

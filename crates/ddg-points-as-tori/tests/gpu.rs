@@ -422,47 +422,56 @@ fn degenerate_query_on_gpu() {
     assert!(matches!(r, Err(PatError::DegenerateQuery { index: 1, .. })), "{r:?}");
 }
 
+/// GPU vs CPU pipeline, per matmul mode (SPEC.md §18 WP4 item 1; NOTES-WP10.md): `Tf32` (the
+/// default) has raw outputs within ~1.5e-4 of the CPU, which the `1/σ` scaling of `a₃…a₅` turns into
+/// coefficients within 3e-3·(1 + |a|) (measured 1.3e-3) and SDF values within 2e-5 (measured 4e-6);
+/// `Split3` coefficients within 1e-5·(1 + |a|), SDF within 1e-6. Bitwise run to run in both.
 #[test]
 fn pipeline_gpu_vs_cpu() {
     let Some(ord) = gpu() else { return };
     let model = Model::reference().unwrap();
     let cloud = ellipsoid_cloud(5000, 31, [0.6, 0.45, 0.3]);
     let cpu = BuildOptions::default().with_threads(Some(16));
-    let mut gpuo = cpu.clone();
-    gpuo.predict.device = Device::Cuda { ordinal: ord };
-    gpuo.eval.device = Device::Cuda { ordinal: ord };
+    assert_eq!(cpu.predict.gpu_matmul, GpuMatmul::Tf32, "the GPU default is TF32 (user decision 2026-11-04)");
     let (fc, rc) = PointsAsTori::build(&cloud, &model, &cpu).unwrap();
-    let (fg, rg) = PointsAsTori::build(&cloud, &model, &gpuo).unwrap();
-    let (fg2, _) = PointsAsTori::build(&cloud, &model, &gpuo).unwrap();
-    eprintln!("devices: knn {:?}, network {:?}, fit {:?}, eval {:?}", rg.knn_device, rg.predict.device, rg.fit_device, fg.device());
     assert_eq!(rc.predict.device, Device::Cpu);
-    assert_eq!(rg.predict.device, Device::Cuda { ordinal: ord });
-    // run to run on the GPU: bitwise
-    assert!(fg.tori().coefficients == fg2.tori().coefficients, "two GPU builds differ");
-    let tb = |t: &Tori| -> Vec<u64> { t.tori.iter().flat_map(|t| bits(&[t.center[0], t.center[1], t.center[2], t.axis[0], t.axis[1], t.axis[2], t.major, t.minor])).collect() };
-    assert!(tb(fg.tori()) == tb(fg2.tori()));
-    // against the CPU: coefficients within 1e-5 (1 + |a|)
-    let mut worst = 0f64;
-    for (a, b) in fc.tori().coefficients.iter().zip(&fg.tori().coefficients) {
-        for t in 0..6 {
-            worst = worst.max(((a[t] - b[t]).abs() / (1.0 + a[t].abs())) as f64);
+    for (mode, tol, tol_sdf) in [(GpuMatmul::Tf32, 3e-3, 2e-5), (GpuMatmul::Split3, 1e-5, 1e-6)] {
+        let mut gpuo = cpu.clone();
+        gpuo.predict.device = Device::Cuda { ordinal: ord };
+        gpuo.eval.device = Device::Cuda { ordinal: ord };
+        gpuo.predict.gpu_matmul = mode;
+        let (fg, rg) = PointsAsTori::build(&cloud, &model, &gpuo).unwrap();
+        let (fg2, _) = PointsAsTori::build(&cloud, &model, &gpuo).unwrap();
+        eprintln!("{mode:?} devices: knn {:?}, network {:?}, fit {:?}, eval {:?}", rg.knn_device, rg.predict.device, rg.fit_device, fg.device());
+        assert_eq!(rg.predict.device, Device::Cuda { ordinal: ord });
+        // run to run on the GPU: bitwise
+        assert!(fg.tori().coefficients == fg2.tori().coefficients, "{mode:?}: two GPU builds differ");
+        let tb = |t: &Tori| -> Vec<u64> { t.tori.iter().flat_map(|t| bits(&[t.center[0], t.center[1], t.center[2], t.axis[0], t.axis[1], t.axis[2], t.major, t.minor])).collect() };
+        assert!(tb(fg.tori()) == tb(fg2.tori()));
+        // against the CPU: coefficients within tol·(1 + |a|)
+        let mut worst = 0f64;
+        for (a, b) in fc.tori().coefficients.iter().zip(&fg.tori().coefficients) {
+            for t in 0..6 {
+                worst = worst.max(((a[t] - b[t]).abs() / (1.0 + a[t].abs())) as f64);
+            }
         }
+        let qs = queries(4000, 9, &cloud);
+        let (mut dc, mut dg) = (vec![0.0; qs.len()], vec![0.0; qs.len()]);
+        fc.evaluate(&qs, EvalOut { distance: Some(&mut dc), gradient: None, laplacian: None }).unwrap();
+        fg.evaluate(&qs, EvalOut { distance: Some(&mut dg), gradient: None, laplacian: None }).unwrap();
+        let mut ds: Vec<f64> = dc.iter().zip(&dg).map(|(a, b)| (a - b).abs()).collect();
+        ds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        eprintln!(
+            "pipeline {mode:?}: coefficients max |Δa|/(1+|a|) {worst:.2e} (tolerance {tol:e}); SDF |Δφ| median {:.1e}, p99.9 {:.1e}, max {:.1e}; saddles CPU {} GPU {}",
+            ds[ds.len() / 2],
+            ds[ds.len() * 999 / 1000],
+            ds[ds.len() - 1],
+            rc.fit.saddle,
+            rg.fit.saddle
+        );
+        assert!(worst < tol, "{mode:?} coefficients: {worst:e}");
+        assert!(ds[ds.len() - 1] < tol_sdf, "{mode:?} SDF: {:e}", ds[ds.len() - 1]);
     }
-    let qs = queries(4000, 9, &cloud);
-    let (mut dc, mut dg) = (vec![0.0; qs.len()], vec![0.0; qs.len()]);
-    fc.evaluate(&qs, EvalOut { distance: Some(&mut dc), gradient: None, laplacian: None }).unwrap();
-    fg.evaluate(&qs, EvalOut { distance: Some(&mut dg), gradient: None, laplacian: None }).unwrap();
-    let mut ds: Vec<f64> = dc.iter().zip(&dg).map(|(a, b)| (a - b).abs()).collect();
-    ds.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    eprintln!(
-        "pipeline: coefficients max |Δa|/(1+|a|) {worst:.2e}; SDF |Δφ| median {:.1e}, p99.9 {:.1e}, max {:.1e}; saddles CPU {} GPU {}",
-        ds[ds.len() / 2],
-        ds[ds.len() * 999 / 1000],
-        ds[ds.len() - 1],
-        rc.fit.saddle,
-        rg.fit.saddle
-    );
-    assert!(worst < 1e-5, "coefficients: {worst:e}");
 }
 
 /// Debug: the stable multi-pass blend of `kernels.cu` written in Rust, generic over f32/f64.

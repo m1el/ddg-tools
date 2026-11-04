@@ -7,9 +7,10 @@
 //!
 //! **TF32.** CubeCL's default f32 matmul on `sm_80+` is a tensor-core (`wmma …tf32`) kernel: the
 //! operands are rounded to TF32 (10 explicit mantissa bits) inside the kernel, which moves the raw
-//! outputs by ~1e-4 relative against the CPU (NOTES-GPU.md). [`GpuMatmul::Split3`] (the default)
-//! recovers f32 accuracy with framework ops only: every operand is split exactly into a TF32 head
-//! and an f32 tail, `a = a_h + a_l`, and `a·b ≈ a_h·b_h + (a_h·b_l + a_l·b_h)` (the `a_l·b_l`
+//! outputs by ~1e-4 relative against the CPU (NOTES-GPU.md). That is the default,
+//! [`GpuMatmul::Tf32`] (user decision 2026-11-04). The option [`GpuMatmul::Split3`] recovers f32
+//! accuracy with framework ops only: every operand is split exactly into a TF32 head and an f32
+//! tail, `a = a_h + a_l`, and `a·b ≈ a_h·b_h + (a_h·b_l + a_l·b_h)` (the `a_l·b_l`
 //! term is ~2⁻²² relative). Weights are split on the host by truncation, activations on the device
 //! by Veltkamp's split `c = 8193 a`, `a_h = c − (c − a)` (separate kernels, no FMA contraction).
 //!
