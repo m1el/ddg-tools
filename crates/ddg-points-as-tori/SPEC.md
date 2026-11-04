@@ -1177,3 +1177,24 @@ proposals"; all accepted by the orchestrator).** These override §5, §7 and §1
 6. The ids `pat-shc-gradient`, `pat-sspd-gradient`, `pat-extrusion`, `pat-extrusion-gradient`,
    `pat2d-circle-sdf`, `pat2d-blend` each have their own Lean theorem. `pat2d-blend` covers shift
    and convexity only; there is no 2D gradient proof.
+
+**Resolutions after the baselines (WP5, 2026-11-04; `NOTES-WP5.md`; proposals accepted).**
+1. Point areas: the Voronoi cell comes from clipping half-planes in the tangent plane (same area
+   as the planar Delaunay route, no robust predicates). Cells on the hull are clipped to the k-NN
+   radius and counted.
+2. New cited ids `pat-truth-closest-point`, `pat-solid-angle` (CITED.md, WP15 audit).
+3. **"GWN-sign + distance" is defined** as unsigned distance to the nearest cloud point, signed
+   by the (direct, fast or regularized) winding number at threshold ½. It is a baseline of ours,
+   not in the paper. On the sanity run it is the strongest point method (512 points, 9 clouds,
+   64³ mean abs. error: PAT 0.0183, GWN-sign 0.0169, LSE + GWN-sign 0.0165, SHC 0.0247,
+   SSPD 0.0576, SPSR 0.0220 on 7 meshed clouds). WP14 reports it in every table next to the
+   paper's methods, and also reports near-surface error (narrow band) and eikonality
+   (‖∇φ‖ − 1), where nearest-point distance is weak, so that the grid mean is not the only
+   criterion.
+4. SHC with `w = 0` stays an error by default. The opt-in `shc_zero_value` (counted) exists
+   because CAD grids put up to 167 grid points exactly in a face plane; WP14 uses it with value 0
+   and reports the count.
+5. FWN β: default 2 (SPEC); Barill's point-cloud value 2.3 is the option used in WP14's timing row.
+6. `SignRule` default is still open: the network predicted saddles only on femur (4/3897;
+   Geometric marginally better). WP14 adds clouds with saddles and meshes (e.g. Thingi10K
+   samples, analytic saddle shapes from WP8).
