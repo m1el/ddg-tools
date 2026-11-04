@@ -333,8 +333,10 @@ fn options_validate() {
     assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: f64::INFINITY, max: 100.0 }));
     assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: 2.0, max: 0.0 }));
     assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: 2.0, max: f64::NAN }));
-    let mut ok = OptimizeOptions::default();
-    ok.first_trial = FirstTrial::GrowPrevious { growth: 1.0, max: 1e-3 };
+    let ok = OptimizeOptions {
+        first_trial: FirstTrial::GrowPrevious { growth: 1.0, max: 1e-3 },
+        ..OptimizeOptions::default()
+    };
     assert!(ok.validate().is_ok());
 }
 
