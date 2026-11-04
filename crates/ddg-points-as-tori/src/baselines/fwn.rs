@@ -127,7 +127,7 @@ pub fn dipole(p: [f64; 3], m: [f64; 3], x: [f64; 3]) -> (f64, bool) {
 /// `Ω = 2 atan2(det[a,b,c], |a||b||c| + (a·b)|c| + (b·c)|a| + (c·a)|b|)`, corners relative to
 /// `x`). Positive when `x` is on the side the normal `(b−a)×(c−a)` points away from.
 ///
-/// [formula: pat-winding-dipole]
+/// [formula: pat-solid-angle]
 #[inline]
 pub fn triangle_winding(t: &[[f64; 3]; 3], x: [f64; 3]) -> f64 {
     let a = sub(t[0], x);

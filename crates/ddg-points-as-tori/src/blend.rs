@@ -155,7 +155,7 @@ pub fn shift(x: [f64; 3], positions: &[[f64; 3]], nbrs: &[u32]) -> (f64, f64, us
 /// [formula: pat-blend-weight-range]
 #[inline]
 pub fn blend_weight(lambda: f64, rho: f64, shift: f64, area: f64) -> f64 {
-    area * (-lambda * (rho - shift)).exp()
+    area * crate::exp::exp(-lambda * (rho - shift))
 }
 
 /// The neighbor set degenerates: [`LambdaRule::PerQuery`] with `σ_x = 0` (every member at `x`).

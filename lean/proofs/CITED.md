@@ -2452,6 +2452,62 @@ network and everything learned; neighbor search; the clamps of D9 beyond the sta
 - **Why not formalized.** A heuristic quadrature weight; no exact property is claimed.
 - **What depends on it.** The area weights of GWN, FWN, SHC and SSPD (baselines only).
 
+### [formula: pat-truth-closest-point] The closest point of a triangle
+
+- **Statement.** The point of the triangle `abc` closest to `p` is found by classifying `p` into the
+  Voronoi regions of the three corners, then the three edges, then the interior (the barycentric
+  coordinates of the projection onto the plane); the closest point is the corner, the projection
+  onto the edge, or the projection onto the plane respectively.
+- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.5
+  ("Closest point on triangle to point", `ClosestPtPointTriangle`).
+- **Source check.** Not re-read. `tests/baselines.rs` compares the function with the distance to
+  the mesh computed from the segments and with fixed cases.
+- **Why not formalized.** A case analysis of a convex quadratic minimization over a triangle; it
+  only produces the ground-truth distance of the mesh baseline (SPEC §9), never a result of the method.
+- **What depends on it.** The ground truth `|φ|` of the accuracy measurements (`truth::TriMeshTruth`).
+
+### [formula: pat-solid-angle] The solid angle of a triangle
+
+- **Statement.** For corners `a, b, c` relative to the viewpoint, the solid angle is
+  `Ω = 2 atan2(det[a, b, c], |a||b||c| + (a·b)|c| + (b·c)|a| + (c·a)|b|)`; the generalized winding
+  number of a mesh at `x` is `Σ Ω / 4π`.
+- **Reference.** A. van Oosterom, J. Strackee, *The solid angle of a plane triangle*, IEEE Trans.
+  Biomed. Eng. BME-30(2), 1983, 125–126, Eq. (8); the winding number: A. Jacobson, L. Kavan,
+  O. Sorkine-Hornung, *Robust inside-outside segmentation using generalized winding numbers*,
+  ACM TOG 32(4), 2013, Eq. 3.
+- **Source check.** Not re-read.
+- **Why not formalized.** Mathlib has no solid angles of triangles (cf. `spherical-triangle-area`).
+- **What depends on it.** The sign of the mesh ground truth (exact winding number) and the
+  triangle elements of the fast winding number (SPEC §9).
+
+### [formula: pat-triangle-sampling] Uniform sampling of a triangle
+
+- **Statement.** For independent `u, v ~ U(0,1)`, the point `√u(1−v) a + √u v b + (1 − √u) c` is
+  uniformly distributed on the triangle `abc`; a face is drawn with probability proportional to
+  its area.
+- **Reference.** R. Osada, T. Funkhouser, B. Chazelle, D. Dobkin, *Shape distributions*, ACM TOG
+  21(4), 2002, Sec. 4.2 (`P = (1−√r₁)A + √r₁(1−r₂)B + √r₁ r₂ C`; the corners are relabeled here,
+  as in the authors' sampler).
+- **Source check.** Not re-read; the barycentrics are those of the authors' mesh sampler
+  (`NOTES-REFERENCE.md` §9, `MS`/`S3.cpp`).
+- **Why not formalized.** A statement about a random variable (a change of variables on the unit square);
+  nothing downstream depends on it beyond the training distribution.
+- **What depends on it.** The training queries (`train::queries`); no inference result.
+
+### [formula: pat-query-sampling] Training queries of a neighborhood
+
+- **Statement.** For one training row, the queries are drawn from the faces whose bounding boxes
+  meet the box of the row's neighborhood (the box of the neighbor positions, widened to a minimum
+  extent), by area, and perturbed as the options say (a definition of the training distribution
+  as coded, SPEC §10.3).
+- **Reference.** The authors' training-data sampler (`points-as-tori`, MIT)
+  as recorded in `NOTES-REFERENCE.md` §9 (`MS` = `training/mesh_sampling_jax.py`) and `NOTES-WP7.md` item 2; the paper's Sec. 4.3 and
+  App. C describe the distribution in words.
+- **Source check.** Reference code read (NOTES-WP7.md); paper text not re-read.
+- **Why not formalized.** A definition of a sampling procedure, not a mathematical property; it
+  has no formula to prove.
+- **What depends on it.** The training distribution only.
+
 ### [formula: pat-regularized-wn] The regularized winding number
 
 - **Statement.** The dipole kernel multiplied by `S(t) = erf t − (2t/√π) e^{−t²}`, `t = ρ/ε`, is

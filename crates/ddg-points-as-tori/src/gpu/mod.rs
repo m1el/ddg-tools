@@ -126,6 +126,7 @@ struct Kernels {
     eval_radius_f32: CudaFunction,
     fit_tori: CudaFunction,
     exp_values: CudaFunction,
+    pat_exp_values: CudaFunction,
 }
 
 /// The template instance (32, 64 or 128) for `k ≤ KMAX`.
@@ -203,6 +204,7 @@ impl GpuContext {
             eval_radius_f32: f("eval_radius_f32")?,
             fit_tori: f("fit_tori")?,
             exp_values: f("exp_values")?,
+            pat_exp_values: f("pat_exp_values")?,
         };
         let stream = ctx.default_stream();
         Ok(Arc::new(GpuContext { _ctx: ctx, stream, k, info }))
@@ -245,6 +247,16 @@ impl GpuContext {
         let mut dy = self.zeros::<f64>(x.len())?;
         unsafe { self.stream.launch_builder(&self.k.exp_values).arg(&n).arg(&dx).arg(&mut dy).launch(launch_cfg(n)?) }
             .map_err(gpu_err("exp"))?;
+        self.down(&dy, x.len())
+    }
+
+    /// The crate's own [`crate::exp::exp`] evaluated on the device (the blend's weights).
+    pub fn pat_exp_values(&self, x: &[f64]) -> Result<Vec<f64>, PatError> {
+        let n = x.len() as u64;
+        let dx = self.up(x, 0.0)?;
+        let mut dy = self.zeros::<f64>(x.len())?;
+        unsafe { self.stream.launch_builder(&self.k.pat_exp_values).arg(&n).arg(&dx).arg(&mut dy).launch(launch_cfg(n)?) }
+            .map_err(gpu_err("pat_exp"))?;
         self.down(&dy, x.len())
     }
 }

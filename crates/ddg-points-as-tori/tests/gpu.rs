@@ -199,6 +199,52 @@ fn exp_against_host_libm() {
     assert!(maxulp <= 2);
 }
 
+/// WP4b: the crate's `exp` is the same bits on the device and on the host, over the blend's range
+/// and the edge cases.
+#[test]
+fn pat_exp_bitwise_host_device() {
+    let Some(ord) = gpu() else { return };
+    let g = GpuContext::new(ord).unwrap();
+    let mut s = 29;
+    let mut x: Vec<f64> = (0..4_000_000).map(|_| 1600.0 * lcg(&mut s) - 800.0).collect();
+    x.extend([0.0, -0.0, 1e-300, -1e-300, 709.78, 709.782712893384, 709.79, -745.13, -745.14, -708.4, -708.5, -1022.0 * std::f64::consts::LN_2, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, f64::MIN]);
+    x.push(f64::NAN);
+    let y = g.pat_exp_values(&x).unwrap();
+    let bad = x.iter().zip(&y).filter(|(a, b)| {
+        let c = ddg_points_as_tori::exp::exp(**a);
+        !(c.to_bits() == b.to_bits() || (c.is_nan() && b.is_nan()))
+    }).count();
+    assert_eq!(bad, 0, "{bad} of {} arguments differ between host and device", x.len());
+}
+
+/// WP4b: the f64 blend on the GPU is bitwise the CPU's (level 2), for every neighborhood and λ rule.
+#[test]
+fn blend_bitwise_cpu_gpu() {
+    let Some(ord) = gpu() else { return };
+    let cloud = ellipsoid_cloud(3000, 11, [0.6, 0.45, 0.3]);
+    let tori = net_tori(&cloud);
+    let qs = queries(3000, 5, &cloud);
+    let mut s = 3;
+    let area: Vec<f64> = (0..cloud.len()).map(|_| 0.5 + lcg(&mut s)).collect();
+    let (paper, _) = TorusField::paper_options(&cloud, Some(16)).unwrap();
+    let cases: Vec<(&str, EvalOptions)> = vec![
+        ("knn32 per-query", EvalOptions::default()),
+        ("knn32 exact", EvalOptions { gradient: GradientMode::Exact, ..Default::default() }),
+        ("knn64 constant", EvalOptions { neighborhood: Neighborhood::Knn { k: 64 }, lambda: LambdaRule::Constant { lambda: 40.0 }, ..Default::default() }),
+        ("knn100 areas iso", EvalOptions { neighborhood: Neighborhood::Knn { k: 100 }, area_weights: Some(area), isovalue: 0.01, ..Default::default() }),
+        ("all", EvalOptions { neighborhood: Neighborhood::All, ..Default::default() }),
+        ("radius", EvalOptions { neighborhood: Neighborhood::Radius { r: 0.1, fallback_k: 32 }, ..Default::default() }),
+        ("paper", paper),
+    ];
+    for (name, o) in cases {
+        let c = eval_all(&field_with(&cloud, &tori, o.clone(), Device::Cpu), &qs);
+        let g = eval_all(&field_with(&cloud, &tori, o, Device::Cuda { ordinal: ord }), &qs);
+        assert!(bits(&c.d) == bits(&g.d), "{name}: distance differs");
+        assert!(bits(&c.l) == bits(&g.l), "{name}: Laplacian differs");
+        assert!(c.g.iter().flatten().zip(g.g.iter().flatten()).all(|(a, b)| a.to_bits() == b.to_bits()), "{name}: gradient differs");
+    }
+}
+
 /// A field on an ellipsoid cloud with the network's tori, on `device` with `opts`.
 fn field_with(cloud: &PointCloud, tori: &Tori, mut opts: EvalOptions, device: Device) -> TorusField {
     opts.device = device;

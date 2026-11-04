@@ -7,8 +7,8 @@
 // Determinism (the workspace GPU rule): one thread per output, in the CPU's operation order;
 // gathers only, no atomics, no reductions across threads. Compiled with --fmad=false (and IEEE
 // division and square root), so every + − × / √ is the CPU's: kNN, fitting and the per-torus SDF
-// are bitwise equal to the CPU (level 2). The blend's `exp` is CUDA's, not the host libm's; the
-// blend is level 1 (bitwise run to run) and within a measured tolerance of the CPU (NOTES-GPU.md).
+// are bitwise equal to the CPU (level 2). The blend's `exp` is the crate's own (`pat_exp`, the
+// text of `src/exp.rs`), not CUDA's or the host libm's, so the blend is level 2 as well (WP4b).
 
 typedef unsigned int u32;
 typedef unsigned long long u64;
@@ -293,6 +293,33 @@ __device__ __forceinline__ int torus_sdf_grad(const TorusArrays& T, u32 i, const
 }
 
 // ---------------------------------------------------------------------------------------------
+// The crate's exp (src/exp.rs), the same sequence of operations. No fused multiply-add
+// (--fmad=false); rint is round-half-even like f64::round_ties_even.
+__device__ __forceinline__ double pat_exp(double x) {
+    if (x != x) return x;
+    if (x > 709.782712893384) return __longlong_as_double(0x7FF0000000000000LL);
+    if (x < -745.1332191019412) return 0.0;
+    double kf = rint(x * 1.4426950408889634);
+    double r = (x - kf * 6.93147180369123816490e-1) - kf * 1.90821492927058770002e-10;
+    double p = 1.6059043836821613e-10;
+    p = p * r + 2.08767569878681e-9;
+    p = p * r + 2.505210838544172e-8;
+    p = p * r + 2.755731922398589e-7;
+    p = p * r + 2.7557319223985893e-6;
+    p = p * r + 2.48015873015873e-5;
+    p = p * r + 1.984126984126984e-4;
+    p = p * r + 1.388888888888889e-3;
+    p = p * r + 8.333333333333333e-3;
+    p = p * r + 4.1666666666666664e-2;
+    p = p * r + 0.16666666666666666;
+    p = p * r + 0.5;
+    double y = 1.0 + (r + r * r * p);
+    int k = (int)kf;
+    if (k > 1023) return (y * 2.0) * __longlong_as_double((long long)(1023 + 1023) << 52);
+    if (k < -1021) return (y * __longlong_as_double((long long)(k + 1000 + 1023) << 52)) * __longlong_as_double((long long)(-1000 + 1023) << 52);
+    return y * __longlong_as_double((long long)(k + 1023) << 52);
+}
+
 // The blend (src/blend.rs) in f64. [formula: pat-blend-shift] [formula: pat-blend-weight-range]
 // [formula: pat-blend-convex] [formula: pat-blend-gradient] [formula: pat-blend-gradient-exact]
 // [formula: pat-blend-laplacian]
@@ -359,7 +386,7 @@ __device__ void blend(const BlendParams& P, const double* pos, const TorusArrays
             double r0 = x[0] - pos[3 * i], r1 = x[1] - pos[3 * i + 1], r2 = x[2] - pos[3 * i + 2];
             double rho = sqrt(r0 * r0 + r1 * r1 + r2 * r2);
             double a = area ? area[i] : 1.0;
-            double w = a * exp(-lambda * (rho - shift));
+            double w = a * pat_exp(-lambda * (rho - shift));
             gsum += w * torus_sdf(T, i, x);
             wsum += w;
         }
@@ -383,7 +410,7 @@ __device__ void blend(const BlendParams& P, const double* pos, const TorusArrays
             rh[0] = 0.0; rh[1] = 0.0; rh[2] = 0.0;
         }
         double a = area ? area[i] : 1.0;
-        double w = a * exp(-lambda * (rho - shift));
+        double w = a * pat_exp(-lambda * (rho - shift));
         double g, gr[3], lg;
         int sing = torus_sdf_grad(T, i, x, lap, &g, gr, &lg);
         if (sing == SING_AXIS) o->axis += 1;
@@ -889,4 +916,10 @@ extern "C" __global__ void fit_tori(u32 n, const double* P, const double* N, con
 extern "C" __global__ void exp_values(u64 n, const double* x, double* y) {
     u64 i = (u64)blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) y[i] = exp(x[i]);
+}
+
+// The crate's exp, for the bitwise comparison with src/exp.rs.
+extern "C" __global__ void pat_exp_values(u64 n, const double* x, double* y) {
+    u64 i = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) y[i] = pat_exp(x[i]);
 }

@@ -48,6 +48,7 @@
 pub mod blend;
 pub mod cloud;
 pub mod error;
+pub mod exp;
 pub mod features;
 pub mod field;
 pub mod fit;
