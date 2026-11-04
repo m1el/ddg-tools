@@ -48,6 +48,7 @@ fn main() {
         Some("case") => case(&args[1..]),
         Some("continuity") => continuity(&args[1..]),
         Some("orient") => orient(&args[1..]),
+        Some("selfint") => selfint(&args[1..]),
         _ => Err("usage: eval prepare|case|continuity|orient ... (see the file header)".into()),
     };
     if let Err(e) = r {
@@ -1164,5 +1165,20 @@ fn orient(a: &[String]) -> R<()> {
         eprintln!("{} it{iters}: residual {:.4}", dir.display(), wrong as f64 / n as f64);
     }
     std::fs::write(dir.join("orient.json"), out.finish()).map_err(err)?;
+    Ok(())
+}
+
+// ------------------------------------------------------------------ self-intersection check
+
+/// `eval selfint <mesh.obj>...`: the Thingi10K selection test on single meshes (to check it
+/// against the dataset's own `num_self_intersections`).
+fn selfint(a: &[String]) -> R<()> {
+    for p in a {
+        let obj = ddg_core::io::read_obj(p).map_err(err)?;
+        let f = obj.triangles().ok_or("not a triangle mesh")?;
+        let v = center_and_scale(&obj.positions);
+        let s = self_intersections(&v, &f);
+        println!("{p}\tfaces {}\tcrossings {}\tfolds {}\tcoplanar_close {}\tpairs {}", f.len(), s.crossings, s.folds, s.coplanar_close, s.pairs_tested);
+    }
     Ok(())
 }
