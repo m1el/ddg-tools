@@ -22,6 +22,7 @@
 //!   --max-steps N         stop after N steps in all
 //!   --checkpoint-every N  [2000]
 //!   --no-validate         skip the validation at epoch ends
+//!   --validate-every N    validate at an epoch end once N steps passed since the last one [0: every epoch]
 //!   --no-resume           start fresh even if --out holds a checkpoint
 //!   --network-batch B     neighborhoods per network launch [256 on the GPU, 4 on the CPU]
 //!   --pair-chunk P        padded pairs per loss chunk [1048576 on the GPU, 65536 on the CPU]
@@ -59,6 +60,7 @@ struct Args {
     max_steps: Option<u64>,
     checkpoint_every: u64,
     validate: bool,
+    validate_every: u64,
     resume: bool,
     network_batch: Option<usize>,
     pair_chunk: Option<usize>,
@@ -93,6 +95,7 @@ fn parse() -> Result<Args, PatError> {
         max_steps: None,
         checkpoint_every: 2000,
         validate: true,
+        validate_every: 0,
         resume: true,
         network_batch: None,
         pair_chunk: None,
@@ -144,6 +147,7 @@ fn parse() -> Result<Args, PatError> {
             "--max-steps" => a.max_steps = Some(num(val(&mut i)?, "--max-steps")?),
             "--checkpoint-every" => a.checkpoint_every = num(val(&mut i)?, "--checkpoint-every")?.max(1),
             "--no-validate" => a.validate = false,
+            "--validate-every" => a.validate_every = num(val(&mut i)?, "--validate-every")?,
             "--no-resume" => a.resume = false,
             "--network-batch" => a.network_batch = Some(num(val(&mut i)?, "--network-batch")?.max(1) as usize),
             "--pair-chunk" => a.pair_chunk = Some(num(val(&mut i)?, "--pair-chunk")?.max(1) as usize),
@@ -205,6 +209,7 @@ fn train_options(a: &Args, gpu: bool) -> Result<TrainOptions, PatError> {
     o.max_steps = a.max_steps;
     o.resume = a.resume;
     o.validate = a.validate;
+    o.validate_every_steps = a.validate_every;
     o.threads = a.threads;
     Ok(o)
 }

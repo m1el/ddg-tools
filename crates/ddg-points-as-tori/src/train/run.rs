@@ -199,6 +199,9 @@ pub struct TrainOptions {
     pub resume: bool,
     /// Evaluate the curriculum's validation file at the end of every epoch.
     pub validate: bool,
+    /// Validate at an epoch end only when at least this many steps were taken since the last
+    /// validation (always at the last epoch of a phase); 0: every epoch.
+    pub validate_every_steps: u64,
     /// Threads (`None`: all cores).
     pub threads: Option<usize>,
 }
@@ -220,6 +223,7 @@ impl TrainOptions {
             files_in_buffer: 4,
             resume: true,
             validate: true,
+            validate_every_steps: 0,
             threads: None,
         })
     }
@@ -647,6 +651,7 @@ pub fn train_on(
         let mut cur = start;
         let mut phase_steps = 0u64;
         let mut since_ckpt = 0u64;
+        let mut last_val = gstep;
         // a burn-cuda failure (out of memory, a lost device) surfaces as a panic at the next read
         // back: it is caught here and returned as an error (the run resumes from its checkpoint)
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), PatError> {
@@ -744,9 +749,12 @@ pub fn train_on(
                         cur = Cursor { phase: pi, epoch: epoch + 1, done: 0, step: gstep, ..cur };
                         save_checkpoint(&opts.checkpoint_dir, &params, &adam, &cur, "")?;
                         since_ckpt = 0;
+                        let due = epoch + 1 == ph.epochs || gstep.saturating_sub(last_val) >= opts.validate_every_steps;
                         if opts.validate
+                            && due
                             && let Some(v) = &opts.curriculum.validation
                         {
+                            last_val = gstep;
                             let val = validate_on(&params, ctx, pool, &data_dir.join(v), &opts.data, &opts.step, 1024, opts.seed, epoch)?;
                             report.validation = Some(val);
                             let rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, step: gstep, validation: Some(val), ..Default::default() };

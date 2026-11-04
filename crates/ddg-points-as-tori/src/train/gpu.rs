@@ -538,7 +538,10 @@ mod tests {
 
     /// An ellipsoid-like cloud with outward normals, random coefficients near the tangent sphere,
     /// and queries around it.
-    fn synthetic(n: usize, nq: usize, seed: u64) -> (Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<f64>, Vec<[f64; 3]>, Vec<f64>) {
+    /// Points, normals, coefficients, queries, ground truth.
+    type Synthetic = (Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<f64>, Vec<[f64; 3]>, Vec<f64>);
+
+    fn synthetic(n: usize, nq: usize, seed: u64) -> Synthetic {
         let mut s = seed;
         let mut p = Vec::new();
         let mut nr = Vec::new();
