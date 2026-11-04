@@ -20,12 +20,11 @@ use pat::csg::{Csg, ImplicitField};
 use pat::mc::{Band, McOptions, Resolution, marching_cubes};
 use pat::pat2d;
 use pat::truth::{MeshTruth, SignMode, TruthOptions};
+use pat::fit::Torus;
 use pat::{
-    BuildOptions, BuildReport, Device, EvalOptions, EvalPrecision, EvalReport, FeatureOrder, GradientMode, LambdaRule, Model, Neighborhood,
-    NormalPolicy, PatError, PointCloud, PointsAsTori, SignRule, Tori, TorusField,
+    BuildOptions, BuildReport, Device, EigenRule, EvalOptions, EvalPrecision, EvalReport, FeatureOrder, GpuMatmul, GradientMode, LambdaRule, Model,
+    Neighborhood, NormalPolicy, PatError, PointCloud, PointsAsTori, Progress, SignRule, Tori, TorusField,
 };
-use pat::fit::{EigenRule, Torus};
-use pat::network::GpuMatmul;
 
 // -------------------------------------------------------------------------------------------
 // Values and errors
@@ -83,6 +82,8 @@ pub enum O {
     Str(String),
     /// A flat numeric buffer or sequence.
     Array(Vec<f64>),
+    /// A progress/cancel handle (`PatProgress`).
+    Progress(Progress),
 }
 
 /// Why a call failed. Both kinds are `PointsAsToriError` (a `ValueError`) in Python.
@@ -158,6 +159,14 @@ impl Kw {
     /// A seed.
     pub fn opt_u64(&mut self, key: &str) -> R<Option<u64>> {
         self.opt_usize(key).map(|x| x.map(|v| v as u64))
+    }
+    /// A progress handle.
+    pub fn opt_progress(&mut self, key: &str) -> R<Option<Progress>> {
+        match self.take(key) {
+            None | Some(O::None) => Ok(None),
+            Some(O::Progress(p)) => Ok(Some(p.clone())),
+            Some(o) => bad(format!("{key}: expected a PatProgress, got {o:?}")),
+        }
     }
     /// A boolean option.
     pub fn opt_bool(&mut self, key: &str) -> R<Option<bool>> {
@@ -334,7 +343,9 @@ pub fn parse_build(kw: &mut Kw, paper_default: bool) -> R<BuildSpec> {
         Some(o) => return bad(format!("area_weights: expected None, \"barill\" or one number per point, got {o:?}")),
     };
     let eval = parse_eval_overrides(kw)?;
-    let mut opts = BuildOptions { k, ..Default::default() };
+    let progress = kw.opt_progress("progress")?;
+    let mut opts = BuildOptions { k, progress: progress.clone(), ..Default::default() };
+    opts.eval.progress = progress;
     opts.predict.device = device;
     opts.predict.threads = threads;
     opts.predict.feature_order = feature_order;
@@ -427,11 +438,11 @@ impl Pat {
     }
 
     /// A field from saved tori.
-    pub fn from_tori(points: &[f64], normals: &[f64], tori: Tori, spec: &BuildSpec) -> R<Pat> {
+    pub fn from_tori(points: &[f64], normals: &[f64], tori: Tori, sign_rule: Option<SignRule>, spec: &BuildSpec) -> R<Pat> {
         let (cloud, creport) = PointCloud::new(to3("points", points)?, to3("normals", normals)?, spec.policy)?;
-        let mut eval = EvalOptions { device: spec.opts.eval.device, threads: spec.opts.eval.threads, ..Default::default() };
+        let mut eval = EvalOptions { device: spec.opts.eval.device, threads: spec.opts.eval.threads, progress: spec.opts.eval.progress.clone(), ..Default::default() };
         apply_eval(spec, &cloud, &mut eval)?;
-        let field = TorusField::new(&cloud, tori, eval)?;
+        let field = TorusField::new(&cloud, tori, eval)?.with_sign_rule(sign_rule);
         Ok(Pat { cloud, field: Arc::new(field), build_report: None, cloud_report: creport, last_eval: Mutex::new(None) })
     }
 
@@ -454,7 +465,7 @@ impl Pat {
             };
         }
         apply_eval(&spec, &self.cloud, &mut eval)?;
-        let field = TorusField::new(&self.cloud, self.field.tori().clone(), eval)?;
+        let field = TorusField::new(&self.cloud, self.field.tori().clone(), eval)?.with_sign_rule(self.field.sign_rule());
         Ok(Pat { cloud: self.cloud.clone(), field: Arc::new(field), build_report: self.build_report.clone(), cloud_report: self.cloud_report.clone(), last_eval: Mutex::new(None) })
     }
 
@@ -482,9 +493,10 @@ impl Pat {
         self.field.tori()
     }
 
-    /// Save our binary tori file.
+    /// Save our binary tori file (tied to the cloud by its hash, and marked with the sign rule the
+    /// tori were fitted with when that is known).
     pub fn save_tori(&self, path: &str) -> R<()> {
-        std::fs::write(path, self.tori().to_bytes(self.cloud.hash())).map_err(|e| PErr(format!("cannot write {path}: {e}")))
+        std::fs::write(path, self.field.to_bytes()).map_err(|e| PErr(format!("cannot write {path}: {e}")))
     }
 
     /// The evaluation options as a report.
@@ -498,16 +510,18 @@ fn kw_given(_kw: &Kw) -> bool {
 }
 
 /// Read a tori file (checked against the cloud's hash).
-pub fn load_tori_file(path: &str) -> R<Tori> {
+pub fn load_tori_file(path: &str) -> R<(Tori, Option<SignRule>)> {
     let bytes = std::fs::read(path).map_err(|e| PErr(format!("cannot read {path}: {e}")))?;
-    Ok(Tori::from_bytes(&bytes, None)?.0)
+    let (t, _, rule) = Tori::from_bytes_with(&bytes, None)?;
+    Ok((t, rule))
 }
 
 /// Check a tori file against the cloud that is meant to go with it, then read it.
-pub fn load_tori_for(path: &str, points: &[f64], normals: &[f64], policy: NormalPolicy) -> R<Tori> {
+pub fn load_tori_for(path: &str, points: &[f64], normals: &[f64], policy: NormalPolicy) -> R<(Tori, Option<SignRule>)> {
     let bytes = std::fs::read(path).map_err(|e| PErr(format!("cannot read {path}: {e}")))?;
     let (cloud, _) = PointCloud::new(to3("points", points)?, to3("normals", normals)?, policy)?;
-    Ok(Tori::from_bytes(&bytes, Some(cloud.hash()))?.0)
+    let (t, _, rule) = Tori::from_bytes_with(&bytes, Some(cloud.hash()))?;
+    Ok((t, rule))
 }
 
 /// The tori as a dict of flat arrays: the reference's layout (`centers`, `axes` as `(theta, phi)`,
@@ -686,6 +700,7 @@ fn mc_report_v(r: &pat::mc::McReport) -> V {
         ("zero_normals", V::u(r.zero_normals)),
         ("mesh", mesh),
         ("seconds", V::F(r.seconds[4])),
+        ("eval", r.eval.as_ref().map_or(V::None, eval_report_v)),
     ])
 }
 
@@ -792,6 +807,8 @@ pub struct MeshOut {
     pub normals: Option<Vec<f64>>,
     /// The report.
     pub report: V,
+    /// What the fitted fields evaluated during the run (`None` for analytic fields).
+    pub eval: Option<EvalReport>,
 }
 
 /// Marching cubes on `field`.
@@ -804,6 +821,7 @@ pub fn reconstruct(field: &dyn ImplicitField, kw: &mut Kw) -> R<MeshOut> {
         faces: mesh.faces.iter().flatten().copied().collect(),
         normals: mesh.normals.as_ref().map(|n| flat3(n)),
         report: mc_report_v(&rep),
+        eval: rep.eval.clone(),
     })
 }
 
@@ -863,12 +881,7 @@ pub fn morphology(field: &dyn ImplicitField, op: &str, radius: f64, kw: &mut Kw)
     if !(radius.is_finite() && radius >= 0.0) {
         return bad(format!("radius: {radius} (finite and >= 0)"));
     }
-    let levels: Vec<f64> = match morph {
-        Morph::Erode(c) => vec![-c],
-        Morph::Dilate(c) => vec![c],
-        Morph::Open(c) => vec![-c, c],
-        Morph::Close(c) => vec![c, -c],
-    };
+    let levels = morph.levels()?;
     let mut sample = parse_sample(kw)?;
     let mut spec = parse_build(kw, true)?;
     kw.finish("morphology")?;
@@ -1268,6 +1281,7 @@ pub fn defaults() -> V {
         ("k", V::None),
         ("paper", V::B(false)),
         ("area_weights", V::None),
+        ("progress", if b.progress.is_none() { V::None } else { V::s("set") }),
     ]);
     V::D(items)
 }
@@ -1314,7 +1328,7 @@ mod tests {
         assert!(d[0] < -0.3 && (d[1] - 0.5).abs() < 0.05, "{d:?}");
         let t = export_tori(f.tori());
         let back = import_tori(&t.centers, &t.axes, &t.major, &t.minor).unwrap();
-        let g = Pat::from_tori(&p, &nr, back, &spec).unwrap();
+        let g = Pat::from_tori(&p, &nr, back, None, &spec).unwrap();
         let (e, _, _) = g.evaluate(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], true, false, false).unwrap();
         assert!((e[0] - d[0]).abs() < 1e-8);
         assert!(matches!(defaults(), V::D(_)));

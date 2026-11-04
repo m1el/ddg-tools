@@ -2081,6 +2081,28 @@ class PointsAsToriError(DdgError, ValueError):
     degenerate query, no GPU, ...). The message is the library's."""
 
 @final
+class PatProgress:
+    """A progress counter and cancel flag. Pass it as ``progress=`` to ``PointsAsTori(...)`` (it then
+    also counts the field's evaluations); poll it from another thread; ``cancel()`` makes the
+    running call raise ``PointsAsToriError("cancelled")`` at its next check (between chunks of a few
+    hundred neighborhoods or queries). ``reset()`` clears it for reuse."""
+
+    def __init__(self) -> None: ...
+    def cancel(self) -> None: ...
+    def reset(self) -> None: ...
+    @property
+    def cancelled(self) -> bool: ...
+    @property
+    def stage(self) -> Literal["idle", "neighborhoods", "network", "fit", "tree", "evaluate"]: ...
+    @property
+    def done(self) -> int:
+        """Items finished in the current stage (neighborhoods, points, queries)."""
+    @property
+    def total(self) -> int: ...
+    @property
+    def fraction(self) -> float: ...
+
+@final
 class PointsAsTori:
     """Signed distance to an oriented point cloud by blending one fitted torus per point.
 
@@ -2121,9 +2143,14 @@ class PointsAsTori:
         gradient: Literal["frozen", "exact"] = "frozen",
         isovalue: float = 0.0,
         precision: Literal["f64", "f32_stable"] = "f64",
+        progress: PatProgress | None = None,
     ) -> None: ...
     @property
     def n(self) -> int: ...
+    @property
+    def sign_rule(self) -> Literal["reference", "geometric"] | None:
+        """The sign rule the tori were fitted with; None when unknown (``from_tori_dict``, or a
+        tori file written before the marker existed)."""
     @property
     def points(self) -> array[float]: ...
     @property
@@ -2135,7 +2162,8 @@ class PointsAsTori:
     def distance_and_gradient(self, queries: Buffer) -> tuple[array[float], array[float]]: ...
     def laplacian(self, queries: Buffer) -> array[float]: ...
     def save_tori(self, path: str) -> None:
-        """Our binary tori file, tied to the cloud by a hash (``load_tori`` checks it)."""
+        """Our binary tori file, tied to the cloud by a hash (``load_tori`` checks it) and marked with
+        the sign rule; older files without the marker still load."""
     def export_tori(self) -> dict[str, array[float]]:
         """The authors' layout: ``centers`` (3n), ``axes`` (2n angles theta, phi), ``major``
         (n), ``minor`` (n, signed)."""

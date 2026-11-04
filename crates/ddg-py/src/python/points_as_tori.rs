@@ -21,6 +21,64 @@ use crate::points_as_tori::{Kw, O, PErr, Pat, Shared, V};
 
 static ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 
+/// A progress counter and cancel flag for `PointsAsTori(...)` builds and evaluations: pass it as
+/// `progress=`, poll `stage`, `done`, `total` or `fraction` from another thread, and `cancel()` to
+/// make the running call raise `PointsAsToriError("cancelled")` at its next check.
+#[pyclass(name = "PatProgress", module = "ddg_tools", frozen)]
+struct PyProgress(ddg_points_as_tori::Progress);
+
+#[pymethods]
+impl PyProgress {
+    #[new]
+    fn new() -> Self {
+        PyProgress(ddg_points_as_tori::Progress::new())
+    }
+
+    /// Ask the running call to stop (sticky until `reset()`).
+    fn cancel(&self) {
+        self.0.cancel();
+    }
+
+    /// Clear the cancel flag and the counters.
+    fn reset(&self) {
+        self.0.reset();
+    }
+
+    /// Whether `cancel()` was called.
+    #[getter]
+    fn cancelled(&self) -> bool {
+        self.0.is_cancelled()
+    }
+
+    /// The current stage: "idle", "neighborhoods", "network", "fit", "tree" or "evaluate".
+    #[getter]
+    fn stage(&self) -> &'static str {
+        self.0.stage()
+    }
+
+    /// Items finished in the current stage.
+    #[getter]
+    fn done(&self) -> u64 {
+        self.0.done()
+    }
+
+    /// Items in the current stage.
+    #[getter]
+    fn total(&self) -> u64 {
+        self.0.total()
+    }
+
+    /// `done / total` of the current stage.
+    #[getter]
+    fn fraction(&self) -> f64 {
+        self.0.fraction()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PatProgress(stage={:?}, done={}, total={}, cancelled={})", self.0.stage(), self.0.done(), self.0.total(), self.0.is_cancelled())
+    }
+}
+
 fn err(e: PErr) -> PyErr {
     Python::attach(|py| match ERROR.get(py) {
         Some(t) => PyErr::from_type(t.bind(py).clone(), e.0),
@@ -125,6 +183,9 @@ fn to_opt(name: &str, obj: &Bound<'_, PyAny>) -> PyResult<O> {
     if obj.is_instance_of::<PyString>() {
         return Ok(O::Str(obj.extract()?));
     }
+    if let Ok(p) = obj.cast::<PyProgress>() {
+        return Ok(O::Progress(p.get().0.clone()));
+    }
     if let Ok(v) = nums(leak(name), obj) {
         return Ok(O::Array(v));
     }
@@ -224,6 +285,7 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PointsAsToriError", &cls)?;
     let _ = ERROR.set(py, cls.unbind());
     m.add_class::<PyPat>()?;
+    m.add_class::<PyProgress>()?;
     m.add_class::<PyCsg>()?;
     m.add_class::<PyTruth>()?;
     m.add_class::<PyPat2>()?;
@@ -247,9 +309,10 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // The submodule `ddg_tools.points_as_tori`: the same objects with the short names.
     let sub = PyModule::new(py, "points_as_tori")?;
     sub.setattr("__doc__", "Points as Tori (Feng, Gkioulekas, Crane 2026): signed distance to oriented point clouds. The same objects as the pat_* names of ddg_tools, without the prefix.")?;
-    let pairs: [(&str, &str); 22] = [
+    let pairs: [(&str, &str); 23] = [
         ("PointsAsTori", "PointsAsTori"),
         ("CsgField", "PatCsgField"),
+        ("Progress", "PatProgress"),
         ("MeshTruth", "PatMeshTruth"),
         ("Pat2d", "Pat2d"),
         ("PointsAsToriError", "PointsAsToriError"),
@@ -331,6 +394,13 @@ impl PyPat {
     #[getter]
     fn n(&self) -> usize {
         self.pat.cloud.len()
+    }
+
+    /// The sign rule the tori were fitted with ("reference" or "geometric"), or None when not
+    /// known (tori imported from a dict or from a file written without the marker).
+    #[getter]
+    fn sign_rule(&self) -> Option<&'static str> {
+        self.pat.field.sign_rule().map(|r| if r == ddg_points_as_tori::SignRule::Reference { "reference" } else { "geometric" })
     }
 
     /// The (validated) points, flat `array('d')`, 3 per point.
@@ -470,7 +540,7 @@ impl PyPat {
         options: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let f: Shared = self.pat.field.clone();
-        reconstruct_impl(py, f, level, resolution, bbox, options)
+        reconstruct_impl(py, f, Some(self.pat.clone()), level, resolution, bbox, options)
     }
 
     /// Points and unit normals on `φ = level` (area-uniform, projected): `(points, normals)`.
@@ -514,9 +584,12 @@ fn boolean_impl(a: Shared, other: &Bound<'_, PyAny>, op: &str, smooth: Option<f6
     Ok(PyCsg { field: Arc::new(core::boolean(a, b, op, smooth).map_err(err)?) })
 }
 
+/// Marching cubes; with `sink` (the `PointsAsTori` object), `eval_report` afterwards describes the
+/// evaluations of the run.
 fn reconstruct_impl<'py>(
     py: Python<'py>,
     f: Shared,
+    sink: Option<Arc<Pat>>,
     level: Option<&Bound<'py, PyAny>>,
     resolution: Option<&Bound<'py, PyAny>>,
     bbox: Option<&Bound<'py, PyAny>>,
@@ -525,6 +598,11 @@ fn reconstruct_impl<'py>(
     let (mut kw, want) = kwargs(options, &[("level", level), ("resolution", resolution), ("bbox", bbox)])?;
     let want_normals = options.is_some_and(|o| o.get_item("normals").ok().flatten().is_some_and(|v| v.extract::<bool>().unwrap_or(false)));
     let m = py.detach(move || core::reconstruct(&*f, &mut kw)).map_err(err)?;
+    if let (Some(p), Some(e)) = (sink, m.eval.clone())
+        && let Ok(mut last) = p.last_eval.lock()
+    {
+        *last = Some(e);
+    }
     let mut items = vec![arr(py, &m.positions)?, index_array(py, "faces", m.faces.iter().copied())?];
     if want_normals && let Some(n) = &m.normals {
         items.push(arr(py, n)?);
@@ -564,8 +642,8 @@ fn pat_load_tori(py: Python<'_>, path: &str, points: &Bound<'_, PyAny>, normals:
         .detach(move || {
             let spec = core::parse_build(&mut kw, false)?;
             kw.finish("load_tori")?;
-            let tori = core::load_tori_for(&path, &p, &n, spec.policy)?;
-            Pat::from_tori(&p, &n, tori, &spec)
+            let (tori, rule) = core::load_tori_for(&path, &p, &n, spec.policy)?;
+            Pat::from_tori(&p, &n, tori, rule, &spec)
         })
         .map_err(err)?;
     Ok(PyPat { pat: Arc::new(pat) })
@@ -590,7 +668,7 @@ fn pat_from_tori_dict(py: Python<'_>, points: &Bound<'_, PyAny>, normals: &Bound
             let spec = core::parse_build(&mut kw, false)?;
             kw.finish("from_tori_dict")?;
             let t = core::import_tori(&c, &a, &r, &s)?;
-            Pat::from_tori(&p, &n, t, &spec)
+            Pat::from_tori(&p, &n, t, None, &spec)
         })
         .map_err(err)?;
     Ok(PyPat { pat: Arc::new(pat) })
@@ -646,7 +724,7 @@ impl PyCsg {
         bbox: Option<&Bound<'py, PyAny>>,
         options: Option<&Bound<'py, PyDict>>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        reconstruct_impl(py, self.field.clone(), level, resolution, bbox, options)
+        reconstruct_impl(py, self.field.clone(), None, level, resolution, bbox, options)
     }
 
     /// Points and normals on `φ = level`, as `PointsAsTori.sample_level_set` (`count` defaults to 4096).
@@ -708,7 +786,7 @@ fn pat_reconstruct<'py>(
     bbox: Option<&Bound<'py, PyAny>>,
     options: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    reconstruct_impl(py, shared(field, "field")?, level, resolution, bbox, options)
+    reconstruct_impl(py, shared(field, "field")?, None, level, resolution, bbox, options)
 }
 
 /// Points and normals on a level set; see `PointsAsTori.sample_level_set`.

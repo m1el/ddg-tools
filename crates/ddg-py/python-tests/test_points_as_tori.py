@@ -211,6 +211,8 @@ class RoundTrips(unittest.TestCase):
             FIELD.save_tori(path)
             g = ddg_tools.pat_load_tori(path, *SPHERE)
             self.assertIsNone(g.build_report)
+            self.assertEqual(FIELD.sign_rule, "reference")
+            self.assertEqual(g.sign_rule, "reference")  # the file records it
             self.assertEqual(g.signed_distance(Q).tobytes(), FIELD.signed_distance(Q).tobytes())
             self.assertEqual(g.gradient(Q).tobytes(), FIELD.gradient(Q).tobytes())
             self.assertEqual(g.tori["coefficients"].tobytes(), FIELD.tori["coefficients"].tobytes())
@@ -252,6 +254,66 @@ class RoundTrips(unittest.TestCase):
             ddg_tools.pat_from_tori_dict(*SPHERE, {"centers": t["centers"]})
         with self.assertRaises(pat.PointsAsToriError):
             ddg_tools.pat_from_tori_dict(*SPHERE, {**t, "major": t["major"][:-1]})
+
+
+class CrateItems(unittest.TestCase):
+    """WP15: the sign-rule marker, reconstruct's eval report, smooth = 0 and the progress hook."""
+
+    def test_sign_rule_marker_survives_a_round_trip_and_old_files_load(self):
+        geo = ddg_tools.PointsAsTori(*SPHERE, sign_rule="geometric")
+        self.assertEqual(geo.sign_rule, "geometric")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "g.tori")
+            geo.save_tori(path)
+            self.assertEqual(ddg_tools.pat_load_tori(path, *SPHERE).sign_rule, "geometric")
+            with open(path, "rb") as fh:
+                data = bytearray(fh.read())
+            data[12:16] = b"\0\0\0\0"  # a file from before the marker
+            old = os.path.join(d, "old.tori")
+            with open(old, "wb") as fh:
+                fh.write(data)
+            self.assertIsNone(ddg_tools.pat_load_tori(old, *SPHERE).sign_rule)
+            data[12] = 9
+            with open(old, "wb") as fh:
+                fh.write(data)
+            with self.assertRaises(pat.PointsAsToriError):
+                ddg_tools.pat_load_tori(old, *SPHERE)
+        imported = ddg_tools.pat_from_tori_dict(*SPHERE, FIELD.export_tori())
+        self.assertIsNone(imported.sign_rule)
+
+    def test_reconstruct_fills_the_eval_report(self):
+        f = ddg_tools.PointsAsTori(*SPHERE)
+        self.assertIsNone(f.eval_report)
+        v, faces, rep = f.reconstruct(resolution=16, return_report=True)
+        er = f.eval_report
+        self.assertGreater(er["queries"], 0)
+        self.assertEqual(er["queries"], rep["eval"]["queries"])
+        self.assertGreaterEqual(er["terms"], 32 * (er["queries"] - 1))
+
+    def test_smooth_zero_is_the_sharp_boolean(self):
+        a, b = FIELD, ddg_tools.PointsAsTori(*fibonacci_sphere(512, 0.5, (0.3, 0.0, 0.0)))
+        for op in ("union", "intersect", "subtract"):
+            sharp = getattr(a, op)(b).signed_distance(Q)
+            self.assertEqual(getattr(a, op)(b, smooth=0.0).signed_distance(Q).tobytes(), sharp.tobytes())
+
+    def test_progress_counts_and_cancels(self):
+        p = ddg_tools.PatProgress()
+        self.assertEqual((p.stage, p.done, p.total, p.cancelled), ("idle", 0, 0, False))
+        f = ddg_tools.PointsAsTori(*SPHERE, progress=p)
+        self.assertEqual(f.signed_distance(Q).tobytes(), FIELD.signed_distance(Q).tobytes())
+        self.assertEqual((p.stage, p.done, p.total), ("evaluate", len(Q) // 3, len(Q) // 3))
+        self.assertEqual(p.fraction, 1.0)
+        p.cancel()
+        self.assertTrue(p.cancelled)
+        with self.assertRaises(pat.PointsAsToriError) as cm:
+            f.signed_distance(Q)
+        self.assertIn("cancelled", str(cm.exception))
+        with self.assertRaises(pat.PointsAsToriError):
+            ddg_tools.PointsAsTori(*SPHERE, progress=p)
+        p.reset()
+        self.assertEqual(f.signed_distance(Q).tobytes(), FIELD.signed_distance(Q).tobytes())
+        with self.assertRaises(pat.PointsAsToriError):
+            ddg_tools.PointsAsTori(*SPHERE, progress="not a progress")
 
 
 class Errors(unittest.TestCase):
@@ -601,7 +663,7 @@ class Defaults(unittest.TestCase):
             tree = ast.parse(fh.read())
         names = {n.name for n in tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef))}
         for name in dir(ddg_tools):
-            if name.startswith("pat_") or name in ("PointsAsTori", "PatCsgField", "PatMeshTruth", "Pat2d", "PointsAsToriError"):
+            if name.startswith("pat_") or name in ("PointsAsTori", "PatCsgField", "PatMeshTruth", "Pat2d", "PointsAsToriError", "PatProgress"):
                 self.assertIn(name, names)
 
 
