@@ -2,6 +2,8 @@
 //! identical-tori blend, the WP3 resolutions (min-ρ shift for constant λ, `DegenerateQuery`,
 //! Laplacian 0 at singular points).
 
+#![allow(clippy::needless_range_loop)]
+
 mod common;
 
 use common::{ellipsoid_cloud, lcg};

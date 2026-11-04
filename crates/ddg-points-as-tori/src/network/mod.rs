@@ -1,8 +1,8 @@
 //! The coefficient network: weights, the inference API and the CPU back ends (SPEC.md §5, §6).
 //!
 //! The weights are kept framework neutral ([`NetWeights`], f32, Flax layouts flattened to
-//! `[in, out]` row-major matrices). The CPU forward pass is the burn 0.22 module of
-//! [`burn`](self::burn) on the Flex backend, built without its rayon feature: every call is
+//! `[in, out]` row-major matrices). The CPU forward pass is the burn 0.22 module of the
+//! [`burn`] module on the Flex backend, built without its rayon feature: every call is
 //! single-threaded, and our explicit pool runs fixed chunks of [`CHUNK`] neighborhoods, one per
 //! task. Results are bitwise independent of the thread count (SPEC.md §5.4) and, as measured, of
 //! the chunk size too (every op of the forward pass is row-wise per neighborhood).
@@ -299,7 +299,7 @@ pub fn scale_outputs_f64(y: [f64; 6], sigma: f64) -> [f64; 6] {
 /// Raw network outputs for precomputed features (`b·t·6` values, `b` neighborhoods of `t`
 /// tokens), chunked as in [`predict_coefficients`]. For parity tests and benchmarks.
 pub fn forward_features(model: &Model, features: &[f32], tokens: usize, opts: &PredictOptions) -> Result<Vec<f32>, PatError> {
-    if tokens == 0 || features.len() % (6 * tokens) != 0 {
+    if tokens == 0 || !features.len().is_multiple_of(6 * tokens) {
         return Err(PatError::SizeMismatch { what: format!("{} feature values for {tokens} tokens", features.len()) });
     }
     check_device(opts.device)?;
@@ -342,6 +342,9 @@ impl Runner {
     }
 }
 
+/// Coefficients, scales `σ_i` and the report of [`predict_coefficients`].
+pub type Prediction = (Vec<[f32; 6]>, Vec<f64>, PredictReport);
+
 /// Coefficients and scales `σ_i` for every neighborhood (SPEC.md §6.3).
 ///
 /// Rows of `nbhds` must start with their own index (as [`crate::spatial::fitting_neighborhoods`]
@@ -351,7 +354,7 @@ pub fn predict_coefficients(
     cloud: &PointCloud,
     nbhds: &Neighborhoods,
     opts: &PredictOptions,
-) -> Result<(Vec<[f32; 6]>, Vec<f64>, PredictReport), PatError> {
+) -> Result<Prediction, PatError> {
     let t0 = std::time::Instant::now();
     check_device(opts.device)?;
     let n = cloud.len();

@@ -273,6 +273,7 @@ pub fn torus_radii(kappa_min: f64, kappa_max: f64, floor: f64) -> (f64, f64, boo
 /// Torus sign (Eq. 22): `+1` iff `κmax < 0 ∧ (κmin < 0 ∨ κmin > 0)`, else `−1`.
 ///
 /// [formula: pat-torus-sign]
+#[allow(clippy::nonminimal_bool)] // written as Eq. 22
 pub fn torus_sign(kappa_min: f64, kappa_max: f64) -> f64 {
     if (kappa_max < 0.0 && kappa_min < 0.0) || (kappa_max < 0.0 && kappa_min > 0.0) { 1.0 } else { -1.0 }
 }
@@ -458,4 +459,73 @@ pub fn fit_diagnostics(cloud: &PointCloud, coefficients: &[[f32; 6]], i: usize, 
     }
     let a = coefficients[i].map(|x| x as f64);
     Ok(fit_torus(cloud.positions()[i], cloud.normals()[i], a, opts).1)
+}
+
+const MAGIC: &[u8; 8] = b"PATTORI\0";
+const VERSION: u32 = 1;
+
+impl Tori {
+    /// Our binary format (SPEC.md §2.2): magic `PATTORI\0`, `u32` version 1, `u32` 0, `u64` n,
+    /// `u64` hash of the source cloud ([`PointCloud::hash`]), then little-endian arrays: centers
+    /// `f64[3n]`, axes `f64[3n]`, major `f64[n]`, minor `f64[n]`, σ `f64[n]`, coefficients `f32[6n]`.
+    pub fn to_bytes(&self, cloud_hash: u64) -> Vec<u8> {
+        let n = self.tori.len();
+        let mut b = Vec::with_capacity(32 + n * (8 * 9 + 24));
+        b.extend_from_slice(MAGIC);
+        b.extend_from_slice(&VERSION.to_le_bytes());
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&(n as u64).to_le_bytes());
+        b.extend_from_slice(&cloud_hash.to_le_bytes());
+        let mut f = |x: f64| b.extend_from_slice(&x.to_le_bytes());
+        self.tori.iter().for_each(|t| t.center.iter().for_each(|&x| f(x)));
+        self.tori.iter().for_each(|t| t.axis.iter().for_each(|&x| f(x)));
+        self.tori.iter().for_each(|t| f(t.major));
+        self.tori.iter().for_each(|t| f(t.minor));
+        self.sigma.iter().for_each(|&x| f(x));
+        for c in &self.coefficients {
+            for x in c {
+                b.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        b
+    }
+
+    /// Read [`Tori::to_bytes`]. With `expected_hash`, a different source-cloud hash is an error.
+    /// Returns the tori and the stored hash.
+    pub fn from_bytes(bytes: &[u8], expected_hash: Option<u64>) -> Result<(Tori, u64), PatError> {
+        let ferr = |reason: String| PatError::Format { reason };
+        if bytes.len() < 32 || &bytes[..8] != MAGIC {
+            return Err(ferr("not a tori file (bad magic)".into()));
+        }
+        let u32at = |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
+        let u64at = |i: usize| u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap_or([0; 8]));
+        if u32at(8) != VERSION {
+            return Err(ferr(format!("tori file version {} (expected {VERSION})", u32at(8))));
+        }
+        let n = u64at(16) as usize;
+        let hash = u64at(24);
+        if let Some(h) = expected_hash
+            && h != hash
+        {
+            return Err(ferr(format!("tori file belongs to cloud {hash:016x}, not {h:016x}")));
+        }
+        let need = n.checked_mul(8 * 9 + 24).and_then(|x| x.checked_add(32));
+        if need != Some(bytes.len()) {
+            return Err(ferr(format!("tori file has {} bytes, {n} tori need {:?}", bytes.len(), need)));
+        }
+        let f = |k: usize| f64::from_le_bytes(bytes[32 + 8 * k..40 + 8 * k].try_into().unwrap_or([0; 8]));
+        let tori = (0..n)
+            .map(|i| Torus {
+                center: [f(3 * i), f(3 * i + 1), f(3 * i + 2)],
+                axis: [f(3 * n + 3 * i), f(3 * n + 3 * i + 1), f(3 * n + 3 * i + 2)],
+                major: f(6 * n + i),
+                minor: f(7 * n + i),
+            })
+            .collect();
+        let sigma = (0..n).map(|i| f(8 * n + i)).collect();
+        let o = 32 + 8 * 9 * n;
+        let g = |k: usize| f32::from_le_bytes([bytes[o + 4 * k], bytes[o + 4 * k + 1], bytes[o + 4 * k + 2], bytes[o + 4 * k + 3]]);
+        let coefficients = (0..n).map(|i| std::array::from_fn(|c| g(6 * i + c))).collect();
+        Ok((Tori { tori, coefficients, sigma }, hash))
+    }
 }

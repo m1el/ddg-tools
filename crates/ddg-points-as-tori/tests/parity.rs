@@ -5,6 +5,8 @@
 //! Run with `--release --nocapture` for the full 64³ grids and the tables; debug builds use every
 //! 4th grid point per axis.
 
+#![allow(clippy::needless_range_loop)]
+
 mod common;
 
 use common::{Golden, INPUTS, diff_stats, golden_root};

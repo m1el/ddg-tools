@@ -110,11 +110,11 @@ fn build_rec(points: &[[f64; 3]], idx: &mut [u32], nodes: &mut [Node], start: us
 #[inline]
 fn box_d2(n: &Node, q: &[f64; 3]) -> f64 {
     let mut s = 0.0;
-    for a in 0..3 {
-        let d = if q[a] < n.lo[a] {
-            n.lo[a] - q[a]
-        } else if q[a] > n.hi[a] {
-            q[a] - n.hi[a]
+    for ((&qa, &lo), &hi) in q.iter().zip(&n.lo).zip(&n.hi) {
+        let d = if qa < lo {
+            lo - qa
+        } else if qa > hi {
+            qa - hi
         } else {
             0.0
         };

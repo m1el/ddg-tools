@@ -2,6 +2,8 @@
 //! inner equators, planes, cylinders; clamps and errors; invariance of the features and the
 //! pipeline under translation and scaling.
 
+#![allow(clippy::needless_range_loop)]
+
 mod common;
 
 use common::{ellipsoid_cloud, lcg};
@@ -243,4 +245,19 @@ fn features_and_coefficients_are_translation_and_scale_covariant() {
         }
     }
     assert!(worst < 1e-5, "coefficients not covariant: {worst:e}");
+}
+
+#[test]
+fn tori_round_trip() {
+    let cloud = ellipsoid_cloud(50, 5, [1.0, 0.7, 0.4]);
+    let co = vec![[0.01f32, 0.1, -0.2, 0.3, -0.5, -0.4]; 50];
+    let (tori, _) = fit_tori(&cloud, &co, &FitOptions::default()).unwrap();
+    let b = tori.to_bytes(cloud.hash());
+    let (back, h) = ddg_points_as_tori::Tori::from_bytes(&b, Some(cloud.hash())).unwrap();
+    assert_eq!(h, cloud.hash());
+    assert_eq!(back.tori, tori.tori);
+    assert_eq!(back.coefficients, tori.coefficients);
+    assert_eq!(back.sigma.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), tori.sigma.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+    assert!(matches!(ddg_points_as_tori::Tori::from_bytes(&b, Some(1)), Err(PatError::Format { .. })));
+    assert!(matches!(ddg_points_as_tori::Tori::from_bytes(&b[..b.len() - 1], None), Err(PatError::Format { .. })));
 }
