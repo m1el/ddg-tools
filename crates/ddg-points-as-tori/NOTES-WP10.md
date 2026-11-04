@@ -130,9 +130,34 @@ Batch 512 halves the launches of the network passes and is faster when host-boun
 leaves too little for the render agent's Blender processes (1–2.7 GB); the run uses 256 (8.2 GB) and can be
 restarted with `--network-batch 512` when the GPU is ours alone (TRAINING.md).
 
+**Host prefetch in phases 0–4** (measured 05:20, load ~105, one phase-0 shape, CPU only): queries + ground
+truth 0.83 s wall on 16 threads, 0.45 s on 60; plan 0.149 / 0.134 s per slice (only partly parallel). A shape is
+two steps ≈ 0.9 s of GPU work at 0.45 s/step, so the preparer needs ≈ 20–30 threads to stay ahead (pretraining
+needs almost none: one shape per 64 steps). **Headroom for the run:** other agents ≤ ~24 threads in total
+(machine load ≲ 32) gives the three dispatch threads idle SMT siblings and the preparer ~30 threads; sent to the
+orchestrator at 05:21.
+
 **Full curriculum** (497,858 steps): 0.6 s/step → **≈ 83 h** under the current load; ≈ 0.45 s/step → 62 h on a
 quiet host; the 30–35 h estimate of SPEC §18 assumed WP4's inference throughput for the backward too, but the
 backward is ~6× the forward in launches and time. The measured ETA of the run is in TRAINING.md.
+
+## 5b. The run's pretraining: a jump at step ~810
+
+In the live run (lr 1e-3, the reference's pretraining) the blob loss sat at 0.242 (distance 0.043, eikonal
+0.200) for 12 epochs and then jumped within ~10 steps (809–818) to 0.28 (distance 0.137, eikonal 0.145), where it
+stayed (epochs 13–16). WP7's CPU run had the same jump (distance up to 0.135 at its 4th epoch), so it is the
+recipe, not the GPU path. `train eval` (CPU, unit normals) puts it in context:
+
+| weights | blob distance / eikonal / sum | `ABC17_validation_3` distance / eikonal / sum |
+|---|---|---|
+| authors' final (`pat-reference`) | 0.0334 / 0.2322 / 0.2656 | 0.0195 / 0.2961 / 0.3156 |
+| authors' `FundamentalFormPredictor_pretrained.pkl` (converted, not committed) | 0.0965 / 0.1930 / 0.2895 | 0.0572 / 0.2905 / 0.3477 |
+| ours, step 1,088 (after the jump) | 0.1386 / 0.1409 / 0.2795 | 0.0895 / 0.2187 / 0.3082 |
+
+The authors' `_pretrained` weights show the same high-distance/low-eikonal profile, which suggests (it does not
+prove) that their pretraining ended in a similar state and phase 0 (lr 1e-5) moves away from it. Not
+intervened; the phase-0 validation curve will tell. If phase 0 does not recover the distance term, a rerun of
+pretraining at a lower lr (a deviation from the recipe) is the proposal.
 
 ## 6. SPEC proposals (nothing applied to SPEC.md)
 

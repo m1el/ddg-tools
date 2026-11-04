@@ -7,6 +7,7 @@
 //! bench    step timing, memory and run-to-run determinism on one shape (GPU and/or CPU)
 //! compare  the same short run on the CPU and the GPU (same data, seed, init): loss curves
 //! export   the weights of a checkpoint directory (or a phase file) as a safetensors file
+//! eval     the validation loss of weights (--from FILE|DIR|reference) on --file
 //!
 //! options (defaults in brackets):
 //!   --data DIR            training data [/var/data/discrete-geometry/PointsAsTori/PAT_training_data/PAT_training_data]
@@ -490,6 +491,28 @@ fn compare(a: &Args) -> Result<(), PatError> {
     Ok(())
 }
 
+/// The validation loss (unit normals unless --raw-normals) of a weights file (or `reference`) on
+/// --file, batches of --steps rows (default: 32 for the pretraining blob, 1024 otherwise).
+fn eval(a: &Args) -> Result<(), PatError> {
+    let from = a.from.clone().ok_or_else(|| bad("eval needs --from FILE|DIR|reference".into()))?;
+    let model = if from.as_os_str() == "reference" {
+        Model::reference()?
+    } else if from.is_dir() {
+        ddg_points_as_tori::train::run::checkpoint_model(&from)?
+    } else {
+        Model::from_safetensors(&std::fs::read(&from).map_err(|e| bad(format!("{}: {e}", from.display())))?)?
+    };
+    let ctx = ctx_for(&a.device)?;
+    let gpu = on_gpu(&ctx);
+    let pool = ddg_points_as_tori::pool::make_pool(host_threads(a, gpu))?;
+    let batch = if a.steps != 8 { a.steps } else if a.file.contains("pretraining") { 32 } else { 1024 };
+    let o = step_options(a, gpu);
+    let t = std::time::Instant::now();
+    let (d, e) = ddg_points_as_tori::train::run::validate_on(&NetParams::from_model(&model, &ctx), &ctx, &pool, &a.data.join(&a.file), &DataOptions { raw_normals: a.raw_normals, ..Default::default() }, &o, batch, a.seed, 0)?;
+    eprintln!("eval {} on {} (batch {batch}): distance {d:.6}, eikonal {e:.6}, loss {:.6} ({:.1} s)", from.display(), a.file, d + e, t.elapsed().as_secs_f64());
+    Ok(())
+}
+
 /// Export the weights of a checkpoint directory or a phase file.
 fn export(a: &Args) -> Result<(), PatError> {
     let from = a.from.clone().unwrap_or_else(|| a.out.clone());
@@ -527,6 +550,7 @@ fn main() {
         "bench" => bench(&a),
         "compare" => compare(&a),
         "export" => export(&a),
+        "eval" => eval(&a),
         c => Err(bad(format!("unknown command {c} (run | bench | compare | export)"))),
     });
     if let Err(e) = r {

@@ -16,11 +16,11 @@ crate's port of their training code (`src/train/`, MIT, Copyright (c) 2026 Nicol
 | data rules | normals normalized at load (D23), the network on valid rows with an attention pad mask (D19), all-padding slices skipped |
 | schedule | the code's (`Schedule::Code`: linear warmup, then constant; D21), Adam β 0.9/0.999, ε 1e-8 |
 | seed | 42 (data order, queries, initialization; D22) |
-| device | CUDA 0 (RTX 4080), TF32 matmuls (user decision 2026-11-04), network batch 256 neighborhoods |
+| device | CUDA 0 (RTX 4080), TF32 matmuls (user decision 2026-11-04), network batch 256 neighborhoods (taped passes), 1024 (untaped forward) |
 | checkpoints | every 2,000 steps (at the next shape boundary), at every epoch end and every phase end |
 | validation | `ABC17_validation_3.npz` with unit normals, at epoch ends once 1,000 steps passed since the last one, and at every phase end |
 | output | `/var/data/discrete-geometry/ddg-tools/runs_tmp/pat-train/` |
-| code | commit `7527474` (binary frozen as `runs_tmp/pat-train/bin/train-7527474`) |
+| code | commit `801b3c9` (binary frozen as `runs_tmp/pat-train/bin/train-801b3c9`); steps 1–576 ran with `7527474` (the same math without `--forward-batch`) |
 
 | phase | files | epochs | steps | lr | rows per step |
 |---|---|---|---|---|---|
@@ -33,8 +33,8 @@ crate's port of their training code (`src/train/`, MIT, Copyright (c) 2026 Nicol
 
 ### Exact command
 
-Started 2026-11-04 05:03 UTC (restarted 05:06 from its step-64 checkpoint after a two-minute A/B measurement),
-detached, at normal priority, through `runs_tmp/pat-train/run.sh`, which restarts the trainer after a failure
+Started 2026-11-04 05:03 UTC; stopped twice for short A/B measurements of the batch shapes and restarted from
+its checkpoints (05:06 from step 64; 05:16 from step 576 with the `--forward-batch 1024` binary); detached, at normal priority, through `runs_tmp/pat-train/run.sh`, which restarts the trainer after a failure
 (up to 30 times, 2 minutes apart; every start resumes from the last checkpoint):
 
 ```bash
@@ -44,13 +44,13 @@ cargo build --release -p ddg-points-as-tori --features train,cuda --example trai
 OUT=/var/data/discrete-geometry/ddg-tools/runs_tmp/pat-train
 mkdir -p $OUT/bin && cp target-pat10/release/examples/train $OUT/bin/train-$(git rev-parse --short HEAD)
 # run.sh loops over:
-#   $OUT/bin/train-7527474 run --out $OUT --device cuda:0 --seed 42 --sign reference --eigen robust \
-#       --schedule code --checkpoint-every 2000 --validate-every 1000 >> $OUT/train.log 2>&1
+#   $OUT/bin/train-801b3c9 run --out $OUT --device cuda:0 --seed 42 --sign reference --eigen robust \
+#       --schedule code --checkpoint-every 2000 --validate-every 1000 --forward-batch 1024 >> $OUT/train.log 2>&1
 cd $OUT && setsid nohup ./run.sh > /dev/null 2>&1 < /dev/null &
 setsid nohup timeout 5d nvidia-smi dmon -s um -d 10 -o T > $OUT/dmon.log 2>&1 < /dev/null &
 ```
 
-PIDs are in `runs_tmp/pat-train/PIDS` (wrapper 18921, trainer 18924, dmon 7298 at the time of writing).
+PIDs are in `runs_tmp/pat-train/PIDS` (wrapper 144488, trainer 144491, dmon 7298 at the time of writing).
 Before launching, the GPU was checked for other users (`nvidia-smi --query-compute-apps=pid,process_name,used_memory
 --format=csv`): the run was started only when no `blender` process of the render agent was on the GPU.
 
@@ -113,7 +113,7 @@ item 6: they stay there until they match or beat the authors' weights on §16.2)
 
 ```bash
 cd /var/data/discrete-geometry/ddg-tools
-./runs_tmp/pat-train/bin/train-7527474 export --from runs_tmp/pat-train/final.safetensors \
+./runs_tmp/pat-train/bin/train-801b3c9 export --from runs_tmp/pat-train/final.safetensors \
     --to data/points-as-tori/retrained-2026-11-seed42.safetensors
 # or a phase: --from runs_tmp/pat-train/phase-phase2.safetensors; or the latest checkpoint: --from runs_tmp/pat-train
 ```
