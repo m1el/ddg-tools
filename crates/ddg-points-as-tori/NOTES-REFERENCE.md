@@ -877,5 +877,7 @@ arrays differing.
 **Framework prototypes** (SPEC §8). The candle 0.10.2 CPU forward on 10k holey-bunny
 neighborhoods:
 - It reproduces the JAX coefficients to a max abs error of 2.2e-5.
-- First version, with `broadcast_matmul`, ran at 42 neighborhoods/s.
-- Further numbers are in SPEC §8.2.
+- First version, with `broadcast_matmul`, ran at 42 neighborhoods/s; with 2D GEMMs, 68/s.
+- burn 0.21 Flex: 95/s with its inner pool; 335/s with 32 single-threaded chunk workers. Max abs
+  diff vs JAX raw outputs is 2.2e-6, bitwise identical across runs and worker counts.
+- Details are in SPEC §5.3.
