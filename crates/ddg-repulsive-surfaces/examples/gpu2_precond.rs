@@ -31,8 +31,7 @@ fn main() {
     let (s, p) = (Surface::new(m.positions.len(), m.faces).unwrap(), m.positions);
     let pool = Arc::new(make_pool(Some(threads)).unwrap());
     let mut cons = vec![Constraint::Barycenter { component: None, target: None }];
-    if pins > 0 {
-        let step = s.n_vertices() / pins;
+    if let Some(step) = s.n_vertices().checked_div(pins) {
         cons.push(Constraint::Pins { vertices: (0..pins).map(|k| (k * step) as u32).collect(), targets: None });
     }
     let set = ConstraintSet::new(&s, &p, &cons, BarycenterMode::PerComponent).unwrap();

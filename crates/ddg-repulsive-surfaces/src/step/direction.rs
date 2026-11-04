@@ -228,9 +228,9 @@ impl SaddleSolver for SparseSaddle {
 
 /// The solver of one step.
 pub(crate) enum StepSolver {
-    Dense(DenseSaddle),
+    Dense(Box<DenseSaddle>),
     Hierarchical(Box<RobustHierarchical>),
-    Sparse(SparseSaddle),
+    Sparse(Box<SparseSaddle>),
 }
 
 /// The largest vertex count for which a failed GMRES solve falls back to a dense LU
@@ -381,16 +381,16 @@ impl SaddleSolver for RobustHierarchical {
 impl StepSolver {
     pub fn as_dyn(&mut self) -> &mut dyn SaddleSolver {
         match self {
-            StepSolver::Dense(s) => s,
+            StepSolver::Dense(s) => s.as_mut(),
             StepSolver::Hierarchical(s) => s.as_mut(),
-            StepSolver::Sparse(s) => s,
+            StepSolver::Sparse(s) => s.as_mut(),
         }
     }
 
     /// The sparse comparison-metric solver (comparison optimizers, WP9).
     pub fn as_sparse(&mut self) -> Option<&mut SparseSaddle> {
         match self {
-            StepSolver::Sparse(s) => Some(s),
+            StepSolver::Sparse(s) => Some(s.as_mut()),
             _ => None,
         }
     }
@@ -441,7 +441,7 @@ impl StepSolver {
             Metric::Sobolev { .. } => match backend.resolve(surface.n_faces()) {
                 None => {
                     let a = dense_metric_with_extras(pool, surface, positions, exponents, weights, extras)?;
-                    Ok(StepSolver::Dense(DenseSaddle::new(pool, &a, c_q)?))
+                    Ok(StepSolver::Dense(Box::new(DenseSaddle::new(pool, &a, c_q)?)))
                 }
                 Some(o) => {
                     let donor = match (face_tree, bh_leaf_size) {
@@ -478,7 +478,7 @@ impl StepSolver {
                     })))
                 }
             },
-            _ => Ok(StepSolver::Sparse(SparseSaddle::new(surface, positions, metric, c_q)?)),
+            _ => Ok(StepSolver::Sparse(Box::new(SparseSaddle::new(surface, positions, metric, c_q)?))),
         }
     }
 }

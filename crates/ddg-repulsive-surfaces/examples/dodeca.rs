@@ -359,14 +359,14 @@ fn cmd_flow(path: &str, a: &FlowArgs, args: &[String]) {
         writeln!(csv, "{}", csv_line(&r)).unwrap();
         hist.push(r.energy_after);
         let it = sess.iteration();
-        if it % 25 == 0 {
+        if it.is_multiple_of(25) {
             csv.flush().unwrap();
             println!("PROGRESS step={it} faces={} energy={:.6e} t={:.0}s", sess.surface().n_faces(), r.energy_after, t0.elapsed().as_secs_f64());
         }
-        if it % 100 == 0 {
+        if it.is_multiple_of(100) {
             println!("SYM step={it} energy={:.6e} {}", r.energy_after, sym_line(sess.surface().faces(), sess.positions()));
         }
-        if a.frame_every > 0 && it % a.frame_every == 0 {
+        if a.frame_every > 0 && it.is_multiple_of(a.frame_every) {
             write_obj(format!("{}/frame_{it:05}.obj", a.out), sess.surface(), sess.positions()).unwrap();
         }
         if sess.status().is_terminal() {

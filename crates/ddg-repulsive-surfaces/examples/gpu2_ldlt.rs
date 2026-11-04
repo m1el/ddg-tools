@@ -40,8 +40,7 @@ fn main() {
     };
     let pool = Arc::new(make_pool(Some(4)).unwrap());
     let mut cons = vec![Constraint::Barycenter { component: None, target: None }];
-    if pins > 0 {
-        let step = s.n_vertices() / pins;
+    if let Some(step) = s.n_vertices().checked_div(pins) {
         cons.push(Constraint::Pins {
             vertices: (0..pins).map(|k| (k * step) as u32).collect(),
             targets: None,
