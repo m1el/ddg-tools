@@ -53,8 +53,8 @@ private def floats (ctx : String) (l : Array String) (from_ cnt : Nat) : Except 
 private def v3Of (a : Array Float) (i : Nat) : V3 := ⟨a[i]!, a[i + 1]!, a[i + 2]!⟩
 
 /-- Largest cloud / query set accepted. -/
-def maxPoints : Nat := 400
-def maxQueries : Nat := 5000
+def maxPoints : Nat := 20000
+def maxQueries : Nat := 20000
 
 /-- Parse the body lines of a case. -/
 def parseBody (name : String) (lines : Array (Array String)) : Except String PatCase := do

@@ -1951,3 +1951,108 @@ vertex of degree 2 (`invalid`), a self-face (`noroot`); 6 Newton steps (one with
 2 weight cases (one flat); 11 removals (interior, boundary, memoryless, an already flat hexagon
 with equal weights, an ear with cost `+∞`). One random interior star of degree 3
 (`iem-flatten-interior-6`) is `invalid`: its root degenerates a face.
+
+## Points as Tori (ninth paper): `ddg-oracle pat`
+
+> Nicole Feng, Keenan Crane. *Points as Tori* (point-cloud signed distance by blending fitted tori).
+> Contract: `crates/ddg-points-as-tori/SPEC.md` §4.1, §4.2, §7, §9, §15.3.
+
+An independent Float implementation, from the SPEC and `NOTES-REFERENCE.md` §6-§7, of everything
+in the pipeline except the network: the features of a neighborhood (frame rule, median scale,
+output scaling), torus fitting from the six coefficients with the JAX clamps (D9), the per-torus SDF
+with gradient and Laplacian, the blend (Eq. 25-26) with all neighborhoods and λ rules, its frozen
+and exact gradients and its Laplacian, and the SHC and SSPD baselines with gradients. Plain `Float`;
+no code is shared with the Rust crate. Code: `DdgOracle/PointsAsTori/` (`Basic`, `Eval`, `Format`,
+`Gen`, `Selftest`, `Fixtures`); notes in `crates/ddg-points-as-tori/NOTES-WP3.md`.
+
+| command | |
+|---|---|
+| `ddg-oracle pat [IN [OUT]]` | answer every case of the stream (tasks `features`, `fit`, `sdf`, `blend`, `baselines`) |
+| `ddg-oracle pat-selftest [N]` | central differences of `∇g`, `Δg`, the blends (constant λ: frozen = exact gradient = differences; PerQuery: exact gradient), `Δφ`, SHC/SSPD gradients; Rayleigh quotients against Eq. 19; torus contact (`g(o) = 0`, tube normal `±n*`); translation / scale invariance of the features; convexity; round trips; on `N` seeded cases (default 60) |
+| `ddg-oracle pat-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/pat`, 35 cases, about 1 MB, `MANIFEST.tsv`) |
+
+### Input
+
+Common conventions as for the other papers: `case NAME` ... `end`, tags and 16-digit hex floats
+(IEEE-754 bits), 0-based integers. Unknown tags are errors. At most 20000 points and 20000 queries.
+
+```
+task features|fit|sdf|blend|baselines
+cloud N                        optional count check
+p X Y Z NX NY NZ [AREA]        N lines: position, unit normal (|n| - 1 <= 1e-6, else NonUnitNormal), point area (default 1)
+-- features
+center I                       the center point
+nbhd K                         neighborhood [I] ++ (K-1 nearest j != I by (|p_j - p_I|^2, j)); fewer if N < K
+nbr J0 J1 ...                  or an explicit neighborhood (J0 must be I)
+y Y0 ... Y5                    optional network output; the coefficients a = (s y0, y1, y2, y3/s, y4/s, y5/s) are printed
+-- fit (and blend without torus lines)
+fitopts EPS FLOOR              optional, default 1e-10 1e-10 (disc / eigenvector / denominator clamp, |kappa| floor)
+coef I A00 A01 A10 A11 A02 A20 coefficients at point I (blend: exactly N lines, I = 0..N-1 in order)
+-- sdf and blend
+torus CX CY CZ UX UY UZ R R_MINOR   centre, unit axis, major radius, signed minor radius (sign = sign(T))
+-- blend and baselines
+neighborhood knn K | all | radius R FALLBACK | radius auto FALLBACK     default knn 32
+lambda perquery C | constant L | paper C FACTOR KMEAN                   default perquery 64
+areas 0|1                      multiply the weights by the point areas (default 0)
+iso V                          subtracted from phi (blend only, default 0)
+x X Y Z                        queries
+```
+
+Blend takes either N `torus` lines (the torus of point `i` is line `i`) or N `coef` lines (fitted
+with the default options). SDF applies every torus to every query.
+
+### Rules (all of them)
+
+* **Order and ties.** Distances are `ρ² = ‖x − p‖²` summed left to right; sets are sorted by `(ρ², index)`;
+  every sum runs over the set in that order. `ρ = sqrt(ρ²)`.
+* **Neighbor set** of a query. `knn K`: first `min(K, N)`. `all`: all points. `radius R FB`: the points with
+  `ρ <= R`, or the first `FB` if there are none. `radius auto FB`: `R = 2C/λ` of the paper rule.
+* **Shift and λ.** `σ_x = ½ max ρ`. `perquery C`: `λ = C/σ_x` (error `DegenerateQuery` if `σ_x = 0`).
+  `constant L`: `λ = L`. `paper C F KM`: `λ = F/D` with `D` = mean over all points of the mean of the `min(KM, N)`
+  smallest distances to the cloud (self included, distance 0). The weights are `w_i = exp(−λ(ρ_i − s)) [· A_i]`
+  with the shift `s = σ_x` for `perquery` and **`s = min ρ`** (the nearest member, weight exactly 1) for `constant` and
+  `paper`: with λ = 10³/D and a 32-NN fallback, `exp(λσ)` overflows (SPEC issue 1). The shift cancels
+  mathematically, so `φ` and the gradients do not depend on it; the SHC formula uses the same `s`.
+* **Fit** (`NOTES-REFERENCE.md` §6.1 with the JAX clamps): `disc = sqrt(max(arg, EPS))`; `ev₊x = v1 + disc` and
+  `ev₋y = v2` are replaced by `sgn⁺(·) max(|·|, EPS)` (`sgn⁺(0) = +1`); denominators likewise; `|κ|` floored at FLOOR before
+  inverting; `sgn(κ₊κ₋)` in `R` is 0 at 0; the torus sign is Eq. 22; the axis is `(n* × v_min)/max(‖·‖, EPS)`.
+  The frame is the rule of §4.1 applied to the unit normal.
+* **Torus SDF.** `g = sgn⁺(r)(‖d‖ − |r|)`, `d = (v − R, z)`, `v = ‖(x−c) × u‖`, `z = (x−c)·u`. Kind 2 (`‖d‖ = 0`,
+  tested first): gradient 0, Laplacian 0. Kind 1 (`v = 0`): `∇g = sgn⁺(r)(z/‖d‖)u`, Laplacian 0. Kind 0: `∇g = sgn⁺(r)(w₁(x−c−zu)/v + w₂u)`,
+  `Δg = sgn⁺(r)(1/‖d‖ + d₁/(‖d‖v))`. Exact float comparisons.
+* **Blend.** `φ0 = Σwg/Σw`, output `φ = φ0 − iso`. Frozen gradient `A + φ0 B`; exact gradient adds `(∂λ/∂x)·Σw(σ−ρ)(g−φ0)/W` with
+  `∂λ/∂x = −(C/σ²)·½ r̂_last` (`r̂_last` of the last member of the sorted set), only for `perquery`; otherwise it equals the frozen
+  one. `r̂ = 0` at `ρ = 0`. Laplacian with λ, σ frozen: `Δφ = (ΔN − φ0 ΔW)/W + 2 B·∇φ_frozen`,
+  `ΔN = Σ w[(λ² − 2λ/ρ) g − 2λ r̂·∇g + Δg]`, `ΔW = Σ w(λ² − 2λ/ρ)`, with the `2λ/ρ` term dropped at `ρ = 0`.
+* **Baselines.** SHC: terms with `ρ = 0` are left out and counted; `φ = sgn(w)(−log|w|/λ + s)`; the gradient is `−∇w/(λ|w|)`
+  with `∇w = Σ A e/(2π)[(λρ+1)ρ⁻³ n − ⟨d,n⟩(λ²ρ²+3λρ+3)ρ⁻⁵ d]` (λ and the shift frozen). `w = 0` is the error `DegenerateQuery`.
+  SSPD: `Σ A⟨d,n⟩e / Σ A e`, gradient `(∇N − φ∇W)/W`, `r̂ = 0` at `ρ = 0`. Areas come from the `p` lines.
+
+### Output
+
+`case NAME`, `task T`, then `status ok` and the body, or `status error KIND MESSAGE`
+(`KIND`: `Syntax`, `TooLarge`, `NonUnitNormal`, `NonFinite`, `IndexOutOfRange`, `DegenerateNeighborhood`, `DegenerateQuery`,
+`NonFiniteTorus`, `NonUnitAxis`, `ZeroMinorRadius`, `ValueCount`, `InvalidOptions`, `Unsupported`), then `end`.
+Floats are hex; `F` = float, `N` = integer.
+
+* `features`: `center I K`; `sigma F`; `frame` 9F (`ŝ t̂ c`); `nbr J0 ... J(K-1)`; `f M` 6F per token (`pat-features`, f64, difference first);
+  with `y`: `coef` 6F.
+* `fit`: `fitopts EPS FLOOR`; `tori M`; per coefficient line, in order: `t I` 10F (`c` 3, `u` 3, `R`, signed `r`, `sign`);
+  `d I` 9F (`A, H, K, κ₊, κ₋` of Eq. 19 `H ± √(max(H²−K,0))`, then the Rayleigh values `κ₊, κ₋` of the eigenvector pair, `κmin, κmax`);
+  `dir I` 9F (unit `v_min`, unit `v_max`, `n*`); `flags I` 5N = `disc eig denom curv umbilic` (1 if clamped; `disc`: `arg < EPS`; `eig`: `ev₊x` or `ev₋y`;
+  `denom`: either Rayleigh denominator; `curv`: `|κmin|` or `|κmax|` below FLOOR; `umbilic` = `disc`). Rust `clamped_eigvec` = `eig` (+ `denom`, one's choice, see the notes).
+* `sdf`: `tori T queries Q`; for each query `q` and each torus `t`: `g q t` 6F (`g, ∇g, Δg`) then 1N kind (0 regular, 1 axis, 2 core).
+* `blend`: `cloud N queries Q`; `paper` 3F (`D, λ, R_eval` of the paper rule, 0 if unused); per query `b q` 11F (`φ, ∇φ frozen (3), ∇φ exact (3), Δφ, σ_x, λ, shift`)
+  then 3N (`|set|`, number of set members whose torus is singular (kind ≠ 0), number of members with `ρ = 0`); `nb q J...` the set in sorted order.
+* `baselines`: as `blend` with `s q` 13F (`SHC, ∇SHC (3), SSPD, ∇SSPD (3), σ_x, λ, shift`) then 2N (`|set|`, skipped SHC terms).
+
+### Fixtures and Rust side
+
+`fixtures/pat/NAME.in|out` (+ `MANIFEST.tsv`: name, task, status, description). Float tokens are compared to `1e-12` relative (against
+`max(|x|, 1)`); integer tokens and tags exactly. `pat-fixtures check DIR` regenerates the inputs (byte for byte) and compares the outputs to `1e-9`.
+The Rust replay (`crates/ddg-points-as-tori/tests/oracle.rs`, WP15) parses the `.in`, builds the same objects, calls the library and compares to `.out`;
+the operation orders above are the ones to follow. Cases: features (even / odd / 64 tokens / duplicates / fewer than k / errors), fit (tangent sphere,
+concave sphere, saddle, ellipsoid-like, cylinder, planar and near-planar with all clamps, custom options, 48 random), sdf (z-axis torus with core and axis queries,
+negative sign, spindle and sphere, random), blend (unit sphere with tangent-sphere coefficients under every neighborhood / λ rule / area weights / isovalue,
+random ellipsoid cloud, singular sets, coincident points), baselines (SHC / SSPD under three rules), and error cases.
+The oracle was also compared against the authors' program (`runs_tmp/pat-ref`, 12 clouds): see the notes.
