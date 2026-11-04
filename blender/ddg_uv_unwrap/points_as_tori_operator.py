@@ -22,8 +22,9 @@ modes:
 
 The tori are cached per cloud (hash of positions and normals; memory and a sidecar next to the
 .blend). The modal ``invoke`` runs the work on a worker thread while a timer shows progress; Esc or
-the panel's Cancel button abandons it (the native call in flight runs to its end in the background
-and its result is dropped). ``execute`` (redo, scripts, headless Blender) runs the same job in the
+the panel's Cancel button stops it: the tori build and the marching-cubes evaluations check the
+native ``PatProgress`` cancel flag between chunks (orientation and the other native calls run to
+their end in the background and their result is dropped). ``execute`` (redo, scripts, headless Blender) runs the same job in the
 calling thread. Conventions as for the Repulsive Surfaces operators: scene settings in
 ``scene.ddg_points_as_tori`` copied into the operator on invoke, sidebar panel in the DDG tab,
 device box greyed out without CUDA, a status line.
@@ -182,7 +183,21 @@ def build_kwargs(opts):
     return kwargs
 
 
-def get_field(cloud, opts, directory):
+class CancelEvent(threading.Event):
+    """A ``threading.Event`` that also cancels the native call in flight (``ddg_tools.PatProgress``),
+    so Esc stops a build at its next chunk instead of letting it finish in the background."""
+
+    def __init__(self):
+        super().__init__()
+        self.native = None
+
+    def set(self):
+        super().set()
+        if self.native is not None:
+            self.native.cancel()
+
+
+def get_field(cloud, opts, directory, native_progress=None):
     """``(field, info)``: the blended field of ``cloud`` (from the cache or built) and a dict:
     ``cache`` ('memory', 'sidecar' or 'miss'), ``seconds``, ``device`` (where the tori were
     predicted: 'cpu' or 'cuda'), ``warnings``."""
@@ -207,8 +222,12 @@ def get_field(cloud, opts, directory):
             field = None
     if field is None:
         try:
-            field = ddg.PointsAsTori(cloud.positions, cloud.normals, **kwargs)
+            field = ddg.PointsAsTori(cloud.positions, cloud.normals, progress=native_progress, **kwargs)
+            if native_progress is not None:
+                field = field.with_options(progress=None)  # the cache must not keep this job's handle
         except ValueError as ex:
+            if native_progress is not None and native_progress.cancelled:
+                raise Cancelled() from ex
             raise PatError("{}: {}".format(cloud.name, ex)) from ex
         report = field.build_report or {}
         device = report.get("predict_device")
@@ -223,6 +242,8 @@ def get_field(cloud, opts, directory):
     # A cached field may have been made with another evaluation rule, device or thread count.
     eval_options = {"device": kwargs["device"], "cuda_ordinal": kwargs["cuda_ordinal"],
                     "paper": opts["evaluation"] == 'PAPER'}
+    if native_progress is not None:
+        eval_options["progress"] = native_progress
     if opts["threads"] > 0:
         eval_options["threads"] = opts["threads"]
     try:
@@ -273,7 +294,15 @@ class Job:
         self.opts = opts
         self.mode = opts["mode"]
         self.directory = directory
-        self.cancel = threading.Event()
+        self.cancel = CancelEvent()
+        self.native_progress = None
+        try:
+            make = getattr(core.native(), "PatProgress", None)  # wheels before WP15 have none
+        except Exception:  # a broken installation is reported by the job itself
+            make = None
+        if make is not None:
+            self.native_progress = make()
+            self.cancel.native = self.native_progress
         self.progress = 0.0
         self.stage = "starting"
         self.stages = []  # one dict per finished stage
@@ -290,7 +319,7 @@ class Job:
         cloud = self.clouds[index]
         self.stage = "{}: tori of '{}' ({:,} points)".format(label, cloud.name, cloud.n)
         self._check()
-        field, info = get_field(cloud, self.opts, self.directory)
+        field, info = get_field(cloud, self.opts, self.directory, self.native_progress)
         info.update(stage="build", cloud=cloud.name, n=cloud.n)
         self.stages.append(info)
         self.progress = fraction
@@ -303,7 +332,8 @@ class Job:
         except Cancelled:
             self.error = Cancelled()
         except Exception as ex:  # reported by the main thread
-            self.error = ex
+            # a cancelled native call raises its own error: it is the user's Esc, not a failure
+            self.error = Cancelled() if self.cancel.is_set() else ex
         finally:
             self.done = True
 
@@ -345,7 +375,7 @@ class Job:
         label = {'SURFACE': "Surface", 'OFFSET': "Offset"}.get(mode)
         if mode == 'BOOLEAN':
             other = self._field(1, "2/3", 1.0 / 3.0)
-            smooth = o["boolean_smooth"] if o["boolean_smooth"] > 0.0 else None
+            smooth = o["boolean_smooth"]  # 0 is the hard min / max in the library
             try:
                 field = getattr(field, OP_ARGUMENT[o["boolean_op"]])(other, smooth=smooth)
             except ValueError as ex:
@@ -651,8 +681,8 @@ class OBJECT_OT_ddg_points_as_tori(bpy.types.Operator):
             job.cancel.set()
             self._cleanup(context)
             LAST.update(text="cancelled", error=False)
-            self.report({'INFO'}, "Points as Tori cancelled (a native call in flight finishes in "
-                                  "the background; its result is dropped)")
+            self.report({'INFO'}, "Points as Tori cancelled (a native call without a cancel hook "
+                                  "finishes in the background; its result is dropped)")
             return {'CANCELLED'}
         if event.type == 'TIMER':
             if job.done:

@@ -458,6 +458,8 @@ impl Pat {
         let mut eval = cur.clone();
         eval.device = spec.opts.eval.device;
         eval.threads = spec.opts.eval.threads;
+        // the progress handle is never inherited: `progress=None` (the default) detaches it
+        eval.progress = spec.opts.eval.progress.clone();
         if matches!(spec.areas, AreaSpec::None) {
             spec.areas = match &cur.area_weights {
                 Some(a) => AreaSpec::Given(a.clone()),

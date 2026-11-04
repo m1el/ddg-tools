@@ -916,9 +916,10 @@ panel states the device the setting resolves to. *Advanced*: sign rule (Referenc
 trained; Geometric differs only at saddle points), evaluation rule (Per Query, the library's
 default; Paper: the paper's Sec. 4.2 constant lambda over a radius neighborhood), threads.
 
-**Cancel.** The native calls cannot be interrupted: Esc / Cancel returns at once and drops the
-result; a build or marching-cubes call already running finishes in the background (and still fills
-the cache).
+**Cancel.** Esc / Cancel returns at once. The tori build and the marching-cubes / Boolean
+evaluations check the native cancel flag (`ddg_tools.PatProgress`) between chunks and stop with
+nothing cached; Orient Normals and any other native call without the hook run to their end in the
+background and their result is dropped.
 
 Tests: `tests/test_points_as_tori.py` (headless: every mode, transforms, Boolean of two spheres,
 orientation of a cloud with 30 % flipped normals, memory and sidecar cache hits and invalidation,

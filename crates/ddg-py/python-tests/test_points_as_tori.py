@@ -310,6 +310,10 @@ class CrateItems(unittest.TestCase):
         self.assertIn("cancelled", str(cm.exception))
         with self.assertRaises(pat.PointsAsToriError):
             ddg_tools.PointsAsTori(*SPHERE, progress=p)
+        # with_options detaches the handle unless given again
+        self.assertEqual(f.with_options().signed_distance(Q).tobytes(), FIELD.signed_distance(Q).tobytes())
+        with self.assertRaises(pat.PointsAsToriError):
+            f.with_options(progress=p).signed_distance(Q)
         p.reset()
         self.assertEqual(f.signed_distance(Q).tobytes(), FIELD.signed_distance(Q).tobytes())
         with self.assertRaises(pat.PointsAsToriError):

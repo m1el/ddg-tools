@@ -2179,7 +2179,8 @@ class PointsAsTori:
     @property
     def options(self) -> dict[str, object]: ...
     def with_options(self, **options: object) -> PointsAsTori:
-        """The same tori with other evaluation options."""
+        """The same tori with other evaluation options. ``progress=`` attaches a ``PatProgress`` to the
+        new object's evaluations; it is never inherited (the default None detaches it)."""
     def reconstruct(
         self,
         level: float | None = None,

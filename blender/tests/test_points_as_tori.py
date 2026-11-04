@@ -582,6 +582,29 @@ def cancelled_job_reports_cancelled():
     assert job.done and isinstance(job.error, o.Cancelled)
 
 
+@test
+def cancel_stops_the_native_build_and_caches_nothing():
+    import time
+    cloud(n=20000)
+    o = op()
+    opts = o.snapshot_options(settings())
+    opts.update(device='CPU', resolution=24, use_cache=True)
+    clouds, directory = o.prepare(bpy.context, opts)
+    job = o.Job(clouds, opts, directory)
+    if job.native_progress is None:
+        return  # a wheel from before the cancel hook
+    thread = threading.Thread(target=job.run)
+    thread.start()
+    deadline = time.time() + 60
+    while job.native_progress.stage != "network" and time.time() < deadline and not job.done:
+        time.sleep(0.005)
+    job.cancel.set()
+    thread.join(120)
+    assert job.done and isinstance(job.error, o.Cancelled), job.error
+    assert job.native_progress.cancelled
+    assert io().memory_get((clouds[0].digest, "reference")) is None, "a cancelled build was cached"
+
+
 # The last test: it saves the .blend, so the later tests would see a file path.
 
 
