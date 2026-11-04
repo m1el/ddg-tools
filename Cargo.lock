@@ -487,6 +487,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddg-points-as-tori"
+version = "0.1.0"
+
+[[package]]
 name = "ddg-py"
 version = "0.1.0"
 dependencies = [

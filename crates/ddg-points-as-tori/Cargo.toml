@@ -1,0 +1,12 @@
+[package]
+name = "ddg-points-as-tori"
+description = "Points as Tori (Feng, Gkioulekas, Crane 2026): pointwise signed distance for oriented point clouds by blending per-point tori fitted by a small transformer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Dependencies are set by WP1 (SPEC.md §17). The ported reference code and the converted pretrained
+# weights keep their notice in `LICENSES/points-as-tori-MIT.txt`.
+[dependencies]
