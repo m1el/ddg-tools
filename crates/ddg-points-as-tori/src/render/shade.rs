@@ -29,7 +29,11 @@ pub(crate) fn scale(a: V3, s: f64) -> V3 {
     [a[0] * s, a[1] * s, a[2] * s]
 }
 pub(crate) fn cross(a: V3, b: V3) -> V3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 pub(crate) fn length(a: V3) -> f64 {
     dot(a, a).sqrt()
@@ -43,11 +47,19 @@ fn mix1(x: f64, y: f64, a: f64) -> f64 {
     x * (1.0 - a) + y * a
 }
 fn mix3(x: V3, y: V3, a: f64) -> V3 {
-    [mix1(x[0], y[0], a), mix1(x[1], y[1], a), mix1(x[2], y[2], a)]
+    [
+        mix1(x[0], y[0], a),
+        mix1(x[1], y[1], a),
+        mix1(x[2], y[2], a),
+    ]
 }
 fn pow3(x: V3, p: f64) -> V3 {
     // GLSL pow(x, y) is undefined for x < 0; clamp at 0
-    [x[0].max(0.0).powf(p), x[1].max(0.0).powf(p), x[2].max(0.0).powf(p)]
+    [
+        x[0].max(0.0).powf(p),
+        x[1].max(0.0).powf(p),
+        x[2].max(0.0).powf(p),
+    ]
 }
 fn reflect(i: V3, n: V3) -> V3 {
     sub(i, scale(n, 2.0 * dot(n, i)))
@@ -71,7 +83,7 @@ fn ggx(n: V3, v: V3, l: V3, roughness: f64, f0: f64) -> f64 {
     let dot_nh = clamp01(dot(n, h));
     let dot_lh = clamp01(dot(l, h));
     let alpha_sqr = alpha * alpha;
-    let pi = 3.1415926535;
+    let pi = std::f64::consts::PI;
     let denom = dot_nh * dot_nh * (alpha_sqr - 1.0) + 1.0;
     let d = alpha_sqr / (pi * denom * denom);
     let dot_lh5 = (1.0 - dot_lh).powf(5.0);
@@ -94,7 +106,9 @@ fn normal_shade(env: &CubeMap, ray: V3, normal: V3, spec_pos: V3, material: V3) 
     let ibl_diffuse = pow3(env.blurred(normal), 2.2);
     let ibl_reflection = pow3(env.blurred(r), 2.2);
 
-    let fresnel = (1.0 - dot(normal, scale(ray, -1.0))).max(0.0).powf(fresnel_pow);
+    let fresnel = (1.0 - dot(normal, scale(ray, -1.0)))
+        .max(0.0)
+        .powf(fresnel_pow);
 
     let mut refl = pow3(env.texture(r), 2.2);
     refl = mix3(refl, ibl_reflection, (1.0 - fresnel) * roughness);
@@ -105,23 +119,38 @@ fn normal_shade(env: &CubeMap, ray: V3, normal: V3, spec_pos: V3, material: V3) 
     let spec = scale(light_color, g);
     refl = sub(refl, spec);
 
-    let diff0 = [ibl_diffuse[0] * material[0].max(0.0).powf(2.2), ibl_diffuse[1] * material[1].max(0.0).powf(2.2), ibl_diffuse[2] * material[2].max(0.0).powf(2.2)];
+    let diff0 = [
+        ibl_diffuse[0] * material[0].max(0.0).powf(2.2),
+        ibl_diffuse[1] * material[1].max(0.0).powf(2.2),
+        ibl_diffuse[2] * material[2].max(0.0).powf(2.2),
+    ];
     let diff = mix3(diff0, refl, fresnel);
     let m = mix3(diff, refl, metallic);
-    let color = [(m[0] + spec[0]).min(1.0), (m[1] + spec[1]).min(1.0), (m[2] + spec[2]).min(1.0)];
+    let color = [
+        (m[0] + spec[0]).min(1.0),
+        (m[1] + spec[1]).min(1.0),
+        (m[2] + spec[2]).min(1.0),
+    ];
     pow3(color, 1.0 / 2.2)
 }
 
 /// `shade` followed by the `sqrt` the demo applies to surface colours. `normal` must face the
 /// viewer.
-pub(crate) fn shade_surface(env: &CubeMap, lights: &Lights, pos: V3, ray: V3, normal: V3, material: V3) -> V3 {
+pub(crate) fn shade_surface(
+    env: &CubeMap,
+    lights: &Lights,
+    pos: V3,
+    ray: V3,
+    normal: V3,
+    material: V3,
+) -> V3 {
     let ndl = dot(normalize(sub(lights.position, pos)), normal).max(0.3);
     let diffuse = scale(material, ndl);
     let ns = normal_shade(env, ray, normal, lights.specular_dir, material);
     let fr = (1.0 - dot(ray, normal).abs()).powf(80.0);
     let mut c = [0.0; 3];
     for a in 0..3 {
-        c[a] = (diffuse[a] + 0.3 * ns[a] + 0.6 * fr).min(1.0).max(0.0).sqrt();
+        c[a] = (diffuse[a] + 0.3 * ns[a] + 0.6 * fr).clamp(0.0, 1.0).sqrt();
     }
     c
 }
@@ -138,7 +167,11 @@ pub(crate) fn colormap_sdf(t: f64) -> V3 {
     if (0.0..0.5).contains(&t) {
         let blue = [0.0627451, 0.517647, 0.94902];
         let tp = (2.0 * t).powf(7.0);
-        [(1.0 - tp) * white[0] + tp * blue[0], (1.0 - tp) * white[1] + tp * blue[1], (1.0 - tp) * white[2] + tp * blue[2]]
+        [
+            (1.0 - tp) * white[0] + tp * blue[0],
+            (1.0 - tp) * white[1] + tp * blue[1],
+            (1.0 - tp) * white[2] + tp * blue[2],
+        ]
     } else if (0.5..1.0).contains(&t) {
         let grapefruit = [0.992157, 0.431373, 0.337255];
         mix3(white, grapefruit, 2.0 * (t - 0.5))
@@ -186,12 +219,22 @@ mod tests {
     #[test]
     fn shading_is_finite_and_bounded() {
         let env = CubeMap::forest().unwrap();
-        let lights = Lights { position: [0.0, 10.0, 2.0], specular_dir: [-0.5, 1.0, 0.0] };
-        for n in [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], normalize([1.0, 1.0, -1.0])] {
+        let lights = Lights {
+            position: [0.0, 10.0, 2.0],
+            specular_dir: [-0.5, 1.0, 0.0],
+        };
+        for n in [
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            normalize([1.0, 1.0, -1.0]),
+        ] {
             let ray = normalize([0.3, -0.2, -1.0]);
             let n = if dot(n, ray) > 0.0 { scale(n, -1.0) } else { n };
             let c = shade_surface(&env, &lights, [0.0; 3], ray, n, [0.27, 0.29, 0.57]);
-            assert!(c.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x)), "{c:?}");
+            assert!(
+                c.iter().all(|x| x.is_finite() && (0.0..=1.0).contains(x)),
+                "{c:?}"
+            );
         }
     }
 }

@@ -2605,3 +2605,25 @@ formulas, one face (the face model) and the local statements of the section "Int
 are covered, and the tier C statements of the complex model (trace termination, Alg. 3's index,
 the flip with Eq. 3 and 4, the merge); the data structure, the walks of Alg. 2–4 as programs, the
 common subdivision, refinement and every floating-point decision are not.
+
+### [formula: pat-render-ggx] The GGX specular term of the demo shader
+
+- **Statement.** `D F V` with `D = α²/(π((n·h)²(α² − 1) + 1)²)` (GGX / Trowbridge–Reitz
+  normal distribution), `F = F0 + (1 − F0)(1 − l·h)⁵` (Schlick), and the Smith visibility with
+  Schlick's approximation `V = Π 1/((n·w)(1 − k) + k)`, `k = α/2`, `α = roughness²`.
+- **Reference.** B. Walter et al., *Microfacet Models for Refraction through Rough Surfaces*, EGSR
+  2007; C. Schlick, *An Inexpensive BRDF Model for Physically-based Rendering*, 1994; the shader
+  of the authors' demo (`demo/shaders_3d.py` of `points-as-tori`, MIT, from shadertoy `MlB3DV`).
+- **Source check.** The constants (metallic 0.07, roughness 0.1, `F0 = 0.2`, factors 0.3 and 0.6)
+  were read from the demo's `normalShade` and `shade`.
+- **Why not formalized.** A shading model chosen for appearance; it has no claim to prove.
+- **What depends on it.** `render::shade` only (the colour of the images of Fig. 12).
+
+### [formula: pat-render-fresnel] The rim and Fresnel weights of the demo shader
+
+- **Statement.** `(1 − |ω·n|)^80` (the rim term of `fresnelShade`) and `(1 − n·v)₊^p`,
+  `p = mix(5, 3.5, metallic)` (the reflection weight of `normalShade`).
+- **Reference.** The authors' demo shader (as above); the exponent form is Schlick's Fresnel.
+- **Source check.** Read from `fresnelShade` and `normalShade`.
+- **Why not formalized.** As `pat-render-ggx`.
+- **What depends on it.** `render::shade` only.

@@ -32,7 +32,9 @@ pub use cubemap::CubeMap;
 use crate::PatError;
 use crate::csg::ImplicitField;
 use rayon::prelude::*;
-use shade::{Lights, V3, add, cross, cutplane_color, dot, length, normalize, scale, shade_surface, sub};
+use shade::{
+    Lights, V3, add, cross, cutplane_color, dot, length, normalize, scale, shade_surface, sub,
+};
 
 /// The largest image side and pixel count accepted.
 pub const MAX_SIDE: usize = 16384;
@@ -66,8 +68,22 @@ pub struct Camera {
 
 impl Camera {
     /// `look_at(eye, target, up)` with a vertical field of view in degrees; validated.
-    pub fn look_at(eye: [f64; 3], target: [f64; 3], up: [f64; 3], fov_y_degrees: f64, width: usize, height: usize) -> Result<Camera, PatError> {
-        let c = Camera { eye, target, up, fov_y: fov_y_degrees.to_radians(), width, height };
+    pub fn look_at(
+        eye: [f64; 3],
+        target: [f64; 3],
+        up: [f64; 3],
+        fov_y_degrees: f64,
+        width: usize,
+        height: usize,
+    ) -> Result<Camera, PatError> {
+        let c = Camera {
+            eye,
+            target,
+            up,
+            fov_y: fov_y_degrees.to_radians(),
+            width,
+            height,
+        };
         c.validate()?;
         Ok(c)
     }
@@ -75,9 +91,25 @@ impl Camera {
     /// The demo's camera for a scene of the given centre and scale (`scale = 1` for the demo's
     /// `[-1, 1]³` normalization): eye at `(10 cos 5.4, 2.4, 10 sin 5.4)·scale`, looking at the
     /// centre, y up, focal length 4.5 (`fov_y = 2 atan(1/4.5)` = 25.1°).
-    pub fn demo(center: [f64; 3], scale: f64, width: usize, height: usize) -> Result<Camera, PatError> {
-        let eye = [center[0] + scale * 10.0 * 5.4f64.cos(), center[1] + scale * 2.4, center[2] + scale * 10.0 * 5.4f64.sin()];
-        let c = Camera { eye, target: center, up: [0.0, 1.0, 0.0], fov_y: 2.0 * (1.0f64 / 4.5).atan(), width, height };
+    pub fn demo(
+        center: [f64; 3],
+        scale: f64,
+        width: usize,
+        height: usize,
+    ) -> Result<Camera, PatError> {
+        let eye = [
+            center[0] + scale * 10.0 * 5.4f64.cos(),
+            center[1] + scale * 2.4,
+            center[2] + scale * 10.0 * 5.4f64.sin(),
+        ];
+        let c = Camera {
+            eye,
+            target: center,
+            up: [0.0, 1.0, 0.0],
+            fov_y: 2.0 * (1.0f64 / 4.5).atan(),
+            width,
+            height,
+        };
         c.validate()?;
         Ok(c)
     }
@@ -85,7 +117,16 @@ impl Camera {
     /// A camera orbiting `center` at `distance`: `azimuth` about the `up` axis (radians, from the
     /// `+x`/`+z` plane's x direction when `up` is y), `elevation` above the horizon.
     #[allow(clippy::too_many_arguments)]
-    pub fn orbit(center: [f64; 3], distance: f64, azimuth: f64, elevation: f64, up_axis: usize, fov_y_degrees: f64, width: usize, height: usize) -> Result<Camera, PatError> {
+    pub fn orbit(
+        center: [f64; 3],
+        distance: f64,
+        azimuth: f64,
+        elevation: f64,
+        up_axis: usize,
+        fov_y_degrees: f64,
+        width: usize,
+        height: usize,
+    ) -> Result<Camera, PatError> {
         if up_axis > 2 {
             return Err(bad(format!("up_axis = {up_axis} (0, 1 or 2)")));
         }
@@ -106,16 +147,29 @@ impl Camera {
             return Err(bad("camera eye, target and up must be finite"));
         }
         if !(self.fov_y.is_finite() && self.fov_y > 0.0 && self.fov_y < std::f64::consts::PI) {
-            return Err(bad(format!("camera fov_y = {} rad (must be in (0, pi))", self.fov_y)));
+            return Err(bad(format!(
+                "camera fov_y = {} rad (must be in (0, pi))",
+                self.fov_y
+            )));
         }
-        if self.width == 0 || self.height == 0 || self.width > MAX_SIDE || self.height > MAX_SIDE || self.width * self.height > MAX_PIXELS {
-            return Err(bad(format!("resolution {}x{} (each side 1..={MAX_SIDE}, at most {MAX_PIXELS} pixels)", self.width, self.height)));
+        if self.width == 0
+            || self.height == 0
+            || self.width > MAX_SIDE
+            || self.height > MAX_SIDE
+            || self.width * self.height > MAX_PIXELS
+        {
+            return Err(bad(format!(
+                "resolution {}x{} (each side 1..={MAX_SIDE}, at most {MAX_PIXELS} pixels)",
+                self.width, self.height
+            )));
         }
         let w = sub(self.target, self.eye);
         if length(w) <= 0.0 {
             return Err(bad("camera eye equals target"));
         }
-        if length(cross(normalize(w), self.up)) < 1e-9 * length(self.up).max(1e-300) || length(self.up) == 0.0 {
+        if length(cross(normalize(w), self.up)) < 1e-9 * length(self.up).max(1e-300)
+            || length(self.up) == 0.0
+        {
             return Err(bad("camera up is zero or parallel to the view direction"));
         }
         Ok(())
@@ -150,7 +204,11 @@ impl Epsilon {
         let v = match self {
             Epsilon::Relative(r) | Epsilon::Absolute(r) => r,
         };
-        if v.is_finite() && v > 0.0 { Ok(()) } else { Err(bad(format!("{what} = {self:?} (finite and > 0)"))) }
+        if v.is_finite() && v > 0.0 {
+            Ok(())
+        } else {
+            Err(bad(format!("{what} = {self:?} (finite and > 0)")))
+        }
     }
 }
 
@@ -178,7 +236,11 @@ pub struct Ground {
 
 impl Default for Ground {
     fn default() -> Self {
-        Ground { up: [0.0, 1.0, 0.0], gap: 1.0, shadow_value: 0.8 }
+        Ground {
+            up: [0.0, 1.0, 0.0],
+            gap: 1.0,
+            shadow_value: 0.8,
+        }
     }
 }
 
@@ -198,11 +260,22 @@ pub struct CutPlane {
     pub range: Option<f64>,
     /// Isoband frequency (`sin(−f φ)`); `None`: `60/s` (the demo's 60).
     pub isoband_frequency: Option<f64>,
+    /// Saturate `φ − ℓ` into the colour-map range (default). The demo's map is black outside
+    /// `[−range, range)`; `false` reproduces that.
+    pub clamp_colormap: bool,
 }
 
 impl Default for CutPlane {
     fn default() -> Self {
-        CutPlane { axis: 2, offset: 0.0, rotation_x: 0.0, rotation_y: 0.0, range: None, isoband_frequency: None }
+        CutPlane {
+            axis: 2,
+            offset: 0.0,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            range: None,
+            isoband_frequency: None,
+            clamp_colormap: true,
+        }
     }
 }
 
@@ -308,18 +381,26 @@ impl TraceOptions {
         if !(self.bounding_factor.is_finite() && self.bounding_factor > 0.0) {
             return Err(bad(format!("bounding_factor = {}", self.bounding_factor)));
         }
-        for (name, v) in [("base_color", self.base_color), ("background", self.background)] {
+        for (name, v) in [
+            ("base_color", self.base_color),
+            ("background", self.background),
+        ] {
             if !(finite3(v) && v.iter().all(|x| *x >= 0.0)) {
                 return Err(bad(format!("{name} = {v:?} (finite, >= 0)")));
             }
         }
         if !finite3(self.light) || !finite3(self.specular_dir) || length(self.specular_dir) == 0.0 {
-            return Err(bad("light must be finite and specular_dir finite and nonzero"));
+            return Err(bad(
+                "light must be finite and specular_dir finite and nonzero",
+            ));
         }
-        if let Some(g) = &self.ground {
-            if !finite3(g.up) || length(g.up) == 0.0 || !g.gap.is_finite() || !g.shadow_value.is_finite() {
-                return Err(bad(format!("ground {g:?}")));
-            }
+        if let Some(g) = &self.ground
+            && (!finite3(g.up)
+                || length(g.up) == 0.0
+                || !g.gap.is_finite()
+                || !g.shadow_value.is_finite())
+        {
+            return Err(bad(format!("ground {g:?}")));
         }
         if let Some(c) = &self.cut_plane {
             let ok = c.axis <= 2
@@ -359,15 +440,27 @@ impl Image {
         let mut out = Vec::new();
         {
             let mut enc = png::Encoder::new(&mut out, self.width as u32, self.height as u32);
-            enc.set_color(if with_alpha { png::ColorType::Rgba } else { png::ColorType::Rgb });
+            enc.set_color(if with_alpha {
+                png::ColorType::Rgba
+            } else {
+                png::ColorType::Rgb
+            });
             enc.set_depth(png::BitDepth::Eight);
-            let mut w = enc.write_header().map_err(|e| PatError::Format { reason: format!("png: {e}") })?;
+            let mut w = enc.write_header().map_err(|e| PatError::Format {
+                reason: format!("png: {e}"),
+            })?;
             let data: Vec<u8> = if with_alpha {
-                self.rgb.chunks_exact(3).zip(&self.alpha).flat_map(|(c, a)| [c[0], c[1], c[2], *a]).collect()
+                self.rgb
+                    .chunks_exact(3)
+                    .zip(&self.alpha)
+                    .flat_map(|(c, a)| [c[0], c[1], c[2], *a])
+                    .collect()
             } else {
                 self.rgb.clone()
             };
-            w.write_image_data(&data).map_err(|e| PatError::Format { reason: format!("png: {e}") })?;
+            w.write_image_data(&data).map_err(|e| PatError::Format {
+                reason: format!("png: {e}"),
+            })?;
         }
         Ok(out)
     }
@@ -375,7 +468,9 @@ impl Image {
     /// Write a PNG file.
     pub fn write_png(&self, path: &std::path::Path, with_alpha: bool) -> Result<(), PatError> {
         let bytes = self.to_png_bytes(with_alpha)?;
-        std::fs::write(path, bytes).map_err(|e| PatError::Format { reason: format!("{}: {e}", path.display()) })
+        std::fs::write(path, bytes).map_err(|e| PatError::Format {
+            reason: format!("{}: {e}", path.display()),
+        })
     }
 }
 
@@ -478,9 +573,18 @@ pub struct TraceParams {
 pub fn trace_ray(field: &dyn ImplicitField, job: &RayJob, p: &TraceParams) -> RayResult {
     let mut t = job.t0;
     let mut steps = 0u32;
-    let mut res = RayResult { status: status::MISS, steps: 0, t: 0.0, grad: [0.0; 3] };
+    let mut res = RayResult {
+        status: status::MISS,
+        steps: 0,
+        t: 0.0,
+        grad: [0.0; 3],
+    };
     while steps < p.max_steps && t < job.t1 {
-        let x = [job.ro[0] + t * job.rd[0], job.ro[1] + t * job.rd[1], job.ro[2] + t * job.rd[2]];
+        let x = [
+            job.ro[0] + t * job.rd[0],
+            job.ro[1] + t * job.rd[1],
+            job.ro[2] + t * job.rd[2],
+        ];
         steps += 1;
         let (phi, g) = match field.distance_gradient(x) {
             Ok(v) => v,
@@ -508,7 +612,11 @@ pub fn trace_ray(field: &dyn ImplicitField, job: &RayJob, p: &TraceParams) -> Ra
         let denom = if gl > p.g_min { gl } else { p.g_min };
         t += af / denom * p.safety;
     }
-    res.status = if t >= job.t1 { status::MISS } else { status::STEP_LIMIT };
+    res.status = if t >= job.t1 {
+        status::MISS
+    } else {
+        status::STEP_LIMIT
+    };
     res.steps = steps;
     res
 }
@@ -532,7 +640,11 @@ struct CpuBackend<'a> {
 
 impl Backend for CpuBackend<'_> {
     fn trace(&self, jobs: &[RayJob], p: &TraceParams) -> Result<Vec<RayResult>, PatError> {
-        Ok(self.pool.install(|| jobs.par_iter().map(|j| trace_ray(self.field, j, p)).collect()))
+        Ok(self.pool.install(|| {
+            jobs.par_iter()
+                .map(|j| trace_ray(self.field, j, p))
+                .collect()
+        }))
     }
     fn phi(&self, pts: &[[f64; 3]]) -> Result<Vec<f64>, PatError> {
         let mut out = vec![0.0; pts.len()];
@@ -582,9 +694,15 @@ impl Tracer {
 
     /// Render `field` on the CPU (the pool of `options.threads`). `options.device` must be `Cpu`
     /// or `Auto` here; the CUDA path is [`Tracer::render_torus`].
-    pub fn render(&self, field: &dyn ImplicitField, camera: &Camera) -> Result<(Image, RenderReport), PatError> {
+    pub fn render(
+        &self,
+        field: &dyn ImplicitField,
+        camera: &Camera,
+    ) -> Result<(Image, RenderReport), PatError> {
         if let crate::Device::Cuda { .. } = self.options.device {
-            return Err(PatError::Gpu { reason: "Tracer::render runs on the CPU; use render_torus for a CUDA field".into() });
+            return Err(PatError::Gpu {
+                reason: "Tracer::render runs on the CPU; use render_torus for a CUDA field".into(),
+            });
         }
         let pool = crate::pool::make_pool(self.options.threads)?;
         let backend = CpuBackend { field, pool };
@@ -594,7 +712,11 @@ impl Tracer {
     /// Render a [`crate::TorusField`] on `options.device`: `Cpu` is [`Tracer::render`]; `Cuda`
     /// needs the `cuda` feature and a field built with a CUDA evaluation device (kNN or all-points
     /// neighborhood); `Auto` uses the GPU when the field is on one.
-    pub fn render_torus(&self, field: &crate::TorusField, camera: &Camera) -> Result<(Image, RenderReport), PatError> {
+    pub fn render_torus(
+        &self,
+        field: &crate::TorusField,
+        camera: &Camera,
+    ) -> Result<(Image, RenderReport), PatError> {
         match self.options.device {
             crate::Device::Cpu => self.render(field, camera),
             #[cfg(feature = "cuda")]
@@ -611,29 +733,55 @@ impl Tracer {
             #[cfg(not(feature = "cuda"))]
             crate::Device::Auto => self.render(field, camera),
             #[cfg(not(feature = "cuda"))]
-            crate::Device::Cuda { .. } => Err(PatError::Gpu { reason: "tracing on the GPU needs the `cuda` feature".into() }),
+            crate::Device::Cuda { .. } => Err(PatError::Gpu {
+                reason: "tracing on the GPU needs the `cuda` feature".into(),
+            }),
         }
     }
 
     /// The three-phase render over any backend.
-    pub fn render_with(&self, field: &dyn ImplicitField, camera: &Camera, backend: &dyn Backend) -> Result<(Image, RenderReport), PatError> {
+    pub fn render_with(
+        &self,
+        field: &dyn ImplicitField,
+        camera: &Camera,
+        backend: &dyn Backend,
+    ) -> Result<(Image, RenderReport), PatError> {
         let t_start = std::time::Instant::now();
         camera.validate()?;
         let o = &self.options;
         let bb = field.bbox();
         if !(finite3(bb[0]) && finite3(bb[1])) || (0..3).any(|a| bb[0][a] > bb[1][a]) {
-            return Err(bad(format!("field bounding box {bb:?} is not a finite box")));
+            return Err(bad(format!(
+                "field bounding box {bb:?} is not a finite box"
+            )));
         }
-        let center = [0.5 * (bb[0][0] + bb[1][0]), 0.5 * (bb[0][1] + bb[1][1]), 0.5 * (bb[0][2] + bb[1][2])];
+        let center = [
+            0.5 * (bb[0][0] + bb[1][0]),
+            0.5 * (bb[0][1] + bb[1][1]),
+            0.5 * (bb[0][2] + bb[1][2]),
+        ];
         let diag = length(sub(bb[1], bb[0]));
         if diag <= 0.0 {
             return Err(bad("field bounding box has zero extent"));
         }
         let s = diag / (2.0 * 3.0f64.sqrt());
         let sphere_r = o.bounding_factor * diag + o.level.max(0.0);
-        let params = TraceParams { level: o.level, safety: o.safety, g_min: o.g_min, eps: o.eps_hit.resolve(diag), max_steps: o.max_steps };
-        let shadow_params = TraceParams { eps: o.shadow_eps.resolve(diag), max_steps: o.shadow_max_steps, ..params };
-        let lights = Lights { position: add(center, scale(o.light, s)), specular_dir: o.specular_dir };
+        let params = TraceParams {
+            level: o.level,
+            safety: o.safety,
+            g_min: o.g_min,
+            eps: o.eps_hit.resolve(diag),
+            max_steps: o.max_steps,
+        };
+        let shadow_params = TraceParams {
+            eps: o.shadow_eps.resolve(diag),
+            max_steps: o.shadow_max_steps,
+            ..params
+        };
+        let lights = Lights {
+            position: add(center, scale(o.light, s)),
+            specular_dir: o.specular_dir,
+        };
         let (w, h) = (camera.width, camera.height);
         let npix = w * h;
         let (cu, cv, cw) = camera.basis();
@@ -668,7 +816,10 @@ impl Tracer {
                 let (px, py) = ((i % w) as f64, (i / w) as f64);
                 let ndc_x = (2.0 * (px + 0.5) - w as f64) / h as f64;
                 let ndc_y = (2.0 * ((h as f64 - py) - 0.5) - h as f64) / h as f64;
-                let rd = normalize(add(add(scale(cu, ndc_x), scale(cv, ndc_y)), scale(cw, focal)));
+                let rd = normalize(add(
+                    add(scale(cu, ndc_x), scale(cv, ndc_y)),
+                    scale(cw, focal),
+                ));
                 let ro = camera.eye;
                 let mut tmax = f64::INFINITY;
                 let mut tg = None;
@@ -681,13 +832,12 @@ impl Tracer {
                     }
                 }
                 let mut tp = None;
-                if let Some(pg) = &plane {
-                    if let Some(t) = pg.intersect(ro, rd) {
-                        if t < tmax {
-                            tp = Some(t);
-                            tmax = t;
-                        }
-                    }
+                if let Some(pg) = &plane
+                    && let Some(t) = pg.intersect(ro, rd)
+                    && t < tmax
+                {
+                    tp = Some(t);
+                    tmax = t;
                 }
                 let (mut t0, mut t1, mut in_sphere) = (0.0, 0.0, false);
                 if let Some((ts0, ts1)) = sphere(ro, rd) {
@@ -695,7 +845,14 @@ impl Tracer {
                     t1 = ts1.min(tmax);
                     in_sphere = ts1 > 0.0 && t0 < t1;
                 }
-                Prep { ro, rd, job: RayJob { ro, rd, t0, t1 }, in_sphere, ground: tg, plane: tp }
+                Prep {
+                    ro,
+                    rd,
+                    job: RayJob { ro, rd, t0, t1 },
+                    in_sphere,
+                    ground: tg,
+                    plane: tp,
+                }
             })
             .collect();
 
@@ -703,7 +860,12 @@ impl Tracer {
         let jobs: Vec<RayJob> = preps.iter().map(|p| p.job).collect();
         let prim = backend.trace(&jobs, &params)?;
         drop(jobs);
-        let mut rep = RenderReport { rays: npix as u64, threads: backend.threads(), device: backend.device(), ..Default::default() };
+        let mut rep = RenderReport {
+            rays: npix as u64,
+            threads: backend.threads(),
+            device: backend.device(),
+            ..Default::default()
+        };
         for (p, r) in preps.iter().zip(&prim) {
             if !p.in_sphere {
                 rep.clipped += 1;
@@ -731,19 +893,23 @@ impl Tracer {
             }
         }
         let traversed = rep.hits + rep.misses;
-        rep.steps_mean = if traversed > 0 { rep.steps_total as f64 / traversed as f64 } else { 0.0 };
+        rep.steps_mean = if traversed > 0 {
+            rep.steps_total as f64 / traversed as f64
+        } else {
+            0.0
+        };
 
         // Phase B: shadow rays of the ground pixels that nothing else covers.
         let hit_of = |i: usize| preps[i].in_sphere && prim[i].status == status::HIT;
         let mut shadow_pix = Vec::new();
         let mut shadow_jobs = Vec::new();
         if let Some((_, _, _)) = &ground {
-            for i in 0..npix {
-                if hit_of(i) || preps[i].plane.is_some() {
+            for (i, pr) in preps.iter().enumerate() {
+                if hit_of(i) || pr.plane.is_some() {
                     continue;
                 }
-                if let Some(tg) = preps[i].ground {
-                    let gp = add(preps[i].ro, scale(preps[i].rd, tg));
+                if let Some(tg) = pr.ground {
+                    let gp = add(pr.ro, scale(pr.rd, tg));
                     let to_light = sub(lights.position, gp);
                     let dist = length(to_light);
                     let ld = scale(to_light, 1.0 / dist);
@@ -753,7 +919,12 @@ impl Tracer {
                         None => (0.0, 0.0, false),
                     };
                     shadow_pix.push(i);
-                    shadow_jobs.push(RayJob { ro, rd: ld, t0, t1: if ok { t1 } else { 0.0 } });
+                    shadow_jobs.push(RayJob {
+                        ro,
+                        rd: ld,
+                        t0,
+                        t1: if ok { t1 } else { 0.0 },
+                    });
                 }
             }
         }
@@ -769,7 +940,10 @@ impl Tracer {
                 }
                 status::STEP_LIMIT => rep.shadow_step_limit += 1,
                 status::EVAL_ERROR => {
-                    return Err(PatError::DegenerateQuery { index: i, reason: "the field could not be evaluated along a shadow ray".into() });
+                    return Err(PatError::DegenerateQuery {
+                        index: i,
+                        reason: "the field could not be evaluated along a shadow ray".into(),
+                    });
                 }
                 _ => {}
             }
@@ -780,14 +954,18 @@ impl Tracer {
         let mut plane_pix = Vec::new();
         let mut plane_pts = Vec::new();
         for (i, p) in preps.iter().enumerate() {
-            if !hit_of(i) {
-                if let Some(t) = p.plane {
-                    plane_pix.push(i);
-                    plane_pts.push(add(p.ro, scale(p.rd, t)));
-                }
+            if !hit_of(i)
+                && let Some(t) = p.plane
+            {
+                plane_pix.push(i);
+                plane_pts.push(add(p.ro, scale(p.rd, t)));
             }
         }
-        let plane_phi = if plane_pts.is_empty() { Vec::new() } else { backend.phi(&plane_pts)? };
+        let plane_phi = if plane_pts.is_empty() {
+            Vec::new()
+        } else {
+            backend.phi(&plane_pts)?
+        };
         let mut plane_val = vec![f64::NAN; npix];
         for (&i, &v) in plane_pix.iter().zip(&plane_phi) {
             plane_val[i] = v - o.level;
@@ -796,7 +974,10 @@ impl Tracer {
 
         // Phase C: colours.
         let (range, freq) = match &o.cut_plane {
-            Some(c) => (c.range.unwrap_or(2.0 * s), c.isoband_frequency.unwrap_or(60.0 / s)),
+            Some(c) => (
+                c.range.unwrap_or(2.0 * s),
+                c.isoband_frequency.unwrap_or(60.0 / s),
+            ),
             None => (1.0, 1.0),
         };
         let to_u8 = |c: V3| [0, 1, 2].map(|a| (c[a].clamp(0.0, 1.0) * 255.0 + 0.5).floor() as u8);
@@ -809,15 +990,32 @@ impl Tracer {
                     let r = &prim[i];
                     let pos = add(p.ro, scale(p.rd, r.t));
                     let gl = length(r.grad);
-                    let mut n = if gl > 0.0 { scale(r.grad, 1.0 / gl) } else { scale(p.rd, -1.0) };
+                    let mut n = if gl > 0.0 {
+                        scale(r.grad, 1.0 / gl)
+                    } else {
+                        scale(p.rd, -1.0)
+                    };
                     if dot(n, p.rd) > 0.0 {
                         n = scale(n, -1.0);
                     }
-                    (to_u8(shade_surface(&self.env, &lights, pos, p.rd, n, o.base_color)), 255)
+                    (
+                        to_u8(shade_surface(
+                            &self.env,
+                            &lights,
+                            pos,
+                            p.rd,
+                            n,
+                            o.base_color,
+                        )),
+                        255,
+                    )
                 } else if p.plane.is_some() {
                     let phi = plane_val[i];
                     // the demo's colour map over [-range, range] (non-finite φ is drawn as the lowest colour)
-                    let v = if phi.is_finite() { phi } else { -range };
+                    let mut v = if phi.is_finite() { phi } else { -range };
+                    if o.cut_plane.is_some_and(|c| c.clamp_colormap) {
+                        v = v.clamp(-range, range * (1.0 - 1e-9));
+                    }
                     (to_u8(cutplane_color(v, -range, range, freq)), 255)
                 } else if shadowed[i] {
                     (to_u8(scale(o.background, shadow_value)), 255)
@@ -833,7 +1031,15 @@ impl Tracer {
             alpha.push(a);
         }
         rep.seconds = t_start.elapsed().as_secs_f64();
-        Ok((Image { width: w, height: h, rgb, alpha }, rep))
+        Ok((
+            Image {
+                width: w,
+                height: h,
+                rgb,
+                alpha,
+            },
+            rep,
+        ))
     }
 }
 
@@ -850,7 +1056,10 @@ struct CutGeom {
 fn rotate_about(v: V3, axis: V3, theta: f64) -> V3 {
     let (c, s) = (theta.cos(), theta.sin());
     let t = 1.0 - c;
-    add(add(scale(v, c), scale(cross(axis, v), s)), scale(axis, dot(axis, v) * t))
+    add(
+        add(scale(v, c), scale(cross(axis, v), s)),
+        scale(axis, dot(axis, v) * t),
+    )
 }
 
 impl CutGeom {
@@ -872,7 +1081,14 @@ impl CutGeom {
             1 => [diag[0], diag[2]],
             _ => [diag[0], diag[1]],
         };
-        CutGeom { normal, u, v, center: add(bbox_center, scale(n0, c.offset)), half, eps: 1e-2 * s }
+        CutGeom {
+            normal,
+            u,
+            v,
+            center: add(bbox_center, scale(n0, c.offset)),
+            half,
+            eps: 1e-2 * s,
+        }
     }
 
     fn intersect(&self, ro: V3, rd: V3) -> Option<f64> {

@@ -294,6 +294,7 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pat_boolean, m)?)?;
     m.add_function(wrap_pyfunction!(pat_offset, m)?)?;
     m.add_function(wrap_pyfunction!(pat_reconstruct, m)?)?;
+    m.add_function(wrap_pyfunction!(pat_render, m)?)?;
     m.add_function(wrap_pyfunction!(pat_sample_level_set, m)?)?;
     m.add_function(wrap_pyfunction!(pat_morphology, m)?)?;
     m.add_function(wrap_pyfunction!(pat_orient_normals, m)?)?;
@@ -309,7 +310,7 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // The submodule `ddg_tools.points_as_tori`: the same objects with the short names.
     let sub = PyModule::new(py, "points_as_tori")?;
     sub.setattr("__doc__", "Points as Tori (Feng, Gkioulekas, Crane 2026): signed distance to oriented point clouds. The same objects as the pat_* names of ddg_tools, without the prefix.")?;
-    let pairs: [(&str, &str); 23] = [
+    let pairs: [(&str, &str); 24] = [
         ("PointsAsTori", "PointsAsTori"),
         ("CsgField", "PatCsgField"),
         ("Progress", "PatProgress"),
@@ -321,6 +322,7 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         ("boolean", "pat_boolean"),
         ("offset", "pat_offset"),
         ("reconstruct", "pat_reconstruct"),
+        ("render", "pat_render"),
         ("sample_level_set", "pat_sample_level_set"),
         ("morphology", "pat_morphology"),
         ("orient_normals", "pat_orient_normals"),
@@ -787,6 +789,47 @@ fn pat_reconstruct<'py>(
     options: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     reconstruct_impl(py, shared(field, "field")?, None, level, resolution, bbox, options)
+}
+
+/// Sphere-traced image of `field` (Fig. 12; CPU): returns a flat `array('B')` of RGBA bytes
+/// (`height * width * 4`, row 0 at the top, alpha 0 on the plain background), or
+/// `(image, report)` with `return_report=True`. Options: `level`, `safety`, `g_min`, `max_steps`,
+/// `eps_hit`, `sky`, `ground`, `ground_up`, `base_color`, `demo`, `cut_axis` (+ `cut_offset`,
+/// `cut_rotation_x`, `cut_rotation_y`), `threads`. Works on any `PointsAsTori` or `CsgField`.
+#[pyfunction]
+#[pyo3(signature = (field, eye, target, up=None, fov=30.0, width=512, height=512, **options))]
+#[allow(clippy::too_many_arguments)]
+fn pat_render<'py>(
+    py: Python<'py>,
+    field: &Bound<'py, PyAny>,
+    eye: &Bound<'py, PyAny>,
+    target: &Bound<'py, PyAny>,
+    up: Option<&Bound<'py, PyAny>>,
+    fov: f64,
+    width: usize,
+    height: usize,
+    options: Option<&Bound<'py, PyDict>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let f = shared(field, "field")?;
+    let v3 = |name: &'static str, o: &Bound<'py, PyAny>| -> PyResult<[f64; 3]> {
+        let v = nums(name, o)?;
+        <[f64; 3]>::try_from(v).map_err(|v| bad(name, format!("expected 3 numbers, got {}", v.len())))
+    };
+    let cam = core::CameraSpec {
+        eye: v3("eye", eye)?,
+        target: v3("target", target)?,
+        up: match up {
+            Some(u) if !u.is_none() => v3("up", u)?,
+            _ => [0.0, 1.0, 0.0],
+        },
+        fov,
+        width,
+        height,
+    };
+    let (mut kw, want) = kwargs(options, &[])?;
+    let out = py.detach(move || core::render(&*f, &cam, &mut kw)).map_err(err)?;
+    let img = super::new_array(py, "B", &out.rgba)?;
+    with_report(py, vec![img], &out.report, want)
 }
 
 /// Points and normals on a level set; see `PointsAsTori.sample_level_set`.

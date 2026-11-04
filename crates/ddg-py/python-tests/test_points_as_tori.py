@@ -639,6 +639,62 @@ class Determinism(unittest.TestCase):
         self.assertEqual(len(set(out)), 1)
 
 
+class Rendering(unittest.TestCase):
+    """WP11: sphere-traced images (Fig. 12)."""
+
+    EYE, TARGET = (0.0, 0.4, 2.5), (0.0, 0.0, 0.0)
+
+    def render(self, field=None, **kw):
+        return ddg_tools.pat_render(field or FIELD, self.EYE, self.TARGET, fov=30.0, width=48, height=32, **kw)
+
+    def test_image_shape_and_report(self):
+        img, rep = self.render(return_report=True, threads=2)
+        self.assertIsInstance(img, array.array)
+        self.assertEqual(img.typecode, "B")
+        self.assertEqual(len(img), 48 * 32 * 4)
+        self.assertEqual(rep["rays"], 48 * 32)
+        self.assertGreater(rep["hits"], 50)
+        self.assertEqual(rep["step_limit"], 0)
+        self.assertLessEqual(rep["steps_max"], 128)
+        centre = (16 * 48 + 24) * 4
+        self.assertEqual(img[centre + 3], 255)
+        self.assertNotEqual(tuple(img[centre : centre + 3]), (255, 255, 255))
+        if numpy is not None:
+            self.assertEqual(numpy.asarray(img).reshape(32, 48, 4).shape, (32, 48, 4))
+
+    def test_bitwise_at_any_thread_count(self):
+        a = self.render(threads=1)
+        b = self.render(threads=4)
+        c = self.render(threads=3)
+        self.assertEqual(a.tobytes(), b.tobytes())
+        self.assertEqual(a.tobytes(), c.tobytes())
+
+    def test_offset_boolean_and_cut_plane(self):
+        big = FIELD.offset(0.1)
+        _, r0 = self.render(return_report=True)
+        _, r1 = self.render(big, return_report=True)
+        self.assertGreater(r1["hits"], r0["hits"])
+        other = ddg_tools.PointsAsTori(*fibonacci_sphere(256, 0.3, (0.4, 0.0, 0.0)))
+        u = pat.boolean(FIELD, other, "union")
+        _, ru = self.render(u, return_report=True)
+        self.assertGreater(ru["hits"], 50)
+        _, rc = self.render(return_report=True, cut_axis=2, cut_offset=-0.2, sky="white")
+        self.assertGreater(rc["cut_plane_pixels"], 0)
+
+    def test_bad_input_raises(self):
+        with self.assertRaises(pat.PointsAsToriError):
+            ddg_tools.pat_render(FIELD, self.TARGET, self.TARGET)
+        with self.assertRaises(pat.PointsAsToriError):
+            self.render(safety=2.0)
+        with self.assertRaises(pat.PointsAsToriError):
+            self.render(nonsense=1)
+        with self.assertRaises(pat.PointsAsToriError):
+            ddg_tools.pat_render(FIELD, self.EYE, self.TARGET, width=0, height=4)
+        with self.assertRaises(pat.PointsAsToriError):
+            ddg_tools.pat_render(FIELD, (1, 2), self.TARGET)
+        self.assertIs(pat.render, ddg_tools.pat_render)
+
+
 class Defaults(unittest.TestCase):
     def test_stub_defaults_equal_the_library(self):
         path = os.path.join(HERE, "..", "ddg_tools.pyi")

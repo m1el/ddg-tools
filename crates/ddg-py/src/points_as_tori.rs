@@ -827,6 +827,109 @@ pub fn reconstruct(field: &dyn ImplicitField, kw: &mut Kw) -> R<MeshOut> {
     })
 }
 
+/// A sphere-traced image (`pat::render`): RGBA bytes, row 0 at the top, and the report.
+pub struct ImageOut {
+    /// `4 · width · height` bytes (alpha 0 on the plain background).
+    pub rgba: Vec<u8>,
+    /// Report.
+    pub report: V,
+}
+
+/// Camera and image size of [`render`].
+pub struct CameraSpec {
+    /// Eye.
+    pub eye: [f64; 3],
+    /// Target.
+    pub target: [f64; 3],
+    /// Up.
+    pub up: [f64; 3],
+    /// Vertical field of view in degrees.
+    pub fov: f64,
+    /// Width.
+    pub width: usize,
+    /// Height.
+    pub height: usize,
+}
+
+fn render_report_v(r: &pat::render::RenderReport) -> V {
+    V::D(vec![
+        ("rays", V::I(r.rays as i64)),
+        ("clipped", V::I(r.clipped as i64)),
+        ("hits", V::I(r.hits as i64)),
+        ("misses", V::I(r.misses as i64)),
+        ("step_limit", V::I(r.step_limit as i64)),
+        ("non_finite", V::I(r.non_finite as i64)),
+        ("steps_total", V::I(r.steps_total as i64)),
+        ("steps_mean", V::F(r.steps_mean)),
+        ("steps_max", V::I(r.steps_max as i64)),
+        ("shadow_rays", V::I(r.shadow_rays as i64)),
+        ("shadow_hits", V::I(r.shadow_hits as i64)),
+        ("shadow_step_limit", V::I(r.shadow_step_limit as i64)),
+        ("cut_plane_pixels", V::I(r.cut_plane_pixels as i64)),
+        ("seconds", V::F(r.seconds)),
+        ("threads", V::u(r.threads)),
+        ("device", dev_v(r.device)),
+    ])
+}
+
+/// Sphere-trace `field` (`pat::render::Tracer`, CPU). Options: `level`, `safety`, `g_min`,
+/// `max_steps`, `eps_hit` (relative to the bounding-box diagonal), `sky` (`"forest"`, `"white"`),
+/// `ground` (bool), `ground_up` (3 numbers), `demo` (the demo's constants), `base_color` (3
+/// numbers in [0, 1]), `cut_axis` (0, 1, 2) with `cut_offset`, `cut_rotation_x`, `cut_rotation_y`
+/// (radians), `threads`.
+pub fn render(field: &dyn ImplicitField, cam: &CameraSpec, kw: &mut Kw) -> R<ImageOut> {
+    use pat::render::{Camera, CutPlane, Environment, Tracer, TraceOptions};
+    let mut o = if kw.opt_bool("demo")?.unwrap_or(false) { TraceOptions::demo() } else { TraceOptions::default() };
+    if let Some(v) = kw.opt_f64("level")? {
+        o.level = v;
+    }
+    if let Some(v) = kw.opt_f64("safety")? {
+        o.safety = v;
+    }
+    if let Some(v) = kw.opt_f64("g_min")? {
+        o.g_min = v;
+    }
+    if let Some(v) = kw.opt_usize("max_steps")? {
+        o.max_steps = u32::try_from(v).map_err(|_| PErr(format!("max_steps = {v} is too large")))?;
+    }
+    if let Some(v) = kw.opt_f64("eps_hit")? {
+        o.eps_hit = pat::render::Epsilon::Relative(v);
+    }
+    if let Some(s) = kw.choice("sky", &["forest", "white"])? {
+        o.environment = if s == "white" { Environment::Constant([1.0, 1.0, 1.0]) } else { Environment::Forest };
+    }
+    if let Some(false) = kw.opt_bool("ground")? {
+        o.ground = None;
+    }
+    if let Some(u) = kw.opt_array("ground_up")? {
+        let u: [f64; 3] = u.try_into().map_err(|_| PErr("ground_up: expected 3 numbers".into()))?;
+        if let Some(g) = o.ground.as_mut() {
+            g.up = u;
+        }
+    }
+    if let Some(c) = kw.opt_array("base_color")? {
+        o.base_color = c.try_into().map_err(|_| PErr("base_color: expected 3 numbers".into()))?;
+    }
+    if let Some(axis) = kw.opt_usize("cut_axis")? {
+        o.cut_plane = Some(CutPlane {
+            axis,
+            offset: kw.opt_f64("cut_offset")?.unwrap_or(0.0),
+            rotation_x: kw.opt_f64("cut_rotation_x")?.unwrap_or(0.0),
+            rotation_y: kw.opt_f64("cut_rotation_y")?.unwrap_or(0.0),
+            ..Default::default()
+        });
+    }
+    o.threads = parse_threads(kw)?;
+    kw.finish("render")?;
+    let camera = Camera::look_at(cam.eye, cam.target, cam.up, cam.fov, cam.width, cam.height)?;
+    let (img, rep) = Tracer::new(o)?.render(field, &camera)?;
+    let mut rgba = Vec::with_capacity(4 * img.alpha.len());
+    for (c, a) in img.rgb.chunks_exact(3).zip(&img.alpha) {
+        rgba.extend_from_slice(&[c[0], c[1], c[2], *a]);
+    }
+    Ok(ImageOut { rgba, report: render_report_v(&rep) })
+}
+
 fn parse_sample(kw: &mut Kw) -> R<SampleOptions> {
     let mut s = SampleOptions { count: kw.opt_usize("count")?, ..Default::default() };
     s.mc = parse_mc(kw)?;

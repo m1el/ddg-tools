@@ -1,0 +1,33 @@
+/var/data/discrete-geometry/PointsAsTori/points-as-tori/data/holey-bunny.ply: reference (safety 0.5, g_min 0.1, 2048 steps): hits 4750, mean steps 8.55, max 135, step-limit 0
+safety g_min steps | hits | alpha-mismatch px | rgb-mismatch px | mean steps | max steps | step-limit | seconds
+   0.5   0.1   128 |   4750 |      0 |      0 |   8.55 |  128 |     1 | 0.56
+   0.7   0.1   128 |   4748 |      3 |   1152 |   6.07 |   96 |     0 | 0.42
+   0.9   0.1   128 |   4748 |      3 |   1343 |   4.62 |   75 |     0 | 0.29
+     1   0.1   128 |   4747 |      7 |   1488 |   4.05 |   66 |     0 | 0.29
+   0.9     0   128 |   4748 |      3 |   1343 |   4.62 |   75 |     0 | 0.31
+   0.9   0.3   128 |   4748 |      3 |   1343 |   4.62 |   75 |     0 | 0.31
+   0.9   0.1    64 |   4748 |      3 |   1343 |   4.62 |   64 |     3 | 0.32
+   0.9   0.1    40 |   4745 |     22 |   1362 |   4.62 |   40 |    56 | 0.32
+     1     0    40 |   4745 |     14 |   1494 |   4.05 |   40 |    36 | 0.26
+/var/data/discrete-geometry/PointsAsTori/points-as-tori/data/snail.ply: reference (safety 0.5, g_min 0.1, 2048 steps): hits 3508, mean steps 8.20, max 130, step-limit 0
+safety g_min steps | hits | alpha-mismatch px | rgb-mismatch px | mean steps | max steps | step-limit | seconds
+   0.5   0.1   128 |   3507 |      1 |      1 |   8.20 |  128 |     1 | 0.42
+   0.7   0.1   128 |   3508 |      3 |    670 |   5.87 |   92 |     0 | 0.29
+   0.9   0.1   128 |   3502 |     12 |    824 |   4.53 |   71 |     0 | 0.22
+     1   0.1   128 |   3506 |      7 |    890 |   4.03 |   63 |     0 | 0.20
+   0.9     0   128 |   3502 |     12 |    824 |   4.53 |   71 |     0 | 0.24
+   0.9   0.3   128 |   3502 |     12 |    824 |   4.53 |   71 |     0 | 0.23
+   0.9   0.1    64 |   3499 |     16 |    826 |   4.53 |   64 |     6 | 0.22
+   0.9   0.1    40 |   3480 |     36 |    839 |   4.52 |   40 |    65 | 0.22
+     1     0    40 |   3491 |     23 |    900 |   4.02 |   40 |    41 | 0.21
+/var/data/discrete-geometry/PointsAsTori/points-as-tori/data/tooth.ply: reference (safety 0.5, g_min 0.1, 2048 steps): hits 4606, mean steps 7.86, max 135, step-limit 0
+safety g_min steps | hits | alpha-mismatch px | rgb-mismatch px | mean steps | max steps | step-limit | seconds
+   0.5   0.1   128 |   4606 |      0 |      0 |   7.86 |  128 |     1 | 0.37
+   0.7   0.1   128 |   4606 |      0 |    965 |   5.59 |   96 |     0 | 0.28
+   0.9   0.1   128 |   4604 |      2 |   1192 |   4.27 |   74 |     0 | 0.20
+     1   0.1   128 |   4606 |      0 |   1300 |   3.75 |   67 |     0 | 0.18
+   0.9     0   128 |   4604 |      2 |   1192 |   4.27 |   74 |     0 | 0.20
+   0.9   0.3   128 |   4604 |      2 |   1192 |   4.27 |   74 |     0 | 0.21
+   0.9   0.1    64 |   4604 |      2 |   1192 |   4.27 |   64 |     1 | 0.21
+   0.9   0.1    40 |   4603 |     18 |   1207 |   4.27 |   40 |    32 | 0.21
+     1     0    40 |   4605 |      9 |   1308 |   3.75 |   40 |    20 | 0.17

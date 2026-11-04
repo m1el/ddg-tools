@@ -2273,6 +2273,22 @@ def pat_reconstruct(
     bbox: Buffer | None = None,
     **options: object,
 ) -> tuple[object, ...]: ...
+def pat_render(
+    field: PointsAsTori | PatCsgField,
+    eye: Buffer,
+    target: Buffer,
+    up: Buffer | None = None,
+    fov: float = 30.0,
+    width: int = 512,
+    height: int = 512,
+    **options: object,
+) -> array[int] | tuple[array[int], dict[str, object]]:
+    """Sphere-traced image of the level set (Fig. 12, CPU): flat ``array('B')`` of RGBA bytes,
+    ``height * width * 4``, row 0 at the top, alpha 0 on the plain background. ``return_report=True``
+    also returns the render report. Options: ``level``, ``safety``, ``g_min``, ``max_steps``,
+    ``eps_hit``, ``sky`` ("forest" | "white"), ``ground``, ``ground_up``, ``base_color``, ``demo``,
+    ``cut_axis`` (+ ``cut_offset``, ``cut_rotation_x``, ``cut_rotation_y``), ``threads``."""
+    ...
 def pat_sample_level_set(
     field: PointsAsTori | PatCsgField, level: float | None = None, count: int | None = None, **options: object
 ) -> tuple[object, ...]: ...

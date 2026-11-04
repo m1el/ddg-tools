@@ -241,6 +241,24 @@ theorem extrude_gradient {f1 f2 : V3 → ℝ} {G1 G2 : V3} {x : V3}
     change extrudeVal (f1 y) (f2 y) = f2 y
     rw [(extrude_cases _ _).2.2.2 (hy.2.trans hy.1).le hy.1.le, max_eq_right hy.2.le]
 
+/-! ## The sphere-tracing step (SPEC §8.5, D17) -/
+
+/-- A step of `|φ(x) − ℓ| / L` never reaches the level set `φ = ℓ` when `φ` is `L`-Lipschitz: every
+point `y` strictly closer to `x` than `|φ(x) − ℓ| / L` has `φ(y) ≠ ℓ`. (The tracer steps by
+`safety · |φ − ℓ| / max(‖∇φ‖, g_min)`, `safety ≤ 1`; where `max(‖∇φ‖, g_min)` bounds the local
+Lipschitz constant, this is the lemma with `L` that bound.)
+
+[formula: pat-render-step] -/
+theorem sphere_trace_step_safe {φ : V3 → ℝ} {L ℓ : ℝ} (hL : 0 < L)
+    (hφ : ∀ x y, |φ x - φ y| ≤ L * vnorm (x - y)) (x y : V3)
+    (hy : vnorm (y - x) < |φ x - ℓ| / L) : φ y ≠ ℓ := by
+  intro h
+  have h1 := hφ x y
+  rw [RC.vnorm_sub_comm x y, h] at h1
+  have h2 : L * vnorm (y - x) < |φ x - ℓ| := by
+    rwa [lt_div_iff₀ hL, mul_comm] at hy
+  linarith
+
 end PAT
 
 end DdgProofs

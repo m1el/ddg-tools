@@ -38,9 +38,15 @@ impl CubeMap {
         let mut size = 0usize;
         let mut faces = Vec::with_capacity(6);
         for (i, bytes) in FACE_BYTES.iter().enumerate() {
-            let (w, h, data) = decode_rgb8(bytes).map_err(|e| PatError::Format { reason: format!("cube map face {i}: {e}") })?;
+            let (w, h, data) = decode_rgb8(bytes).map_err(|e| PatError::Format {
+                reason: format!("cube map face {i}: {e}"),
+            })?;
             if w != h || (i > 0 && w != size) {
-                return Err(PatError::Format { reason: format!("cube map face {i} is {w}x{h}, expected square faces of one size") });
+                return Err(PatError::Format {
+                    reason: format!(
+                        "cube map face {i} is {w}x{h}, expected square faces of one size"
+                    ),
+                });
             }
             size = w;
             faces.push(data);
@@ -51,22 +57,45 @@ impl CubeMap {
     /// A constant environment: every lookup returns `c` (so the IBL terms see a uniform sky).
     pub fn constant(c: [f64; 3]) -> Result<CubeMap, PatError> {
         if !c.iter().all(|x| x.is_finite() && *x >= 0.0) {
-            return Err(PatError::InvalidOption { what: format!("constant environment colour {c:?} (finite and >= 0)") });
+            return Err(PatError::InvalidOption {
+                what: format!("constant environment colour {c:?} (finite and >= 0)"),
+            });
         }
         Ok(CubeMap::from_faces(1, vec![vec![c]; 6], Some(c)))
     }
 
     /// Faces as RGB texels in `[0, 1]` (`size * size` each, +X -X +Y -Y +Z -Z).
-    pub fn from_faces(size: usize, faces: Vec<Vec<[f64; 3]>>, constant: Option<[f64; 3]>) -> CubeMap {
-        let mut m = CubeMap { size, faces, constant, avg: [[0.0; 3]; 6] };
-        let dirs = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+    pub fn from_faces(
+        size: usize,
+        faces: Vec<Vec<[f64; 3]>>,
+        constant: Option<[f64; 3]>,
+    ) -> CubeMap {
+        let mut m = CubeMap {
+            size,
+            faces,
+            constant,
+            avg: [[0.0; 3]; 6],
+        };
+        let dirs = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, -1.0],
+        ];
         for (a, d) in m.avg.iter_mut().zip(dirs) {
             *a = Self::average_at(&m.faces, m.size, m.constant, d);
         }
         m
     }
 
-    fn average_at(faces: &[Vec<[f64; 3]>], size: usize, constant: Option<[f64; 3]>, tc: [f64; 3]) -> [f64; 3] {
+    fn average_at(
+        faces: &[Vec<[f64; 3]>],
+        size: usize,
+        constant: Option<[f64; 3]>,
+        tc: [f64; 3],
+    ) -> [f64; 3] {
         const D0: f64 = 0.35;
         const D1: f64 = 0.12;
         let off = |t: [f64; 3], o: [f64; 3]| [t[0] + o[0], t[1] + o[1], t[2] + o[2]];
@@ -106,7 +135,14 @@ impl CubeMap {
         let kf = tc[2] * 0.5 + 0.5;
         let (kl, kb, ka) = (1.0 - kr, 1.0 - kt, 1.0 - kf);
         let somestep = |x: f64| x.powi(4);
-        let (kr, kt, kf, kl, kb, ka) = (somestep(kr), somestep(kt), somestep(kf), somestep(kl), somestep(kb), somestep(ka));
+        let (kr, kt, kf, kl, kb, ka) = (
+            somestep(kr),
+            somestep(kt),
+            somestep(kf),
+            somestep(kl),
+            somestep(kb),
+            somestep(ka),
+        );
         let mut ret = [0.0; 3];
         let mut d;
         // the demo's accumulation order: f, a, l, r, t, b
@@ -126,16 +162,29 @@ impl CubeMap {
 }
 
 /// OpenGL cube-face selection and bilinear lookup with `GL_CLAMP_TO_EDGE`.
-fn sample(faces: &[Vec<[f64; 3]>], size: usize, constant: Option<[f64; 3]>, d: [f64; 3]) -> [f64; 3] {
+fn sample(
+    faces: &[Vec<[f64; 3]>],
+    size: usize,
+    constant: Option<[f64; 3]>,
+    d: [f64; 3],
+) -> [f64; 3] {
     if let Some(c) = constant {
         return c;
     }
     let (ax, ay, az) = (d[0].abs(), d[1].abs(), d[2].abs());
     // (face, sc, tc, ma) from the OpenGL specification, table 8.19
     let (face, sc, tc, ma) = if ax >= ay && ax >= az {
-        if d[0] > 0.0 { (0, -d[2], -d[1], ax) } else { (1, d[2], -d[1], ax) }
+        if d[0] > 0.0 {
+            (0, -d[2], -d[1], ax)
+        } else {
+            (1, d[2], -d[1], ax)
+        }
     } else if ay >= az {
-        if d[1] > 0.0 { (2, d[0], d[2], ay) } else { (3, d[0], -d[2], ay) }
+        if d[1] > 0.0 {
+            (2, d[0], d[2], ay)
+        } else {
+            (3, d[0], -d[2], ay)
+        }
     } else if d[2] > 0.0 {
         (4, d[0], -d[1], az)
     } else {
@@ -155,7 +204,12 @@ fn sample(faces: &[Vec<[f64; 3]>], size: usize, constant: Option<[f64; 3]>, d: [
         let jj = (j.max(0.0) as usize).min(size - 1);
         faces[face][jj * size + ii]
     };
-    let (c00, c10, c01, c11) = (at(u0, v0), at(u0 + 1.0, v0), at(u0, v0 + 1.0), at(u0 + 1.0, v0 + 1.0));
+    let (c00, c10, c01, c11) = (
+        at(u0, v0),
+        at(u0 + 1.0, v0),
+        at(u0, v0 + 1.0),
+        at(u0 + 1.0, v0 + 1.0),
+    );
     let mut out = [0.0; 3];
     for a in 0..3 {
         let top = c00[a] * (1.0 - fu) + c10[a] * fu;
@@ -181,7 +235,9 @@ fn decode_rgb8(bytes: &[u8]) -> Result<(usize, usize, Vec<[f64; 3]>), String> {
         other => return Err(format!("colour type {other:?}, expected RGB or RGBA")),
     };
     let (w, h) = (info.width as usize, info.height as usize);
-    let texels = (0..w * h).map(|i| [0, 1, 2].map(|a| buf[i * ch + a] as f64 / 255.0)).collect();
+    let texels = (0..w * h)
+        .map(|i| [0, 1, 2].map(|a| buf[i * ch + a] as f64 / 255.0))
+        .collect();
     Ok((w, h, texels))
 }
 
@@ -193,10 +249,18 @@ mod tests {
     fn forest_loads_and_samples_in_range() {
         let m = CubeMap::forest().unwrap();
         assert_eq!(m.size, 64);
-        for d in [[1.0, 0.0, 0.0], [0.3, -0.7, 0.2], [0.0, 0.0, -1.0], [-0.5, 0.5, 0.5]] {
+        for d in [
+            [1.0, 0.0, 0.0],
+            [0.3, -0.7, 0.2],
+            [0.0, 0.0, -1.0],
+            [-0.5, 0.5, 0.5],
+        ] {
             let c = m.texture(d);
             let b = m.blurred(d);
-            assert!(c.iter().chain(b.iter()).all(|x| (0.0..=1.0).contains(x)), "{c:?} {b:?}");
+            assert!(
+                c.iter().chain(b.iter()).all(|x| (0.0..=1.0).contains(x)),
+                "{c:?} {b:?}"
+            );
         }
     }
 

@@ -19,7 +19,10 @@ impl<'a> GpuBackend<'a> {
     /// A backend for `field` (which must have been built with a CUDA evaluation device).
     pub fn new(field: &'a TorusField) -> Result<GpuBackend<'a>, PatError> {
         if matches!(field.device(), Device::Cpu) {
-            return Err(PatError::Gpu { reason: "the field was built for the CPU; set EvalOptions::device to a CUDA device".into() });
+            return Err(PatError::Gpu {
+                reason: "the field was built for the CPU; set EvalOptions::device to a CUDA device"
+                    .into(),
+            });
         }
         Ok(GpuBackend { field })
     }
@@ -27,10 +30,22 @@ impl<'a> GpuBackend<'a> {
 
 impl Backend for GpuBackend<'_> {
     fn trace(&self, jobs: &[RayJob], p: &TraceParams) -> Result<Vec<RayResult>, PatError> {
-        let flat: Vec<f64> = jobs.iter().flat_map(|j| [j.ro[0], j.ro[1], j.ro[2], j.rd[0], j.rd[1], j.rd[2], j.t0, j.t1]).collect();
+        let flat: Vec<f64> = jobs
+            .iter()
+            .flat_map(|j| {
+                [
+                    j.ro[0], j.ro[1], j.ro[2], j.rd[0], j.rd[1], j.rd[2], j.t0, j.t1,
+                ]
+            })
+            .collect();
         let (out, st) = self.field.gpu_trace(&flat, p)?;
         Ok((0..jobs.len())
-            .map(|i| RayResult { status: st[2 * i], steps: st[2 * i + 1], t: out[4 * i], grad: [out[4 * i + 1], out[4 * i + 2], out[4 * i + 3]] })
+            .map(|i| RayResult {
+                status: st[2 * i],
+                steps: st[2 * i + 1],
+                t: out[4 * i],
+                grad: [out[4 * i + 1], out[4 * i + 2], out[4 * i + 3]],
+            })
             .collect())
     }
 
