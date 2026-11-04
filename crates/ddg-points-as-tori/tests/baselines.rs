@@ -359,7 +359,7 @@ fn kernel_gradients_by_finite_differences() {
     let xs = rand_queries(40, 77, 0.9);
     // constant λ: the frozen gradient is the gradient (the min-ρ shift cancels exactly)
     for nb in [Neighborhood::All, Neighborhood::Knn { k: 32 }] {
-        let f = KernelField::new(&cloud, a.clone(), KernelOptions { neighborhood: nb, lambda: LambdaRule::Constant { lambda: 40.0 }, threads: Some(2) })
+        let f = KernelField::new(&cloud, a.clone(), KernelOptions { neighborhood: nb, lambda: LambdaRule::Constant { lambda: 40.0 }, threads: Some(2), shc_zero_value: None })
             .unwrap();
         for m in [KernelMethod::Shc, KernelMethod::Sspd, KernelMethod::Lse] {
             fd_check(&f, m, &xs, 2e-6);
@@ -368,7 +368,7 @@ fn kernel_gradients_by_finite_differences() {
     let f = KernelField::new(
         &cloud,
         a,
-        KernelOptions { neighborhood: Neighborhood::All, lambda: LambdaRule::PaperHeuristic { c: 64.0, factor: 3.0, k_mean: 64 }, threads: None },
+        KernelOptions { neighborhood: Neighborhood::All, lambda: LambdaRule::PaperHeuristic { c: 64.0, factor: 3.0, k_mean: 64 }, threads: None, shc_zero_value: None },
     )
     .unwrap();
     for m in [KernelMethod::Shc, KernelMethod::Sspd, KernelMethod::Lse] {
@@ -394,7 +394,7 @@ fn kernel_sphere_values_and_shift_invariance() {
     // the constant rule's shift (min ρ) cancels: a constant λ gives the same φ as the formula
     // without shift, computed by hand here for SSPD
     let lam = 30.0;
-    let g = KernelField::new(&cloud, a.clone(), KernelOptions { neighborhood: Neighborhood::All, lambda: LambdaRule::Constant { lambda: lam }, threads: None })
+    let g = KernelField::new(&cloud, a.clone(), KernelOptions { neighborhood: Neighborhood::All, lambda: LambdaRule::Constant { lambda: lam }, threads: None, shc_zero_value: None })
         .unwrap();
     let x = [0.1, 0.2, 0.6];
     let (mut num, mut den) = (0.0, 0.0);
@@ -429,6 +429,10 @@ fn kernel_errors() {
         Err(PatError::DegenerateQuery { index, .. }) => assert_eq!(index, 1),
         e => panic!("{e:?}"),
     }
+    let z = KernelField::new(&cloud, a.clone(), KernelOptions { shc_zero_value: Some(0.25), ..Default::default() }).unwrap();
+    let rep = z.evaluate(KernelMethod::Shc, &[[3.5, 3.5, 1.0], [3.5, 2.5, 0.0]], &mut out, None).unwrap();
+    assert_eq!((rep.degenerate, out[1]), (1, 0.25));
+    assert!(out[0] > 0.0);
     assert!(matches!(f.eval(KernelMethod::Sspd, [f64::NAN, 0.0, 0.0], false), Err(PatError::NonFinite { .. })));
     assert!(matches!(f.evaluate(KernelMethod::Sspd, &[[0.0; 3]], &mut [0.0; 2], None), Err(PatError::SizeMismatch { .. })));
     assert!(matches!(KernelField::new(&cloud, vec![1.0; 3], KernelOptions::default()), Err(PatError::SizeMismatch { .. })));
@@ -588,3 +592,155 @@ fn determinism_across_thread_counts() {
     }
 }
 
+
+// ---------------------------------------------------------------- WP5 sanity run
+
+fn load3(path: &std::path::Path) -> Vec<[f64; 3]> {
+    common::to3(&common::load(path.to_path_buf()).data)
+}
+
+fn load_faces(path: &std::path::Path) -> Vec<[u32; 3]> {
+    common::load(path.to_path_buf()).data.chunks_exact(3).map(|c| [c[0] as u32, c[1] as u32, c[2] as u32]).collect()
+}
+
+/// The 64³ grid mean absolute error of PAT and every baseline against the mesh truth for one
+/// golden cloud: `PAT_WP5_NAME=<input> PAT_WP5_THREADS=<t> cargo test --release --test baselines
+/// sanity_grid_errors -- --ignored --nocapture`. Meshes in `runs_tmp/pat-wp5/meshes/<input>/`,
+/// SPSR output in `runs_tmp/pat-wp5/spsr/<input>/` (scripts/pat_spsr.py); `synth_*` use their
+/// analytic SDF. Prints `RESULT <input> <method> <mae> <max>` lines.
+#[test]
+#[ignore]
+fn sanity_grid_errors() {
+    use ddg_points_as_tori::baselines::{regularized_winding_numbers, winding_signed_distance};
+    use ddg_points_as_tori::spatial::{KdTree, KdTreeOptions};
+    use ddg_points_as_tori::{BuildOptions, EvalOptions, EvalOut, Model, PointsAsTori, SignRule};
+    let Some(root) = common::golden_root() else { return };
+    let name = std::env::var("PAT_WP5_NAME").expect("set PAT_WP5_NAME");
+    let threads = std::env::var("PAT_WP5_THREADS").ok().and_then(|s| s.parse().ok());
+    let wp5 = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runs_tmp/pat-wp5");
+    let g = common::Golden::open(&root, &name);
+    // PAT_WP5_SUBSAMPLE=m: a seeded random subset of m points (partial Fisher–Yates), as §16.2's 512
+    let sub: Option<usize> = std::env::var("PAT_WP5_SUBSAMPLE").ok().and_then(|s| s.parse().ok());
+    let owned;
+    let cloud = match sub {
+        Some(m) if m < g.cloud.len() => {
+            let mut idx: Vec<usize> = (0..g.cloud.len()).collect();
+            let mut seed = 0x5eed_u64;
+            for i in 0..m {
+                let j = i + ((lcg(&mut seed) * (idx.len() - i) as f64) as usize).min(idx.len() - i - 1);
+                idx.swap(i, j);
+            }
+            idx.truncate(m);
+            idx.sort_unstable();
+            let txt: String = idx.iter().map(|i| format!("{i}\n")).collect();
+            std::fs::create_dir_all(wp5.join("sub")).unwrap();
+            std::fs::write(wp5.join("sub").join(format!("{name}@{m}.idx")), txt).unwrap();
+            let p = idx.iter().map(|&i| g.cloud.positions()[i]).collect();
+            let n = idx.iter().map(|&i| g.cloud.normals()[i]).collect();
+            owned = PointCloud::new(p, n, NormalPolicy::RequireUnit { tol: 1e-6 }).unwrap().0;
+            &owned
+        }
+        _ => &g.cloud,
+    };
+    let tag = match sub {
+        Some(m) => format!("{name}@{m}"),
+        None => name.clone(),
+    };
+    let grid = g.grid();
+    let q = grid.len();
+    let t0 = std::time::Instant::now();
+    // truth
+    let truth: Vec<f64> = match name.as_str() {
+        "synth_sphere" => grid.iter().map(|x| norm(*x) - 0.5).collect(),
+        "synth_torus" => grid.iter().map(|x| ((x[0] * x[0] + x[1] * x[1]).sqrt() - 0.35).hypot(x[2]) - 0.15).collect(),
+        _ => {
+            let d = wp5.join("meshes").join(&name);
+            let (v, f) = (load3(&d.join("vertices.npy")), load_faces(&d.join("faces.npy")));
+            let (t, rep) = MeshTruth::new(&v, &f, &TruthOptions { threads, ..Default::default() }).unwrap();
+            let mut s = vec![0.0; q];
+            let tr = t.evaluate(&grid, &mut s, None).unwrap();
+            println!("TRUTH {name} faces {} volume {:.6} inside {} ambiguous {} {:.2}s", rep.faces, rep.signed_volume, tr.inside, tr.ambiguous, tr.seconds);
+            s
+        }
+    };
+    let report = |method: &str, phi: &[f64]| {
+        let mut sum = 0.0;
+        let mut max: f64 = 0.0;
+        for (a, b) in phi.iter().zip(&truth) {
+            let e = (a - b).abs();
+            sum += e;
+            max = max.max(e);
+        }
+        println!("RESULT {tag} {method} {:.6} {:.4}", sum / q as f64, max);
+    };
+    // PAT
+    let model = Model::reference().unwrap();
+    for (label, rule, eval) in [
+        ("PAT-Reference", SignRule::Reference, EvalOptions::default()),
+        ("PAT-Geometric", SignRule::Geometric, EvalOptions::default()),
+        ("PAT-Reference-all", SignRule::Reference, EvalOptions { neighborhood: Neighborhood::All, ..Default::default() }),
+        ("PAT-Geometric-all", SignRule::Geometric, EvalOptions { neighborhood: Neighborhood::All, ..Default::default() }),
+    ] {
+        let mut opts = BuildOptions { eval, ..Default::default() }.with_threads(threads);
+        opts.fit.sign_rule = rule;
+        let (field, rep) = PointsAsTori::build(cloud, &model, &opts).unwrap();
+        let mut phi = vec![0.0; q];
+        field.evaluate(&grid, EvalOut { distance: Some(&mut phi), ..Default::default() }).unwrap();
+        report(label, &phi);
+        println!("SADDLES {tag} {label} {}", rep.fit.saddle);
+        if label == "PAT-Reference" && sub.is_none() {
+            let gold = g.arr("grid_sdf_accel").data;
+            let (mx, med, _) = common::diff_stats(&phi, &gold);
+            println!("GOLDEN {name} PAT-Reference vs authors' grid: max {mx:.3e} median {med:.3e}; saddles {}", rep.fit.saddle);
+        }
+    }
+    // areas and kernel baselines
+    let (areas, arep) = point_areas(cloud, &PointAreaOptions { threads, ..Default::default() }).unwrap();
+    println!("AREAS {name} total {:.4} clipped {} filtered {} isolated {}", arep.total_area, arep.clipped, arep.filtered, arep.isolated);
+    let kf = KernelField::new(cloud, areas.clone(), KernelOptions { threads, shc_zero_value: Some(0.0), ..Default::default() }).unwrap();
+    let mut shc = vec![0.0; q];
+    let mut sspd = vec![0.0; q];
+    let mut lse = vec![0.0; q];
+    let krep = kf.evaluate(KernelMethod::Shc, &grid, &mut shc, None).unwrap();
+    println!("SHC {name} queries with w = 0 (set to 0): {}", krep.degenerate);
+    kf.evaluate(KernelMethod::Sspd, &grid, &mut sspd, None).unwrap();
+    kf.evaluate(KernelMethod::Lse, &grid, &mut lse, None).unwrap();
+    report("SHC", &shc);
+    report("SSPD", &sspd);
+    // winding-number signs with the nearest-point distance
+    let tree = KdTree::new(cloud.positions(), KdTreeOptions::default()).unwrap();
+    let mut buf = Vec::new();
+    let nearest: Vec<f64> = grid
+        .iter()
+        .map(|x| {
+            tree.knn(*x, 1, &mut buf);
+            buf[0].d2.sqrt()
+        })
+        .collect();
+    let mut gwn = vec![0.0; q];
+    winding_numbers(cloud, &areas, &grid, &mut gwn, threads).unwrap();
+    let fw = FastWinding::from_cloud(cloud, &areas, &FwnOptions { threads, ..Default::default() }).unwrap();
+    let mut fwn = vec![0.0; q];
+    let frep = fw.evaluate(&grid, &mut fwn).unwrap();
+    let mut rwn = vec![0.0; q];
+    regularized_winding_numbers(cloud, &areas, 0.02, &grid, &mut rwn, threads).unwrap();
+    let signed = |w: &[f64], d: &[f64]| -> Vec<f64> { w.iter().zip(d).map(|(&w, &d)| winding_signed_distance(d, w, 0.5)).collect() };
+    report("GWN-sign+nearest", &signed(&gwn, &nearest));
+    report("FWN-sign+nearest", &signed(&fwn, &nearest));
+    report("RWN0.02-sign+nearest", &signed(&rwn, &nearest));
+    report("LSE-GWN-signed", &signed(&gwn, &lse));
+    let flips = gwn.iter().zip(&fwn).filter(|(a, b)| (**a > 0.5) != (**b > 0.5)).count();
+    let fmax = gwn.iter().zip(&fwn).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+    println!("FWN {name} vs direct GWN: max |Δw| {fmax:.3e}, sign flips {flips}, far nodes {}, near {}", frep.far_nodes, frep.near_elements);
+    // SPSR
+    let sd = wp5.join("spsr").join(&tag);
+    if sd.join("faces.npy").is_file() {
+        let (v, f) = (load3(&sd.join("vertices.npy")), load_faces(&sd.join("faces.npy")));
+        let (t, rep) = MeshTruth::new(&v, &f, &TruthOptions { threads, require_closed: false, ..Default::default() }).unwrap();
+        let mut s = vec![0.0; q];
+        t.evaluate(&grid, &mut s, None).unwrap();
+        println!("SPSRMESH {name} faces {} boundary {} nonmanifold {} volume {:.4}", rep.faces, rep.boundary_edges, rep.nonmanifold_edges, rep.signed_volume);
+        report("SPSR", &s);
+    }
+    println!("DONE {name} {:.1}s", t0.elapsed().as_secs_f64());
+}

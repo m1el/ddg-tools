@@ -43,6 +43,12 @@ pub struct KernelOptions {
     pub lambda: LambdaRule,
     /// Threads of batch evaluation (`None`: all cores).
     pub threads: Option<usize>,
+    /// SHC where `w = 0` exactly (e.g. a query in the plane of a planar patch, where every
+    /// `⟨x − p_i, n_i⟩ = 0`): `None` (default) returns [`PatError::DegenerateQuery`] as the SPEC
+    /// requires; `Some(v)` returns `φ = v`, `∇φ = 0` and counts the query in
+    /// [`KernelReport::degenerate`] (for error statistics over grids). `|φ| → ∞` as `w → 0`, so no
+    /// value is right.
+    pub shc_zero_value: Option<f64>,
 }
 
 /// One kernel evaluation.
@@ -62,6 +68,8 @@ pub struct KernelValue {
     pub terms: u32,
     /// SHC terms with `ρ = 0` left out; for SSPD and LSE, terms with `r̂ := 0`.
     pub skipped: u32,
+    /// SHC with `w = 0` replaced by [`KernelOptions::shc_zero_value`].
+    pub degenerate: bool,
 }
 
 /// What a batch evaluation did.
@@ -75,6 +83,8 @@ pub struct KernelReport {
     pub skipped: u64,
     /// Radius queries that fell back to kNN.
     pub radius_fallbacks: u64,
+    /// SHC queries with `w = 0` given [`KernelOptions::shc_zero_value`].
+    pub degenerate: u64,
     /// Wall time.
     pub seconds: f64,
 }
@@ -108,6 +118,11 @@ impl KernelField {
         }
         if let Some(i) = areas.iter().position(|&a| a < 0.0) {
             return Err(PatError::InvalidOption { what: format!("point area {i} is negative ({})", areas[i]) });
+        }
+        if let Some(z) = options.shc_zero_value
+            && !z.is_finite()
+        {
+            return Err(PatError::InvalidOption { what: format!("KernelOptions::shc_zero_value = {z} (must be finite)") });
         }
         match options.neighborhood {
             Neighborhood::Knn { k: 0 } => return Err(PatError::InvalidOption { what: "Neighborhood::Knn { k: 0 }".into() }),
@@ -207,6 +222,13 @@ impl KernelField {
             KernelMethod::Shc => {
                 let (value, gradient, skipped) = shc_sum(&self.positions, &self.normals, &self.areas, x, nbrs, lambda, s, grad);
                 v.skipped = skipped;
+                if value == 0.0
+                    && let Some(z) = self.options.shc_zero_value
+                {
+                    v.value = z;
+                    v.degenerate = true;
+                    return Ok(v);
+                }
                 if value == 0.0 || !value.is_finite() {
                     return Err(Fail::Degenerate("the SHC sum w is 0 (or not finite), so log|w| is undefined"));
                 }
@@ -283,6 +305,7 @@ impl KernelField {
             rep.terms += v.terms as u64;
             rep.skipped += v.skipped as u64;
             rep.radius_fallbacks += fb as u64;
+            rep.degenerate += v.degenerate as u64;
         }
         rep.seconds = t0.elapsed().as_secs_f64();
         Ok(rep)
