@@ -25,6 +25,7 @@
 //!   --validate-every N    validate at an epoch end once N steps passed since the last one [0: every epoch]
 //!   --no-resume           start fresh even if --out holds a checkpoint
 //!   --network-batch B     neighborhoods per network launch [256 on the GPU, 4 on the CPU]
+//!   --forward-batch F     neighborhoods per launch of the untaped forward pass on the GPU [= network batch]
 //!   --pair-chunk P        padded pairs per loss chunk [1048576 on the GPU, 65536 on the CPU]
 //!   --phases a,b          only these phases (names), e.g. pretrain
 //!   --file F --shape I --steps N --reps R    (bench, compare)
@@ -63,6 +64,7 @@ struct Args {
     validate_every: u64,
     resume: bool,
     network_batch: Option<usize>,
+    forward_batch: Option<usize>,
     pair_chunk: Option<usize>,
     phases: Option<Vec<String>>,
     file: String,
@@ -98,6 +100,7 @@ fn parse() -> Result<Args, PatError> {
         validate_every: 0,
         resume: true,
         network_batch: None,
+        forward_batch: None,
         pair_chunk: None,
         phases: None,
         file: "nice/blobs_train_mode0_0.npz".into(),
@@ -150,6 +153,7 @@ fn parse() -> Result<Args, PatError> {
             "--validate-every" => a.validate_every = num(val(&mut i)?, "--validate-every")?,
             "--no-resume" => a.resume = false,
             "--network-batch" => a.network_batch = Some(num(val(&mut i)?, "--network-batch")?.max(1) as usize),
+            "--forward-batch" => a.forward_batch = Some(num(val(&mut i)?, "--forward-batch")?.max(1) as usize),
             "--pair-chunk" => a.pair_chunk = Some(num(val(&mut i)?, "--pair-chunk")?.max(1) as usize),
             "--phases" => a.phases = Some(val(&mut i)?.split(',').map(str::to_string).collect()),
             "--file" => a.file = val(&mut i)?,
@@ -189,6 +193,7 @@ fn step_options(a: &Args, gpu: bool) -> StepOptions {
     o.loss.fit.eigen_rule = a.eigen;
     o.reference_padding = a.reference_padding;
     o.network_chunk = a.network_batch.unwrap_or(if gpu { 256 } else { 4 });
+    o.forward_chunk = a.forward_batch.unwrap_or(0);
     o.loss.pair_chunk = a.pair_chunk.unwrap_or(if gpu { 1 << 20 } else { 1 << 16 });
     o
 }

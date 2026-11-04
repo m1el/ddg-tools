@@ -468,12 +468,12 @@ fn padded(sel: &[u32], batch: usize) -> (Vec<u32>, usize) {
 }
 
 /// Pass 2 on the GPU: coefficients and `∂a/∂y` of network rows `sel`, batches of the fixed shape
-/// `o.network_chunk` from the calling thread.
+/// `o.forward_chunk` (or `o.network_chunk`) from the calling thread.
 pub fn coefficients(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32], o: &StepOptions) -> Result<(Vec<f64>, Vec<[f64; 6]>), PatError> {
     if sel.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let batch = o.network_chunk.max(1);
+    let batch = if o.forward_chunk > 0 { o.forward_chunk } else { o.network_chunk.max(1) };
     let (rows, nb) = padded(sel, batch);
     let sub = select_rows(&prep.feats, &rows);
     let raw = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Vec<f64>, PatError> {

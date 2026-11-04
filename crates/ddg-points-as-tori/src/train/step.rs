@@ -40,8 +40,11 @@ pub struct StepOptions {
     pub feature_order: FeatureOrder,
     /// Reproduce the reference's padding (D19).
     pub reference_padding: bool,
-    /// Neighborhoods per taped network chunk (pass 4).
+    /// Neighborhoods per taped network chunk (pass 4; on the GPU also the fixed batch shape).
     pub network_chunk: usize,
+    /// Neighborhoods per launch of the untaped forward pass on the GPU (pass 2); 0: `network_chunk`.
+    /// Ignored on the CPU.
+    pub forward_chunk: usize,
     /// Fixed number of gradient groups (pass 4); results depend on it, not on the threads.
     pub groups: usize,
 }
@@ -54,6 +57,7 @@ impl Default for StepOptions {
             feature_order: FeatureOrder::DifferenceFirst,
             reference_padding: false,
             network_chunk: 4,
+            forward_chunk: 0,
             groups: 64,
         }
     }
