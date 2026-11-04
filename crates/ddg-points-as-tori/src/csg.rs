@@ -37,6 +37,13 @@ pub trait ImplicitField: Sync {
     fn point_count_hint(&self) -> Option<usize> {
         None
     }
+    /// Cumulative evaluation counters of the fitted fields behind this one (queries, singular and
+    /// data-point counters, terms, seconds), if it has any: [`TorusField::totals`] for a
+    /// `TorusField`, the sum over the leaves for a [`Csg`] tree, `None` for analytic fields.
+    /// Marching cubes subtracts two snapshots to fill [`crate::mc::McReport::eval`].
+    fn eval_totals(&self) -> Option<crate::EvalReport> {
+        None
+    }
     /// `out[i] = φ(xs[i])`.
     fn distances(&self, xs: &[[f64; 3]], out: &mut [f64]) -> Result<(), PatError> {
         check_len(xs.len(), out.len(), "distance")?;
@@ -92,6 +99,9 @@ impl<T: ImplicitField + ?Sized> ImplicitField for &T {
     fn point_count_hint(&self) -> Option<usize> {
         (**self).point_count_hint()
     }
+    fn eval_totals(&self) -> Option<crate::EvalReport> {
+        (**self).eval_totals()
+    }
     fn distances(&self, xs: &[[f64; 3]], out: &mut [f64]) -> Result<(), PatError> {
         (**self).distances(xs, out)
     }
@@ -130,6 +140,9 @@ impl ImplicitField for TorusField {
     fn point_count_hint(&self) -> Option<usize> {
         Some(self.positions().len())
     }
+    fn eval_totals(&self) -> Option<crate::EvalReport> {
+        Some(self.totals())
+    }
     fn distances(&self, xs: &[[f64; 3]], out: &mut [f64]) -> Result<(), PatError> {
         self.evaluate(xs, crate::EvalOut { distance: Some(out), gradient: None, laplacian: None }).map(|_| ())
     }
@@ -151,11 +164,11 @@ pub enum Csg {
     Subtract(Box<Csg>, Box<Csg>),
     /// `φ − c` (offset outward for `c > 0`).
     Offset(Box<Csg>, f64),
-    /// Smooth minimum with radius `k > 0` (ours; off unless built).
+    /// Smooth minimum with radius `k ≥ 0` (ours; off unless built). `k = 0` is the sharp `min`.
     SmoothUnion(Box<Csg>, Box<Csg>, f64),
-    /// Smooth maximum with radius `k > 0`.
+    /// Smooth maximum with radius `k ≥ 0` (`k = 0`: the sharp `max`).
     SmoothIntersect(Box<Csg>, Box<Csg>, f64),
-    /// Smooth `max(φ_A, −φ_B)` with radius `k > 0`.
+    /// Smooth `max(φ_A, −φ_B)` with radius `k ≥ 0` (`k = 0`: the sharp subtraction).
     SmoothSubtract(Box<Csg>, Box<Csg>, f64),
 }
 
@@ -197,6 +210,9 @@ fn pick_max(a: f64, b: f64) -> Pick {
 
 /// Polynomial smooth minimum and the weights of the two gradients.
 fn smooth_min(a: f64, b: f64, k: f64) -> Pick {
+    if k == 0.0 {
+        return pick_min(a, b);
+    }
     let h = (k - (a - b).abs()).max(0.0) / k;
     let v = a.min(b) - h * h * k * 0.25;
     // For a <= b: d/da = 1 - h/2, d/db = h/2 (and the mirror image otherwise); at a = b both are 1/2.
@@ -204,6 +220,9 @@ fn smooth_min(a: f64, b: f64, k: f64) -> Pick {
 }
 
 fn smooth_max(a: f64, b: f64, k: f64) -> Pick {
+    if k == 0.0 {
+        return pick_max(a, b);
+    }
     let p = smooth_min(-a, -b, k);
     Pick { v: -p.v, wa: p.wa, wb: p.wb }
 }
@@ -234,7 +253,8 @@ impl Csg {
         Csg::Offset(Box::new(self), c)
     }
 
-    /// Check the parameters of the whole tree (finite offsets, smooth radii `> 0`).
+    /// Check the parameters of the whole tree (finite offsets, smooth radii finite and `≥ 0`; a radius
+    /// of 0 means no smoothing: the sharp Boolean, so callers need not map 0 to a different node).
     pub fn validate(&self) -> Result<(), PatError> {
         match self {
             Csg::Leaf(_) => Ok(()),
@@ -249,8 +269,8 @@ impl Csg {
                 a.validate()
             }
             Csg::SmoothUnion(a, b, k) | Csg::SmoothIntersect(a, b, k) | Csg::SmoothSubtract(a, b, k) => {
-                if !(k.is_finite() && *k > 0.0) {
-                    return Err(PatError::InvalidOption { what: format!("smooth Boolean radius k = {k} (must be finite and > 0)") });
+                if !(k.is_finite() && *k >= 0.0) {
+                    return Err(PatError::InvalidOption { what: format!("smooth Boolean radius k = {k} (must be finite and >= 0; 0 is the sharp Boolean)") });
                 }
                 a.validate()?;
                 b.validate()
@@ -381,6 +401,19 @@ impl ImplicitField for Csg {
         match self {
             Csg::Leaf(f) => f.point_count_hint(),
             _ => None,
+        }
+    }
+    fn eval_totals(&self) -> Option<crate::EvalReport> {
+        match self {
+            Csg::Leaf(f) => f.eval_totals(),
+            Csg::Offset(a, _) => a.eval_totals(),
+            _ => {
+                let (a, b) = self.children()?;
+                match (a.eval_totals(), b.eval_totals()) {
+                    (Some(x), Some(y)) => Some(x.plus(&y)),
+                    (x, y) => x.or(y),
+                }
+            }
         }
     }
     fn distances(&self, xs: &[[f64; 3]], out: &mut [f64]) -> Result<(), PatError> {

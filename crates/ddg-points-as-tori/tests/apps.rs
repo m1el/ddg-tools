@@ -131,17 +131,17 @@ fn morphology_round_trip_on_a_sphere() {
     };
     let c = 0.05;
     // erosion / dilation shift the radius by c
-    let (er, rep) = morphology(&f0, &model, Morph::Erode(c), &opts).unwrap();
+    let (er, _cl, rep) = morphology(&f0, &model, Morph::Erode(c), &opts).unwrap();
     assert_eq!(rep.steps.len(), 1);
     assert!(rep.steps[0].sample.produced >= 500, "{}", rep.steps[0].sample.produced);
     let probe = fibonacci_sphere(400, 0.5 - c);
     assert!(hausdorff_to_field(probe.positions(), &er) < 0.02, "erode: {}", hausdorff_to_field(probe.positions(), &er));
-    let (di, _) = morphology(&f0, &model, Morph::Dilate(c), &opts).unwrap();
+    let (di, _, _) = morphology(&f0, &model, Morph::Dilate(c), &opts).unwrap();
     let probe = fibonacci_sphere(400, 0.5 + c);
     assert!(hausdorff_to_field(probe.positions(), &di) < 0.02, "dilate: {}", hausdorff_to_field(probe.positions(), &di));
     // opening and closing of a convex shape roughly preserve it
     for op in [Morph::Open(c), Morph::Close(c)] {
-        let (g, rep) = morphology(&f0, &model, op, &opts).unwrap();
+        let (g, _cl, rep) = morphology(&f0, &model, op, &opts).unwrap();
         assert_eq!(rep.steps.len(), 2);
         let err = hausdorff_to_field(cloud.positions(), &g);
         assert!(err < 0.03, "{op:?}: original points are {err} from the result's surface");
@@ -171,10 +171,10 @@ fn morphology_round_trip_on_the_golden_torus() {
         ..Default::default()
     };
     // the tube radius is 0.15; closing by 0.03 keeps a convex-ish torus nearly unchanged
-    let (c, _) = morphology(&f0, &model, Morph::Close(0.03), &opts).unwrap();
+    let (c, _, _) = morphology(&f0, &model, Morph::Close(0.03), &opts).unwrap();
     let err = hausdorff_to_field(g.cloud.positions(), &c);
     assert!(err < 0.04, "closed torus: {err}");
-    let (o, _) = morphology(&f0, &model, Morph::Open(0.03), &opts).unwrap();
+    let (o, _, _) = morphology(&f0, &model, Morph::Open(0.03), &opts).unwrap();
     let err = hausdorff_to_field(g.cloud.positions(), &o);
     assert!(err < 0.04, "opened torus: {err}");
     let _ = EvalOptions::default();

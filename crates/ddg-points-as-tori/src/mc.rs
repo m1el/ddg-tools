@@ -202,6 +202,10 @@ pub struct McReport {
     pub mesh: MeshCheck,
     /// Seconds: coarse pass and band, grid evaluation, cells, vertices and refinement, total.
     pub seconds: [f64; 5],
+    /// What the fitted fields behind the surface evaluated during this run (the difference of
+    /// [`ImplicitField::eval_totals`] before and after; batch evaluations only). `None` for
+    /// analytic fields.
+    pub eval: Option<crate::EvalReport>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -599,6 +603,7 @@ fn covered(lo: [f64; 3], hi: [f64; 3], balls: &[([f64; 3], f64)], depth: usize) 
 /// `TriMesh::new` when [`McOptions::check_mesh`]).
 pub fn marching_cubes(field: &dyn ImplicitField, opts: &McOptions) -> Result<(McMesh, McReport), PatError> {
     let t_start = Instant::now();
+    let totals_before = field.eval_totals();
     if !opts.isovalue.is_finite() {
         return Err(invalid(format!("marching cubes isovalue = {}", opts.isovalue)));
     }
@@ -634,6 +639,9 @@ pub fn marching_cubes(field: &dyn ImplicitField, opts: &McOptions) -> Result<(Mc
         }
         fn bbox(&self) -> [[f64; 3]; 2] {
             self.0.bbox()
+        }
+        fn eval_totals(&self) -> Option<crate::EvalReport> {
+            self.0.eval_totals()
         }
         fn distances(&self, xs: &[[f64; 3]], out: &mut [f64]) -> Result<(), PatError> {
             self.0.distances(xs, out)?;
@@ -902,6 +910,7 @@ pub fn marching_cubes(field: &dyn ImplicitField, opts: &McOptions) -> Result<(Mc
             (t_end - t_cells).as_secs_f64(),
             (t_end - t_start).as_secs_f64(),
         ],
+        eval: field.eval_totals().zip(totals_before).map(|(after, before)| after.since(&before)),
     };
     Ok((mesh, report))
 }

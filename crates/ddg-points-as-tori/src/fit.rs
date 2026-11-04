@@ -519,15 +519,28 @@ const MAGIC: &[u8; 8] = b"PATTORI\0";
 const VERSION: u32 = 1;
 
 impl Tori {
-    /// Our binary format (SPEC.md §2.2): magic `PATTORI\0`, `u32` version 1, `u32` 0, `u64` n,
+    /// Our binary format (SPEC.md §2.2): magic `PATTORI\0`, `u32` version 1, `u32` sign-rule marker
+    /// (0: not recorded, 1: [`SignRule::Reference`], 2: [`SignRule::Geometric`]; files written
+    /// before the marker existed have 0 there), `u64` n,
     /// `u64` hash of the source cloud ([`PointCloud::hash`]), then little-endian arrays: centers
     /// `f64[3n]`, axes `f64[3n]`, major `f64[n]`, minor `f64[n]`, σ `f64[n]`, coefficients `f32[6n]`.
     pub fn to_bytes(&self, cloud_hash: u64) -> Vec<u8> {
+        self.to_bytes_with(cloud_hash, None)
+    }
+
+    /// [`Tori::to_bytes`] recording the sign rule the tori were fitted with (the tori of the two
+    /// rules differ at saddles, so a cache keyed by the cloud alone would mix them).
+    pub fn to_bytes_with(&self, cloud_hash: u64, sign_rule: Option<SignRule>) -> Vec<u8> {
         let n = self.tori.len();
         let mut b = Vec::with_capacity(32 + n * (8 * 9 + 24));
         b.extend_from_slice(MAGIC);
         b.extend_from_slice(&VERSION.to_le_bytes());
-        b.extend_from_slice(&0u32.to_le_bytes());
+        let marker: u32 = match sign_rule {
+            None => 0,
+            Some(SignRule::Reference) => 1,
+            Some(SignRule::Geometric) => 2,
+        };
+        b.extend_from_slice(&marker.to_le_bytes());
         b.extend_from_slice(&(n as u64).to_le_bytes());
         b.extend_from_slice(&cloud_hash.to_le_bytes());
         let mut f = |x: f64| b.extend_from_slice(&x.to_le_bytes());
@@ -547,6 +560,13 @@ impl Tori {
     /// Read [`Tori::to_bytes`]. With `expected_hash`, a different source-cloud hash is an error.
     /// Returns the tori and the stored hash.
     pub fn from_bytes(bytes: &[u8], expected_hash: Option<u64>) -> Result<(Tori, u64), PatError> {
+        Self::from_bytes_with(bytes, expected_hash).map(|(t, h, _)| (t, h))
+    }
+
+    /// [`Tori::from_bytes`] also returning the recorded sign rule (`None`: not recorded, as in
+    /// files written by [`Tori::to_bytes`] or before the marker existed; an unknown marker is an
+    /// error).
+    pub fn from_bytes_with(bytes: &[u8], expected_hash: Option<u64>) -> Result<(Tori, u64, Option<SignRule>), PatError> {
         let ferr = |reason: String| PatError::Format { reason };
         if bytes.len() < 32 || &bytes[..8] != MAGIC {
             return Err(ferr("not a tori file (bad magic)".into()));
@@ -556,6 +576,12 @@ impl Tori {
         if u32at(8) != VERSION {
             return Err(ferr(format!("tori file version {} (expected {VERSION})", u32at(8))));
         }
+        let sign_rule = match u32at(12) {
+            0 => None,
+            1 => Some(SignRule::Reference),
+            2 => Some(SignRule::Geometric),
+            m => return Err(ferr(format!("tori file has sign-rule marker {m} (expected 0, 1 or 2)"))),
+        };
         let n = u64at(16) as usize;
         let hash = u64at(24);
         if let Some(h) = expected_hash
@@ -580,6 +606,6 @@ impl Tori {
         let o = 32 + 8 * 9 * n;
         let g = |k: usize| f32::from_le_bytes([bytes[o + 4 * k], bytes[o + 4 * k + 1], bytes[o + 4 * k + 2], bytes[o + 4 * k + 3]]);
         let coefficients = (0..n).map(|i| std::array::from_fn(|c| g(6 * i + c))).collect();
-        Ok((Tori { tori, coefficients, sigma }, hash))
+        Ok((Tori { tori, coefficients, sigma }, hash, sign_rule))
     }
 }

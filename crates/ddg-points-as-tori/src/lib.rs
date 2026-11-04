@@ -55,6 +55,7 @@ pub mod fit;
 pub mod network;
 pub mod npy;
 pub mod pool;
+pub mod progress;
 pub mod sdf;
 pub mod spatial;
 
@@ -89,6 +90,7 @@ pub use cloud::{CloudReport, NormalPolicy, PointCloud};
 pub use error::PatError;
 pub use features::FeatureOrder;
 pub use field::{BuildOptions, BuildReport, EvalOptions, EvalOut, EvalPrecision, EvalReport, Neighborhood, PointsAsTori, TorusField};
-pub use fit::{FitDiagnostics, FitOptions, FitReport, Torus, SignRule, Tori, fit_diagnostics, fit_tori};
-pub use network::{Device, Model, ModelConfig, PredictOptions, PredictReport, predict_coefficients};
+pub use fit::{EigenRule, FitDiagnostics, FitOptions, FitReport, SignRule, Tori, Torus, fit_diagnostics, fit_tori};
+pub use network::{Device, GpuMatmul, Model, ModelConfig, PredictOptions, PredictReport, predict_coefficients};
+pub use progress::Progress;
 pub use spatial::Neighborhoods;

@@ -322,7 +322,8 @@ fn csg_ties_go_to_a_and_batches_agree() {
         assert_eq!(a, d2[i]);
         assert_eq!(b, g[i]);
     }
-    assert!(Csg::SmoothUnion(Box::new(s.clone()), Box::new(s), 0.0).distance([0.0; 3]).is_err());
+    assert!(Csg::SmoothUnion(Box::new(s.clone()), Box::new(s.clone()), -0.1).distance([0.0; 3]).is_err());
+    assert!(Csg::SmoothUnion(Box::new(s.clone()), Box::new(s), f64::NAN).distance([0.0; 3]).is_err());
 }
 
 #[test]

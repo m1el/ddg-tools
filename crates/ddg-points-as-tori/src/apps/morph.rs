@@ -24,7 +24,9 @@ pub enum Morph {
 }
 
 impl Morph {
-    fn levels(self) -> Result<Vec<f64>, PatError> {
+    /// The levels sampled in order (`−c` for erosion, `+c` for dilation, two for opening and
+    /// closing), after checking the radius (finite, `≥ 0`).
+    pub fn levels(self) -> Result<Vec<f64>, PatError> {
         let (c, l) = match self {
             Morph::Erode(c) => (c, vec![-c]),
             Morph::Dilate(c) => (c, vec![c]),
@@ -75,8 +77,14 @@ pub struct MorphReport {
     pub seconds: f64,
 }
 
-/// Apply `op` to the shape of `field` and refit tori to the result.
-pub fn morphology(field: &dyn ImplicitField, model: &Model, op: Morph, opts: &MorphOptions) -> Result<(TorusField, MorphReport), PatError> {
+/// Apply `op` to the shape of `field` and refit tori to the result. Returns the new field, the
+/// cloud that was sampled from the morphed surface (the one the field was built on), and a report.
+pub fn morphology(
+    field: &dyn ImplicitField,
+    model: &Model,
+    op: Morph,
+    opts: &MorphOptions,
+) -> Result<(TorusField, PointCloud, MorphReport), PatError> {
     let t0 = Instant::now();
     let levels = op.levels()?;
     let mut sample = opts.sample.clone();
@@ -84,10 +92,10 @@ pub fn morphology(field: &dyn ImplicitField, model: &Model, op: Morph, opts: &Mo
         sample.count = field.point_count_hint();
     }
     let mut steps = Vec::new();
-    let mut current: Option<TorusField> = None;
+    let mut current: Option<(TorusField, PointCloud)> = None;
     for level in levels {
         let src: &dyn ImplicitField = match &current {
-            Some(f) => f,
+            Some((f, _)) => f,
             None => field,
         };
         let (pts, nrm, srep) = sample_level_set(src, level, &sample)?;
@@ -98,10 +106,10 @@ pub fn morphology(field: &dyn ImplicitField, model: &Model, op: Morph, opts: &Mo
         }
         let (f, brep) = PointsAsTori::build(&cloud, model, &build)?;
         steps.push(MorphStep { level, sample: srep, build: brep });
-        current = Some(f);
+        current = Some((f, cloud));
     }
     match current {
-        Some(f) => Ok((f, MorphReport { steps, seconds: t0.elapsed().as_secs_f64() })),
+        Some((f, cloud)) => Ok((f, cloud, MorphReport { steps, seconds: t0.elapsed().as_secs_f64() })),
         None => Err(PatError::InvalidOption { what: "morphology without steps".into() }),
     }
 }

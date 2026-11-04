@@ -385,7 +385,24 @@ pub fn predict_coefficients(
     nbhds: &Neighborhoods,
     opts: &PredictOptions,
 ) -> Result<Prediction, PatError> {
+    predict_coefficients_with(model, cloud, nbhds, opts, None)
+}
+
+/// [`predict_coefficients`] reporting to a [`crate::Progress`] (stage `"network"`, one item per
+/// neighborhood, checked for cancellation before every chunk of the CPU path and before a CUDA
+/// run).
+pub fn predict_coefficients_with(
+    model: &Model,
+    cloud: &PointCloud,
+    nbhds: &Neighborhoods,
+    opts: &PredictOptions,
+    progress: Option<&crate::Progress>,
+) -> Result<Prediction, PatError> {
     let t0 = std::time::Instant::now();
+    if let Some(p) = progress {
+        p.begin(crate::progress::NETWORK, cloud.len() as u64);
+    }
+    crate::progress::check(progress)?;
     check_device(opts.device)?;
     let n = cloud.len();
     if nbhds.len() != n {
@@ -408,7 +425,11 @@ pub fn predict_coefficients(
     }
     #[cfg(feature = "cuda")]
     if let Some(ordinal) = crate::gpu::resolve_ordinal(opts.device)? {
-        return cuda::predict_coefficients_cuda(model, cloud, nbhds, opts, ordinal);
+        let r = cuda::predict_coefficients_cuda(model, cloud, nbhds, opts, ordinal)?;
+        if let Some(p) = progress {
+            p.advance(n as u64);
+        }
+        return Ok(r);
     }
     let pool = crate::pool::make_pool(opts.threads)?;
     let runner = Runner::new(model);
@@ -421,6 +442,7 @@ pub fn predict_coefficients(
             .map_init(
                 || (FeatureScratch::default(), vec![0f32; CHUNK * t * 6]),
                 |(scr, feat), c| {
+                    crate::progress::check(progress)?;
                     let lo = c * CHUNK;
                     let hi = (lo + CHUNK).min(n);
                     let b = hi - lo;
@@ -440,6 +462,9 @@ pub fn predict_coefficients(
                             scale_outputs(y, sig[r], opts.feature_order)
                         })
                         .collect();
+                    if let Some(p) = progress {
+                        p.advance(b as u64);
+                    }
                     Ok((co, sig, tf, tn))
                 },
             )

@@ -2,9 +2,10 @@
 
 use crate::blend::{BlendFlags, BlendInputs, BlendValue, BlendWant, Degenerate, GradientMode, LambdaRule, blend};
 use crate::fit::{FitOptions, FitReport, Tori, fit_tori_with};
-use crate::network::{Device, Model, PredictOptions, PredictReport, predict_coefficients};
+use crate::network::{Device, Model, PredictOptions, PredictReport, predict_coefficients_with};
 use crate::spatial::{KdTree, KdTreeOptions, Neighbor, fitting_neighborhoods};
-use crate::{PatError, PointCloud};
+use crate::{PatError, PointCloud, Progress, SignRule};
+use std::sync::atomic::{AtomicU64, Ordering};
 use rayon::prelude::*;
 
 /// The neighbor set of a query.
@@ -66,6 +67,9 @@ pub struct EvalOptions {
     pub device: Device,
     /// Threads for batch evaluation (`None`: all cores).
     pub threads: Option<usize>,
+    /// Progress counter and cancel flag of [`TorusField::evaluate`] (stage `"evaluate"`, one item
+    /// per query; a cancelled call returns [`PatError::Cancelled`]).
+    pub progress: Option<Progress>,
 }
 
 /// Output buffers of [`TorusField::evaluate`]; each requested buffer has one entry per query.
@@ -100,10 +104,43 @@ pub struct EvalReport {
     pub seconds: f64,
 }
 
+impl EvalReport {
+    /// The sum of two reports (counters add; the device is `self`'s).
+    pub fn plus(&self, o: &EvalReport) -> EvalReport {
+        EvalReport {
+            queries: self.queries + o.queries,
+            singular_axis: self.singular_axis + o.singular_axis,
+            singular_core: self.singular_core + o.singular_core,
+            at_data_point: self.at_data_point + o.at_data_point,
+            radius_fallbacks: self.radius_fallbacks + o.radius_fallbacks,
+            terms: self.terms + o.terms,
+            device: self.device,
+            seconds: self.seconds + o.seconds,
+        }
+    }
+
+    /// `self − earlier`, for two snapshots of [`TorusField::totals`] (counters saturate at 0).
+    pub fn since(&self, earlier: &EvalReport) -> EvalReport {
+        EvalReport {
+            queries: self.queries.saturating_sub(earlier.queries),
+            singular_axis: self.singular_axis.saturating_sub(earlier.singular_axis),
+            singular_core: self.singular_core.saturating_sub(earlier.singular_core),
+            at_data_point: self.at_data_point.saturating_sub(earlier.at_data_point),
+            radius_fallbacks: self.radius_fallbacks.saturating_sub(earlier.radius_fallbacks),
+            terms: self.terms.saturating_sub(earlier.terms),
+            device: self.device,
+            seconds: (self.seconds - earlier.seconds).max(0.0),
+        }
+    }
+}
+
 /// An analytic SDF approximation: cloud, tori, kd-tree and evaluation options.
 #[derive(Debug)]
 pub struct TorusField {
-    positions: Vec<[f64; 3]>,
+    cloud: PointCloud,
+    cloud_hash: u64,
+    sign_rule: Option<SignRule>,
+    totals: Totals,
     tori: Tori,
     tree: KdTree,
     options: EvalOptions,
@@ -112,6 +149,30 @@ pub struct TorusField {
     pool: rayon::ThreadPool,
     #[cfg(feature = "cuda")]
     gpu: Option<crate::gpu::GpuField>,
+}
+
+/// Running sums of the batch evaluations of one field (see [`TorusField::totals`]).
+#[derive(Debug, Default)]
+struct Totals {
+    queries: AtomicU64,
+    singular_axis: AtomicU64,
+    singular_core: AtomicU64,
+    at_data_point: AtomicU64,
+    radius_fallbacks: AtomicU64,
+    terms: AtomicU64,
+    nanos: AtomicU64,
+}
+
+impl Totals {
+    fn add(&self, r: &EvalReport) {
+        self.queries.fetch_add(r.queries as u64, Ordering::Relaxed);
+        self.singular_axis.fetch_add(r.singular_axis, Ordering::Relaxed);
+        self.singular_core.fetch_add(r.singular_core, Ordering::Relaxed);
+        self.at_data_point.fetch_add(r.at_data_point, Ordering::Relaxed);
+        self.radius_fallbacks.fetch_add(r.radius_fallbacks, Ordering::Relaxed);
+        self.terms.fetch_add(r.terms, Ordering::Relaxed);
+        self.nanos.fetch_add((r.seconds * 1e9) as u64, Ordering::Relaxed);
+    }
 }
 
 fn degenerate(index: usize) -> PatError {
@@ -194,20 +255,23 @@ impl TorusField {
             return Err(PatError::InvalidOption { what: "EvalPrecision::F32Stable runs on the GPU only (device Cpu)".into() });
         }
         let pool = crate::pool::make_pool(options.threads)?;
-        let positions = cloud.positions().to_vec();
-        let tree = pool.install(|| KdTree::new(&positions, KdTreeOptions::default()))?;
+        let positions = cloud.positions();
+        let tree = pool.install(|| KdTree::new(positions, KdTreeOptions::default()))?;
         let (mut lambda_global, mut mean_distance) = (f64::NAN, f64::NAN);
         if let LambdaRule::PaperHeuristic { factor, k_mean, .. } = options.lambda {
-            mean_distance = pool.install(|| mean_neighbor_distance(&tree, &positions, k_mean));
+            mean_distance = pool.install(|| mean_neighbor_distance(&tree, positions, k_mean));
             lambda_global = factor / mean_distance;
             if !(lambda_global.is_finite() && lambda_global > 0.0) {
                 return Err(PatError::InvalidOption { what: format!("PaperHeuristic gives λ = {lambda_global} (D = {mean_distance})") });
             }
         }
         #[cfg(feature = "cuda")]
-        let gpu = open_gpu(&options, &tree, &positions, &tori.tori)?;
+        let gpu = open_gpu(&options, &tree, positions, &tori.tori)?;
         Ok(TorusField {
-            positions,
+            cloud: cloud.clone(),
+            cloud_hash: cloud.hash(),
+            sign_rule: None,
+            totals: Totals::default(),
             tori,
             tree,
             options,
@@ -252,7 +316,54 @@ impl TorusField {
 
     /// The data positions.
     pub fn positions(&self) -> &[[f64; 3]] {
-        &self.positions
+        self.cloud.positions()
+    }
+
+    /// The cloud the field was built on (positions and unit normals).
+    pub fn cloud(&self) -> &PointCloud {
+        &self.cloud
+    }
+
+    /// [`PointCloud::hash`] of [`TorusField::cloud`] (computed once; the key of saved tori).
+    pub fn cloud_hash(&self) -> u64 {
+        self.cloud_hash
+    }
+
+    /// The sign rule the tori were fitted with, when known (set by [`PointsAsTori::build`] and
+    /// [`TorusField::with_sign_rule`]; `None` for tori of unknown origin).
+    pub fn sign_rule(&self) -> Option<SignRule> {
+        self.sign_rule
+    }
+
+    /// Record the sign rule the tori were fitted with (a marker for [`TorusField::to_bytes`]; it
+    /// changes no result).
+    pub fn with_sign_rule(mut self, rule: Option<SignRule>) -> Self {
+        self.sign_rule = rule;
+        self
+    }
+
+    /// The tori in our binary format ([`Tori::to_bytes_with`]) with this field's cloud hash and
+    /// sign-rule marker.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.tori.to_bytes_with(self.cloud_hash, self.sign_rule)
+    }
+
+    /// Sums over every batch evaluation ([`TorusField::evaluate`], and so every
+    /// [`crate::csg::ImplicitField`] batch method, marching cubes included) since the field was
+    /// created: `queries`, the singular and data-point counters, `terms`, `seconds`. Single-point
+    /// queries are not counted. The sums are atomic, so they do not depend on thread timing.
+    pub fn totals(&self) -> EvalReport {
+        let t = &self.totals;
+        EvalReport {
+            queries: t.queries.load(Ordering::Relaxed) as usize,
+            singular_axis: t.singular_axis.load(Ordering::Relaxed),
+            singular_core: t.singular_core.load(Ordering::Relaxed),
+            at_data_point: t.at_data_point.load(Ordering::Relaxed),
+            radius_fallbacks: t.radius_fallbacks.load(Ordering::Relaxed),
+            terms: t.terms.load(Ordering::Relaxed),
+            device: self.device(),
+            seconds: t.nanos.load(Ordering::Relaxed) as f64 * 1e-9,
+        }
     }
 
     /// The options.
@@ -272,7 +383,7 @@ impl TorusField {
 
     fn inputs(&self) -> BlendInputs<'_> {
         BlendInputs {
-            positions: &self.positions,
+            positions: self.cloud.positions(),
             tori: &self.tori.tori,
             area_weights: self.options.area_weights.as_deref(),
             lambda: self.options.lambda,
@@ -283,7 +394,7 @@ impl TorusField {
 
     /// The neighbor set of `x` (into `idx`, using `buf`); returns whether a radius query fell back.
     fn neighbors(&self, x: [f64; 3], buf: &mut Vec<Neighbor>, idx: &mut Vec<u32>) -> bool {
-        let n = self.positions.len();
+        let n = self.cloud.len();
         idx.clear();
         let mut fell_back = false;
         match self.options.neighborhood {
@@ -380,6 +491,11 @@ impl TorusField {
                 what: "the Laplacian pass returns the frozen gradient; request the exact gradient separately".into(),
             });
         }
+        let progress = self.options.progress.as_ref();
+        if let Some(p) = progress {
+            p.begin(crate::progress::EVALUATE, q as u64);
+        }
+        crate::progress::check(progress)?;
         #[cfg(feature = "cuda")]
         if let Some(g) = &self.gpu {
             let mut out = out;
@@ -389,20 +505,31 @@ impl TorusField {
                 Ok(mut rep) => {
                     rep.device = g.device();
                     rep.seconds = t0.elapsed().as_secs_f64();
+                    if let Some(p) = progress {
+                        p.advance(q as u64);
+                    }
+                    self.totals.add(&rep);
                     Ok(rep)
                 }
                 Err(i) => Err(degenerate(i)),
             };
         }
-        let vals: Vec<Result<(BlendValue, bool, usize), Degenerate>> = self.pool.install(|| {
+        type Val = Result<(BlendValue, bool, usize), Degenerate>;
+        let vals: Result<Vec<Vec<Val>>, PatError> = self.pool.install(|| {
             xs.par_chunks(EVAL_CHUNK)
-                .flat_map_iter(|c| {
+                .map(|c| {
+                    crate::progress::check(progress)?;
                     let mut buf = Vec::new();
                     let mut idx = Vec::new();
-                    c.iter().map(|x| self.eval_one(*x, want, &mut buf, &mut idx)).collect::<Vec<_>>()
+                    let v: Vec<Val> = c.iter().map(|x| self.eval_one(*x, want, &mut buf, &mut idx)).collect();
+                    if let Some(p) = progress {
+                        p.advance(c.len() as u64);
+                    }
+                    Ok(v)
                 })
                 .collect()
         });
+        let vals: Vec<Val> = vals?.into_iter().flatten().collect();
         if let Some(i) = vals.iter().position(|v| v.is_err()) {
             return Err(degenerate(i));
         }
@@ -426,6 +553,7 @@ impl TorusField {
             }
         }
         rep.seconds = t0.elapsed().as_secs_f64();
+        self.totals.add(&rep);
         Ok(rep)
     }
 }
@@ -467,6 +595,11 @@ pub struct BuildOptions {
     pub fit: FitOptions,
     /// Evaluation.
     pub eval: EvalOptions,
+    /// Progress counter and cancel flag of [`PointsAsTori::build`]: stages `"neighborhoods"`,
+    /// `"network"` (one item per point, the long one), `"fit"`, `"tree"`. A cancelled build returns
+    /// [`PatError::Cancelled`]. Pass the same handle in [`EvalOptions::progress`] to watch the
+    /// field's later evaluations too.
+    pub progress: Option<Progress>,
 }
 
 impl BuildOptions {
@@ -513,6 +646,11 @@ impl PointsAsTori {
             return Err(PatError::InvalidOption { what: "BuildOptions::k = 0".into() });
         }
         let pool = crate::pool::make_pool(opts.predict.threads)?;
+        let progress = opts.progress.as_ref();
+        if let Some(p) = progress {
+            p.begin(crate::progress::NEIGHBORHOODS, cloud.len() as u64);
+        }
+        crate::progress::check(progress)?;
         let tk = std::time::Instant::now();
         // the GPU of the precompute (kNN, network, fit), if the predict device asks for one
         #[cfg(feature = "cuda")]
@@ -529,7 +667,14 @@ impl PointsAsTori {
         let (nb, knn_device) = (pool.install(|| fitting_neighborhoods(&tree, cloud.positions(), k)), Device::Cpu);
         drop((pool, tree));
         let knn_seconds = tk.elapsed().as_secs_f64();
-        let (coeffs, sigma, predict) = predict_coefficients(model, cloud, &nb, &opts.predict)?;
+        if let Some(p) = progress {
+            p.advance(cloud.len() as u64);
+        }
+        let (coeffs, sigma, predict) = predict_coefficients_with(model, cloud, &nb, &opts.predict, progress)?;
+        if let Some(p) = progress {
+            p.begin(crate::progress::FIT, cloud.len() as u64);
+        }
+        crate::progress::check(progress)?;
         let tokens_lt_k = if nb.k < model.config().k { cloud.len() } else { 0 };
         #[cfg(feature = "cuda")]
         let ((tori, fit), fit_device) = match &gpu {
@@ -538,7 +683,15 @@ impl PointsAsTori {
         };
         #[cfg(not(feature = "cuda"))]
         let ((tori, fit), fit_device) = (fit_tori_with(cloud, &coeffs, &sigma, tokens_lt_k, &opts.fit)?, Device::Cpu);
-        let field = TorusField::new(cloud, tori, opts.eval.clone())?;
+        if let Some(p) = progress {
+            p.advance(cloud.len() as u64);
+            p.begin(crate::progress::TREE, 1);
+        }
+        crate::progress::check(progress)?;
+        let field = TorusField::new(cloud, tori, opts.eval.clone())?.with_sign_rule(Some(opts.fit.sign_rule));
+        if let Some(p) = progress {
+            p.advance(1);
+        }
         let report = BuildReport {
             n: cloud.len(),
             tokens: nb.k,

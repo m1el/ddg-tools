@@ -88,6 +88,8 @@ pub enum PatError {
         /// Why.
         reason: String,
     },
+    /// The call was cancelled through its [`crate::Progress`] handle.
+    Cancelled,
     /// The network framework failed.
     Backend {
         /// What failed.
@@ -139,6 +141,7 @@ impl fmt::Display for PatError {
             PatError::ThreadPool { reason } => write!(f, "thread pool: {reason}"),
             PatError::Format { reason } => write!(f, "format: {reason}"),
             PatError::DegenerateQuery { index, reason } => write!(f, "query {index}: {reason}"),
+            PatError::Cancelled => write!(f, "cancelled"),
             PatError::Backend { reason } => write!(f, "network backend: {reason}"),
         }
     }

@@ -141,7 +141,7 @@ fn morphology_and_orientation() {
             build: BuildOptions::default().with_threads(Some(t)),
             paper_eval: true,
         };
-        let (f, rep) = morphology(&field, &model, Morph::Close(0.03), &opts).unwrap();
+        let (f, _, rep) = morphology(&field, &model, Morph::Close(0.03), &opts).unwrap();
         format!("{}{:?}", field_text(&f), rep.steps.iter().map(|s| (s.level, s.sample.produced, s.sample.rejected)).collect::<Vec<_>>())
     });
     // a cloud with 30 % of its normals flipped
