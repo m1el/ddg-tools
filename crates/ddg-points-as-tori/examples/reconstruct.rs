@@ -12,7 +12,10 @@
 use ddg_points_as_tori::mc::{Band, McOptions, MeshCheck, Resolution, marching_cubes};
 use ddg_points_as_tori::{BuildOptions, Model, NormalPolicy, PointCloud, PointsAsTori, TorusField};
 
-fn read_ply(bytes: &[u8]) -> Result<(Vec<[f64; 3]>, Vec<[f64; 3]>), String> {
+/// Positions and normals.
+type Oriented = (Vec<[f64; 3]>, Vec<[f64; 3]>);
+
+fn read_ply(bytes: &[u8]) -> Result<Oriented, String> {
     let end = bytes.windows(10).position(|w| w == b"end_header").ok_or("no end_header")?;
     let header = std::str::from_utf8(&bytes[..end]).map_err(|e| e.to_string())?;
     if !header.contains("binary_little_endian") {
@@ -40,7 +43,7 @@ fn read_ply(bytes: &[u8]) -> Result<(Vec<[f64; 3]>, Vec<[f64; 3]>), String> {
     Ok((p, nr))
 }
 
-fn read_obj(text: &str) -> Result<(Vec<[f64; 3]>, Vec<[f64; 3]>), String> {
+fn read_obj(text: &str) -> Result<Oriented, String> {
     let (mut p, mut n) = (Vec::new(), Vec::new());
     for l in text.lines() {
         let mut it = l.split_whitespace();

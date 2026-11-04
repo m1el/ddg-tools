@@ -90,6 +90,10 @@ fn torus_field_marching_cubes_and_offset() {
         ddg_points_as_tori::mc::MeshCheck::Manifold { boundary_edges, euler_characteristic, .. } => assert_eq!((boundary_edges, euler_characteristic), (0, 2)),
         ref o => panic!("{o:?}"),
     }
+    // bitwise independent of the marching cubes thread count (the field's own pool is fixed)
+    let (m1, _) = marching_cubes(&f, &McOptions { resolution: Resolution::Longest(48), threads: Some(1), ..Default::default() }).unwrap();
+    assert_eq!(m1.faces, m.faces);
+    assert!(m1.positions.iter().zip(&m.positions).all(|(a, b)| a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits())));
     let r: Vec<f64> = m.positions.iter().map(|p| p.iter().map(|c| c * c).sum::<f64>().sqrt()).collect();
     let (lo, hi) = (r.iter().cloned().fold(f64::INFINITY, f64::min), r.iter().cloned().fold(0.0, f64::max));
     assert!(lo > 0.48 && hi < 0.52, "radius range {lo}..{hi}");
@@ -116,10 +120,15 @@ fn morphology_round_trip_on_a_sphere() {
     let cloud = fibonacci_sphere(512, 0.5);
     let f0 = build(&cloud, 8);
     let model = Model::reference().unwrap();
-    let mut opts = MorphOptions::default();
-    opts.build = BuildOptions::default().with_threads(Some(8));
-    opts.sample.threads = Some(8);
-    opts.sample.mc = McOptions { resolution: Resolution::Longest(48), threads: Some(8), ..Default::default() };
+    let opts = MorphOptions {
+        build: BuildOptions::default().with_threads(Some(8)),
+        sample: SampleOptions {
+            threads: Some(8),
+            mc: McOptions { resolution: Resolution::Longest(48), threads: Some(8), ..Default::default() },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let c = 0.05;
     // erosion / dilation shift the radius by c
     let (er, rep) = morphology(&f0, &model, Morph::Erode(c), &opts).unwrap();
@@ -152,10 +161,15 @@ fn morphology_round_trip_on_the_golden_torus() {
     let g = common::Golden::open(&root, "synth_torus");
     let f0 = build(&g.cloud, 8);
     let model = Model::reference().unwrap();
-    let mut opts = MorphOptions::default();
-    opts.build = BuildOptions::default().with_threads(Some(8));
-    opts.sample.threads = Some(8);
-    opts.sample.mc = McOptions { resolution: Resolution::Longest(64), threads: Some(8), ..Default::default() };
+    let opts = MorphOptions {
+        build: BuildOptions::default().with_threads(Some(8)),
+        sample: SampleOptions {
+            threads: Some(8),
+            mc: McOptions { resolution: Resolution::Longest(64), threads: Some(8), ..Default::default() },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     // the tube radius is 0.15; closing by 0.03 keeps a convex-ish torus nearly unchanged
     let (c, _) = morphology(&f0, &model, Morph::Close(0.03), &opts).unwrap();
     let err = hausdorff_to_field(g.cloud.positions(), &c);

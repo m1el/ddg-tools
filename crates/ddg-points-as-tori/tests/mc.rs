@@ -249,7 +249,7 @@ fn csg_gradients_match_finite_differences() {
     let a = Csg::leaf(Sphere(0.5));
     let b = Csg::leaf(Torus(0.5, 0.2));
     let c = Csg::leaf(Cuboid([0.1, 0.0, 0.0], [0.3, 0.3, 0.3]));
-    let trees = vec![
+    let trees = [
         a.clone().union(b.clone()),
         a.clone().intersect(c.clone()),
         b.clone().subtract(a.clone()).offset(0.05),
