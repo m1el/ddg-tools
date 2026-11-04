@@ -857,6 +857,7 @@ Rust functions carry `[formula: <id>]`. Each id is a Lean theorem in
 | `pat-torus-sign` | Eq. 22 equals "`κmax < 0 ∧ κmin ≠ 0`" | `fit` | proved, `Fitting.lean` |
 | `pat-torus-frame` | center and axis (definitions); `u` unit, `u ⟂ n*` | `fit` | proved, `Fitting.lean` |
 | `pat-torus-contact` | `g(Q*(0,0)) = 0`; the torus normal at `o` is `±n*`; principal curvatures of the torus at `o` are `κmin, κmax` (meridian `1/r`, parallel `1/(R + r)` with signs) | `fit` | proved (`Torus.lean`); curvature-of-torus facts proved for the parametrization |
+| `pat-fit-contact` | `Geometric` rule (center `o + n*/κmin`): `g(o) = 0`, `∇g(o) = n*`. `Reference` rule: `g(o) = 0`, `∇g(o) = sgn(κmin κmax) n*` (−1 exactly at saddles; the torus there has curvatures `(−κmax, −κmin)`, the mirror image). Needs `κmin κmax ≠ 0` | `fit` (`SignRule`) | proved, `Torus.lean` (`PAT.fit_contact`) |
 | `pat-torus-sdf` | Eq. 23 = distance to the torus surface for `R ≥ |r|` (the distance to a circle in its meridian half-plane) | `sdf` | proved for the meridian reduction, `Torus.lean`; exactness of the "circle twice" composition cited (Quilez) if the minimization is heavy |
 | `pat-torus-sdf-gradient` | `∇g` (§7.2) | `sdf` | proved (`HasFDerivAt`), `Torus.lean` |
 | `pat-torus-sdf-laplacian` | `Δg = s(1/‖d‖ + d₁/(‖d‖v))` | `sdf` | proved (2D identity + axisymmetric Laplacian), else FD-tested and cited |
@@ -1155,3 +1156,24 @@ proposals"; all accepted by the orchestrator).** These override §5, §7 and §1
    `(ρ², index)` order; WP15 compares at 1e-12.
 7. Features normalize normals (`n / max(‖n‖, 1e-10)`) in both orders. Report fields as in
    NOTES-WP1 item 9.
+
+**Resolutions after the Lean proofs (WP2, 2026-11-04; `NOTES-WP2.md`).**
+1. New id `pat-fit-contact` (§13) proves the saddle finding of WP1 resolution 1.
+2. **Degenerate eigenvector.** The reference pair `ev± = (v1 ± disc, v2)` is the zero vector for
+   one sign when `v2 = 0` (off umbilics, e.g. `a10 = a01 = a11 = 0`, `a20 ≠ a02`). The 1e-10
+   clamp then returns the other eigenvector, so both curvatures are equal. Near `v2 = 0`,
+   `v1 − disc` cancels: relative error ≈ `ε·v1²/v2²`. In the f64 CPU fit this does not occur on
+   the golden data: all 34,222 points match the closed form `H ± √(H²−K)` to 1.5e-13, and the
+   minimum is `|v2/v1|` = 6e-6. In f32 it starts near `|v2/v1|` ≈ 3e-4, which affects the
+   training loss. Hence `FitOptions::eigen_rule: Reference | Robust` (default `Reference`; switch
+   counted). The training fit (f32) uses the robust form (WP7).
+3. The weight range claim of §7.4 is replaced by: every weight lies in `[e^{−C}, e^{C}]` and
+   `W ≥ |𝒩| e^{−C} > 0` (proved). "Max weight ≥ 1 for the nearest point" holds only when
+   `ρ_min ≤ σ`.
+4. `pat-output-scaling` (scale covariance) is exact only while no absolute 1e-10 clamp is active.
+5. `pat-torus-sdf` is the exact distance for `R ≥ |r|`; spindle tori get the lower bound only.
+   `pat-fwn-expansion` proves the gradient and Hessian of `1/(4π|y|)`; the order-2 term and the
+   error bound are cited.
+6. The ids `pat-shc-gradient`, `pat-sspd-gradient`, `pat-extrusion`, `pat-extrusion-gradient`,
+   `pat2d-circle-sdf`, `pat2d-blend` each have their own Lean theorem. `pat2d-blend` covers shift
+   and convexity only; there is no 2D gradient proof.
