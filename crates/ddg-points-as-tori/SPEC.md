@@ -1362,3 +1362,44 @@ accepted).**
    authors' own `_pretrained.pkl` suggests (0.097 there); if phase 0 does not bring it down, rerunning
    pretraining at a lower lr is the fallback (a deviation from the recipe). A `Geometric`-rule run is deferred
    until WP14 shows the sign rule matters.
+
+**Resolutions after the evaluation (WP14, 2026-11-04; `EVALUATION.md`, `COMPARISON.md`, `NOTES-WP14.md`;
+accepted).**
+1. **User decision 2026-11-04: `SignRule::Geometric` becomes the default** (never worse; 27–48 % better on
+   clouds with predicted saddle tori; bitwise identical elsewhere). `Reference` stays for parity with the
+   authors' program. **A second retraining run with `--sign geometric`** follows the current (Reference) run
+   on the GPU, and both are compared with the released weights.
+2. **User decision 2026-11-04: 32-NN `PerQuery` stays the default; `All` is the documented accuracy
+   option** (better on every measure, O(n) per query). The paper's λ = 10³/D with radius 2C/λ and the tapered
+   kNN are not adopted.
+3. **User decision 2026-11-04: C = 64 stays the default** (paper and training value); C stays configurable,
+   and the C = 32 result (eikonality 0.039 vs 0.046, MAE within one standard error) is documented.
+4. Comparison (315 shapes, 64³): PAT ties "GWN-sign + distance" on grid MAE (0.0207 vs 0.0211), loses on ABC
+   and Thingi10K, wins on blobs; near the surface PAT is 2.5× better (band MAE `|φ_true| < 0.05`, better on
+   309/315), eikonality 0.040 vs 0.131; PAT has twice the catastrophic sign failures (22 vs 11; wrong sign on
+   > 1 % of grid points with `|φ_true| > 0.05`). These metric definitions extend §16.2.
+5. §16.2's "100 unseen ABC shapes" cannot be met with the shipped data: 20 ABC validation shapes exist and 2
+   duplicate training shapes; WP14 reports 18 unseen, 2 duplicates, 80 seen separately (same PAT error).
+6. Continuity (corrects WP6 resolution 1): kNN set changes cause jumps ≤ 1.5e-3 only; the steep grid edges
+   are continuous transitions of width ≈ 1–2/λ_x where the soft-argmin switches between points with
+   disagreeing tori (slope ≈ λ_x Δg). `All` bounds the slopes (max 4.2 vs 17 at 256³; 33 vs 91 zero-level
+   components, truth 37).
+7. The released network predicts near-spheres: median |κmin|/|κmax| ≈ 0.9 even on cylinders, no saddles on
+   saddle surfaces; the authors' tori are 97.6–100 % spindle. The retrained models report the same
+   statistics (`eval curv`).
+8. Black box: we equal the authors' program on 378 clouds (coefficients ≤ 3e-6, SDF ≤ 1.4e-6, same kNN).
+9. Limits to document: dense clouds (Fig. 29 at 7.3M: interior MAE 0.0022 → 0.042, predicted |r| saturates
+   near 20σ) and CAD orientation (ABC 18 %, Thingi10K 26 % wrong after 30 % flips; smooth shapes 1.0 %).
+10. Open for WP16: TF32 vs Split3 effect on φ (`eval gpu`); retrained rows (`RETRAINED=…`).
+
+**Resolutions after the renderer (WP11, 2026-11-04; `NOTES-WP11.md`; accepted).**
+1. Defaults: safety 0.9, `g_min` 0.1, 128 steps, ε_hit 1e-3·diag, bounding sphere radius
+   `0.8·diag + max(ℓ, 0)`; `TraceOptions::demo()` gives the demo's constants. Safety study (§16.3): 0.9/128
+   differs from a 0.5/2048 reference in 2–12 pixels of ~4k hits; `g_min` 0–0.3 changes nothing; the demo's 40
+   steps leave 20–56 step-limit rays per 65k pixels.
+2. Up axis +y as the demo (Blender callers pass `ground_up`/`up`). Python `render` returns RGBA
+   `array('B')` (repo rule: numpy never required), replacing `-> ndarray` in §12.1.
+3. GPU tracer scope: one `TorusField` (kNN k ≤ 128 or All, offsets via level); Booleans of several fields
+   render on the CPU. CPU images are bitwise identical at any thread count; the GPU test
+   (`tests/render_gpu.rs`) runs in WP16.
+
