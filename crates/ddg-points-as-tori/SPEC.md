@@ -36,8 +36,9 @@ Feng"; cited as `ref: <file>:<line>`).
 If an implementation or a test contradicts this file, stop and report it; do not quietly follow
 either side.
 
-User decisions of 2026-11-04 are in §18. Items marked **[user]** need a decision before the work
-package that depends on them.
+User decisions of 2026-11-04 are in §18; they override any **[user]** item or recommendation
+below that says otherwise (burn 0.22 on Rust 1.95.0, D4 accepted, own CPU kernel if burn is slow,
+both 2D variants).
 
 ## 1. The problem
 
@@ -1049,6 +1050,7 @@ Compare at the tolerances of §15.1-4.
 
 | WP | content | files | depends on | model |
 |---|---|---|---|---|
+| WP0 | toolchain bump to 1.95.0 (§18.1): `rust-toolchain.toml`, full workspace build/test/clippy, Python and Blender suites, minimal fixes for new lints | `rust-toolchain.toml`, lint fixes only | — | Sonnet |
 | WP1 | **core**: deps (burn pinned, safetensors), `PatError`, `PointCloud` + validation, kd-tree (kNN/radius, deterministic, parallel), weights converter + committed safetensors + loader + `weights/README.md`, features (both orders), CPU f32 forward via burn-flex (chunked workers, §5.4), fitting with clamps and report, torus SDF/gradient, blend (3 λ rules, 3 neighborhoods, frozen/exact gradient), `PointsAsTori` facade, `tools/jax_oracle.py`, parity tests on the `data/` clouds; re-measure §5.3 in the crate; module stubs | `Cargo.toml`, `src/{lib,error,cloud,features,network/{mod,burn},fit,sdf,blend,field}.rs`, `src/spatial/*`, `tools/*`, `weights/*`, `tests/{parity,fit,sdf,determinism}.rs`, stubs | — | Opus |
 | WP2 | Lean proofs + CITED (§13) | `lean/proofs/DdgProofs/PointsAsTori/*.lean`, the import line, `CITED.md` section | SPEC | Opus |
 | WP3 | Lean oracle + fixtures | `lean/oracle/DdgOracle/PointsAsTori*.lean`, dispatch lines, `lean/oracle/fixtures/pat/`, oracle README row | SPEC (Rust replay test in WP15) | Sonnet |
@@ -1088,16 +1090,23 @@ Compare at the tolerances of §15.1-4.
 - Standing rules.
 - Framework for the network (change of 2026-11-04).
 
-**Open — need the user:**
-1. **D2 / toolchain.** burn 0.21 on the current stable 1.93.1, or bump the workspace toolchain to
-   ≥ 1.95 for burn 0.22 / candle 0.11? Recommendation: stay on 0.21 now, bump later in one
-   workspace-wide change.
-2. **D4.** Accept "framework part on the GPU: run-to-run bitwise + tolerance vs CPU" as an
-   exception to the GPU determinism rule? Recommendation: yes; our own kernels keep the rule.
-3. **CPU inference speed** (§5.2): if burn stays below ~1,000 neighborhoods/s after WP1's tuning,
-   accept it (GPU carries the floor) or allow a CPU-only `gemm`-crate inference kernel?
-   Recommendation: accept first and decide on WP1's numbers.
-4. **D15.** The 2D variant: classical circle fit (recommended), trained 2D network, or skip.
-5. **D27.** SHM and NN-VIPSS: not planned. Confirm.
-6. Retrained weights: commit to the repo (another 6.4 MB) or keep in `data/`? Recommendation:
-   `data/` until they beat or match the authors' on §16.2.
+**Decided by the user on the draft (2026-11-04, second round):**
+1. **D2 / toolchain: bump.** The workspace toolchain is pinned to Rust **1.95.0**
+   (`rust-toolchain.toml`, WP0) and the crate uses **burn 0.22** (pinned `=0.22.x`). This
+   supersedes "burn 0.21" wherever this file still says so; the 0.21 measurements of §5.3 are
+   re-taken on 0.22 in WP1.
+2. **D4: accepted.** Framework part on the GPU: bitwise run to run on the same device (tested),
+   documented tolerance against the CPU. If burn-cuda is not repeatable run to run (atomics), GPU
+   inference switches to cuBLAS through candle. Our own kernels keep the workspace rule.
+3. **CPU inference speed: own kernel.** If WP1's tuning of burn stays below ~1,000
+   neighborhoods/s on the CPU, WP1b writes a CPU-only inference path on the `gemm` crate (fused
+   LayerNorm/GELU, reused buffers, fixed chunks, bitwise thread-independent), cross-checked
+   against the burn path to ~1e-6. Training stays on burn.
+4. **D15: both.** First the classical per-point circle fit (baseline), then a trained 2D network
+   (same architecture on 2D, generated 2D training data: Quilez 2D SDFs, polygons, noise blobs,
+   simulated 2D scans), compared against the fit. WP9 is split: WP9a orientation + classical 2D
+   (Sonnet), WP9b the 2D network and its training (Opus, after WP7/WP10).
+
+**Orchestrator defaults (the user did not pick these; they may override):**
+5. **D27.** SHM and NN-VIPSS are not planned (not in the user's baseline list).
+6. Retrained weights stay in `data/` until they match or beat the authors' on §16.2.
