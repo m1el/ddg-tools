@@ -134,6 +134,19 @@ and resumes the current one; at most 15 min of steps are repeated.
 - **Persistent cache.** A cold start spends 31 s compiling. With the cache, a restart (or a test, or the Geometric
   probe) spends 2 s (51 of 51 cache hits; cache 3.3 MB).
 
+## The live run
+
+- **Launch.** 2026-11-04 15:19 UTC (`nohup setsid ./run.sh`), normal priority. First PIDs: wrapper 748762,
+  python 748765, dmon 748752 (`PIDS`).
+- **Pretraining.** Done in **0.24 h** (15:19–15:33). Epoch-mean distance / eikonal went from 0.062 / 0.217
+  (epoch 0) to 0.043 / 0.196 (epoch 63), staying between 0.04 and 0.06 throughout.
+  - There is **no** jump to ≈ 0.14 near step 810, unlike the burn run (TRAINING.md).
+  - Their validation printout (norm-2 normals) read 0.021 / 0.317 at epoch 0 and 0.020 / 0.329 at epoch 63.
+    It is not comparable with the burn run's unit-normal 0.09 / 0.23.
+- **Phase 0.** From 15:33. Live rate 0.392–0.394 s/step and peak 15.10 GiB, with 61 executables (all cache hits)
+  and none added in steady state. First losses: d 0.11–0.14, e 0.21–0.26 at lr 1e-5 after the 100-step warmup.
+  `eta_total` at step 300 reads 53.9 h, i.e. **2026-11-06 ≈ 21:30 UTC**.
+
 ## Monitoring
 
 All paths are under `/var/data/discrete-geometry/ddg-tools/runs_tmp/pat-train-jax/`.
