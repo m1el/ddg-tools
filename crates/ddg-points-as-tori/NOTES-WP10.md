@@ -203,6 +203,38 @@ loop, 80 steps from the same checkpoint). Tests: `tests/train.rs` (16, FD checks
 The bits of `d9f1606` differ from `801b3c9`'s (burn-fusion segments a captured closure differently from the eager
 stream), within the TF32 standard above.
 
+**Phase 0 in the loop was slower than the bench** (the bench reuses one plan): with `d9f1606` the run's phase-0
+steps took 0.60 s (`t_loss` 0.29–0.39 s, flat, so not compilation). Two causes, two fixes (commit `d7a8200`):
+
+6. **Loss shapes vary every step**, so burn-fusion explores every step's stream anew. Chunk shapes (queries and
+   pairs per query, tori and positions per torus) are now rounded up a fixed ladder (`gpu::ladder`: 1…8, then
+   multiples of 8 growing ~1.25×); padded queries are masked out of the sums, padded torus rows read the zero row.
+   In the loop: `t_loss` 0.328 → 0.257 s; loss curve vs `d9f1606` median 1.7e-5, max 1.3e-4 relative (only the
+   zero padding of the sums changes).
+7. **Our own preparer competes with the step for the host.** With 16 preparer threads the step drops to 0.40 s but
+   the loop waits 0.35 s for data; 32 threads: 0.50 + 0.06; 60: 0.56 + 0.01. The ground truth is ~70 % of the
+   preparer (≈ 13 core-s per phase-0 shape). **The winding-number sums now run on the GPU**
+   (`gpu::solid_angle_sums`, an NVRTC f64 kernel, one thread per query over the faces in the CPU's operation order,
+   no FMA, own stream; `QueryOptions::gpu_truth`, on by default for GPU runs in `examples/train.rs`,
+   `--cpu-truth` to turn it off; distances stay on the CPU BVH; meshes below 512 faces stay on the CPU, where they
+   are faster). Ground truth GPU vs CPU on 6 shapes (1.47M queries, blobs, ABC, simulated): **0 sign and 0 bit
+   differences**. Kernel 0.186 s per 2048-face blob shape. In the loop from the same checkpoint the 120 losses with
+   GPU and with CPU ground truth are **bitwise equal** to each other (and to the ladder run).
+
+| binary, phase-0 loop from the step-4,096 checkpoint, 120 steps | load | fwd | loss | bwd | upd | wait | s/step |
+|---|---|---|---|---|---|---|---|
+| `801b3c9` (the original run binary, eager) | 37–50 | 0.124 | 0.260 | 0.507 | 0.010 | — | **0.90** |
+| `d9f1606` (graphs) | 41–46 | 0.074 | 0.328 | 0.210 | 0.015 | 0.013 | 0.64 |
+| ladder | 41–46 | 0.075 | 0.257 | 0.217 | 0.013 | 0.013 | 0.57 |
+| ladder, CPU ground truth | 30–56 | 0.072 | 0.209 | 0.209 | 0.010 | 0.012 | 0.51 |
+| **`d7a8200`** (ladder + GPU ground truth) | 34–41 | 0.150 | 0.108 | 0.198 | 0.008 | 0.012 | **0.48** |
+
+So phase 0 went from 0.90 to **0.48 s/step (−47 %)** at load 30–55 (WP14 at ≤ 24 threads, nice 19). The run was
+stopped once more (06:09, its last checkpoint the phase-0 start at step 4,096, backed up in `saved-step4096/`) and
+resumed with `d7a8200`; steps 4,097–~4,700 of `d9f1606` appear twice in `log.jsonl` (later lines supersede).
+Remaining bound: GPU time (network ≈ 0.25 s, loss ≈ 0.1 s, ground truth ≈ 0.09 s per step) with the host still
+contended; an f32 ground-truth kernel (~30× cheaper) would change the sign of near-surface points and was not used.
+
 ## 6. SPEC proposals (nothing applied to SPEC.md)
 
 1. §18 WP4 item 1: the Tf32 coefficient tolerance is 3e-3·(1 + |a|) (raw outputs 2e-4); above.
@@ -211,8 +243,8 @@ stream), within the TF32 standard above.
    reductions and `sum_dim` only, and GPU training is bitwise run to run and resumes bitwise; D4's "bitwise run
    to run" therefore holds for training as well, with the caveat that the bits depend on the network batch
    shape (256 by default).
-3. §10.4 "expected time": replace "≈ 30–35 h (TF32)" by the measured ≈ 0.30–0.34 s per step with CUDA graphs
-   (≈ 42–47 h for the curriculum) when other agents keep to ≤ 24 threads; without graphs the bound was burn's
+3. §10.4 "expected time": replace "≈ 30–35 h (TF32)" by the measured ≈ 0.48 s per phase-0 step with CUDA graphs,
+   fixed loss shapes and GPU ground truth (≈ 66 h for the curriculum) when other agents keep to ≤ 24 threads; without graphs the bound was burn's
    per-op dispatch (13k launches per step). Further speed needs our own fused attention/LayerNorm kernels in the
    training graph, which departs from "the network in the framework" (D2); not done.
 4. §10 / D19: `TrainOptions::validate_every_steps` (above), so that validating per epoch does not double the
