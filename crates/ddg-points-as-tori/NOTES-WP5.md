@@ -115,5 +115,7 @@ Observations:
   should check.
 - No performance numbers were tabulated (the reports carry `seconds`). The sanity jobs took 14–42 s each at 8 threads, including
   the brute-force GWN and RWN over 262k queries.
-- SPSR on the full clouds is closed (femur: 3 non-manifold edges). The paper's flip-if-negative orientation check is not needed:
-  every SPSR volume is positive.
+- SPSR meshes are closed except ABC0_6 (14 boundary edges at full density, 16 at 512 points: the surface leaves the
+  reconstruction cube). Its volume is 1.47 against the true 0.32, so SPSR fails on this thin shape, and its GWN sign as a soup
+  decides that row. Full femur has 3 non-manifold edges. Every SPSR volume is positive, so the paper's flip-if-negative check
+  would not have triggered.
