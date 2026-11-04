@@ -1139,9 +1139,11 @@ proposals"; all accepted by the orchestrator).** These override §5, §7 and §1
    `c = Q* − sign/|κmin| n*`) gives the mirror image of the osculating torus: ∂g/∂n = −1 at the
    point. On the golden tori that is every saddle (holey-bunny 33/12,917, femur 4, snail 1).
    Switching those changes the 64³ SDF by up to 0.36. `FitOptions::sign_rule`:
-   `SignRule::Reference` (default for parity: as trained, as the oracle) and
    `SignRule::Geometric` (center `o + n*/κmin`, signed; it differs only at saddles and exact
-   zeros). WP14 picks the default by the §16.2 accuracy run. WP7/WP10 train with either rule
+   zeros; **the default since 2026-11-04**, §18 WP14 item 1) and `SignRule::Reference` (the
+   authors' program: pinned by every parity, golden and oracle test and by training,
+   `TensorFitOptions::default()` and `--sign reference`, independent of `SignRule::default()`,
+   because the released weights were trained with it). WP7/WP10 train with either rule
    (option), and the retrained comparison includes a `Geometric`-trained run. To be proved in
    Lean (WP2): the contact condition (∂g/∂n = +1 at the point) under `Geometric`, and its failure
    at saddles under `Reference`.
@@ -1197,7 +1199,7 @@ proposals"; all accepted by the orchestrator).** These override §5, §7 and §1
    because CAD grids put up to 167 grid points exactly in a face plane; WP14 uses it with value 0
    and reports the count.
 5. FWN β: default 2 (SPEC); Barill's point-cloud value 2.3 is the option used in WP14's timing row.
-6. `SignRule` default is still open: the network predicted saddles only on femur (4/3897;
+6. (Settled by WP14 and the user: `Geometric` default, §18 WP14 item 1.) `SignRule` default was open: the network predicted saddles only on femur (4/3897;
    Geometric marginally better). WP14 adds clouds with saddles and meshes (e.g. Thingi10K
    samples, analytic saddle shapes from WP8).
 
@@ -1367,7 +1369,9 @@ accepted).**
 accepted).**
 1. **User decision 2026-11-04: `SignRule::Geometric` becomes the default** (never worse; 27–48 % better on
    clouds with predicted saddle tori; bitwise identical elsewhere). `Reference` stays for parity with the
-   authors' program. **A second retraining run with `--sign geometric`** follows the current (Reference) run
+   authors' program (implemented in 6a6d472: parity/golden/oracle tests, training and `examples/eval.rs`'s
+   authors' comparisons pin `Reference`; library, Python (`sign_rule="geometric"`) and Blender follow the
+   default; a sidecar with another recorded rule is rebuilt). **A second retraining run with `--sign geometric`** follows the current (Reference) run
    on the GPU, and both are compared with the released weights. **User decision 2026-11-04: probe first,
    then decide**: the Geometric run first covers pretrain + phase0 only (100,096 steps, ≈ 14 h; `--phases
    pretrain,phase0`, `runs_tmp/pat-train-geo/run.sh`, chained to start when the Reference run ends). If the

@@ -2371,7 +2371,8 @@ network and everything learned; neighbor search; the clamps of D9 beyond the sta
    `∇g(o) = +n*`; both rules together are `PAT.fit_contact` (`pat-fit-contact`: `Geometric` gives
    `∂g/∂n*(o) = +1`, `Reference` gives `σ = −1` exactly at saddles). The reference code
    (`torus_distance.cpp:781-807`) is the paper's, and the pretrained network was trained with it
-   (SPEC §18, resolution 1: `SignRule::Reference` default, `SignRule::Geometric` option).
+   (SPEC §18: `SignRule::Geometric` is the default since 2026-11-04; `SignRule::Reference` reproduces
+   the authors' program and training).
 2. *Degenerate eigenvector pair.* `(v1 ± √Δ, v2)` vanishes for one sign whenever `v2 = 0`,
    `v1 ≠ 0`, e.g. `a10 = a01 = a11 = 0`, `a20 ≠ a02` (`PAT.principal_pair_degenerate`); the
    reference's `1e-10` clamp then returns the other eigenvector twice.
