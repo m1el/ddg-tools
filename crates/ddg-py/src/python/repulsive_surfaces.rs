@@ -242,10 +242,10 @@ fn to_val(name: &str, obj: &Bound<'_, PyAny>) -> PyResult<Val> {
         }
     }
     // numpy scalars and other numbers.
-    if let Ok(i) = obj.extract::<i64>() {
-        if obj.hasattr("__index__")? {
-            return Ok(Val::Int(i));
-        }
+    if let Ok(i) = obj.extract::<i64>()
+        && obj.hasattr("__index__")?
+    {
+        return Ok(Val::Int(i));
     }
     if let Ok(x) = obj.extract::<f64>() {
         return Ok(Val::Float(x));

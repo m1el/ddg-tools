@@ -1975,13 +1975,16 @@ pub fn surface_energy(
     Ok((r.differential, report))
 }
 
+/// The result of [`scene`]: `(positions, faces, options)`.
+pub type SceneData = (Vec<[f64; 3]>, Vec<[u32; 3]>, Val);
+
 /// A scene file loaded: `(positions, faces, options)`; the options are the dict
 /// [`flow_options`] reads (the scene's penalties and obstacles as opaque handles).
 ///
 /// # Errors
 /// [`SError::Input`] for a file that cannot be read or parsed, or for a scene feature the
 /// library does not support (normal constraints).
-pub fn scene(path: &str) -> Result<(Vec<[f64; 3]>, Vec<[u32; 3]>, Val)> {
+pub fn scene(path: &str) -> Result<SceneData> {
     let spec = rs::SceneSpec::load(path)?;
     let o = rs::scene_options(&spec)?;
     Ok((spec.positions.clone(), spec.surface.faces().to_vec(), options_val(&o)))
