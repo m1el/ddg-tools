@@ -473,7 +473,7 @@ impl Shape2d {
             Geo::Ellipse { a, b } => eval_ellipse(p, *a, *b),
             Geo::Heart => eval_heart(p),
             Geo::Moon { d, ra, rb } => eval_moon(p, *d, *ra, *rb),
-            Geo::Poly { v } => eval_polygon(p, v),
+            Geo::Poly { v } => polygon_sdf(p, v),
         }
     }
 
@@ -636,8 +636,8 @@ fn eval_ellipse(p: [f64; 2], a: f64, b: f64) -> (f64, [f64; 2]) {
     (if inside { -dist } else { dist }, n)
 }
 
-/// Exact signed distance to a counter-clockwise polygon (even-odd inside test).
-fn eval_polygon(p: [f64; 2], v: &[[f64; 2]]) -> (f64, [f64; 2]) {
+/// Exact signed distance and gradient to a counter-clockwise polygon (even-odd inside test; zero-length edges are skipped).
+pub fn polygon_sdf(p: [f64; 2], v: &[[f64; 2]]) -> (f64, [f64; 2]) {
     let n = v.len();
     let mut best = (f64::INFINITY, [0.0; 2], usize::MAX, 0.0);
     let mut inside = false;

@@ -13,6 +13,8 @@
 //! the reference's `shape_2d.*` (MIT, Copyright (c) 2026 Nicole Feng, notice in
 //! `LICENSES/points-as-tori-MIT.txt`).
 
+#![allow(clippy::type_complexity, clippy::neg_cmp_op_on_partial_ord)]
+
 pub mod boundary;
 pub mod saddle;
 pub mod sdf2d;

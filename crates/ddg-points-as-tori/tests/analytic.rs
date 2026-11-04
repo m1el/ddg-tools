@@ -376,3 +376,16 @@ fn saddle_counts_follow_the_known_geometry() {
         }
     }
 }
+
+/// Writes `data/points-as-tori/analytic.json` and prints the saddle statistics of the 70
+/// instances: `cargo test --release --test analytic -- --ignored --nocapture write_data`.
+#[test]
+#[ignore]
+fn write_data_files() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/points-as-tori");
+    ddg_points_as_tori::analytic::write_analytic_json(&root.join("analytic.json")).unwrap();
+    for inst in analytic_set().unwrap() {
+        let st = saddle_stats(&inst.solid, 20_000, inst.seed).unwrap();
+        eprintln!("SET {:<28} saddle {:>6}/{} = {:.4} flat {:.3}", inst.name(), st.saddle, st.n, st.fraction, st.flat as f64 / st.n as f64);
+    }
+}
