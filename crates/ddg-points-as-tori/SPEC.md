@@ -1253,5 +1253,6 @@ proposals accepted).**
    7.1e-6 relative (20 batches of `ABC17_validation_3`, same queries).
 9. Open for WP10: whether burn-cuda's backward of `select` (scatter-add) uses atomics, which
    would break run-to-run determinism; host-plan and ground-truth prefetch on CPU threads so the
-   GPU is never idle; matmul precision (TF32 ≈ 30–35 h vs f32-accurate 3×TF32 ≈ 80–85 h for the
-   full curriculum, estimated) — **[user]**.
+   GPU is never idle; matmul precision — **user decision 2026-11-04: TF32** for training (≈ 30–35 h
+   estimated; JAX's default f32 matmul on Ampere/Ada is TF32, so likely what the authors used).
+   Retrained weights are evaluated with the usual f32-accurate inference.
