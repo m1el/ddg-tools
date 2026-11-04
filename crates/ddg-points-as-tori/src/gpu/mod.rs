@@ -623,7 +623,9 @@ impl GpuField {
         let want_lap = matches!(want, Want::Laplacian);
         let mut rep = EvalReport { queries: xs.len(), ..Default::default() };
         let null = 0u64;
+        let prof = std::env::var_os("PAT_GPU_PROFILE").is_some();
         for (gi, qs) in xs.chunks(QUERY_GROUP).enumerate() {
+            let tg = std::time::Instant::now();
             let base = gi * QUERY_GROUP;
             let m = qs.len();
             let nq = m as u64;
@@ -749,6 +751,10 @@ impl GpuField {
                 }
                 (Some(_), None) => unreachable!("f32 queries are uploaded with the stable data"),
             }
+            if prof {
+                g.stream.synchronize().map_err(gpu_err("synchronize"))?;
+                eprintln!("  [gpu eval] group {gi}: {m} queries, launch+kernel {:.3} s", tg.elapsed().as_secs_f64());
+            }
             let hf = g.down(&flags, 5 * m)?;
             for (j, f) in hf.chunks_exact(5).enumerate() {
                 if f[3] >> 31 != 0 {
@@ -780,8 +786,10 @@ impl GpuField {
 }
 
 /// Whether [`crate::PointsAsTori::build`] computes the fitting neighborhoods on the GPU when the
-/// precompute device is a GPU (NOTES-GPU.md: measured).
-pub const USE_GPU_KNN: bool = true;
+/// precompute device is a GPU. Off: measured slower than the CPU kd-tree on 64 threads (1M points:
+/// 0.67 s GPU with transfers, 0.27 s CPU; NOTES-GPU.md). [`fitting_neighborhoods`] stays available.
+pub const USE_GPU_KNN: bool = false;
 /// Whether [`crate::PointsAsTori::build`] fits the tori on the GPU when the precompute device is a
-/// GPU (NOTES-GPU.md: measured).
-pub const USE_GPU_FIT: bool = true;
+/// GPU. Off: no gain over the CPU on 64 threads (1M points: 0.21 s GPU with transfers, 0.10 s CPU;
+/// NOTES-GPU.md). [`fit_tori`] stays available (bitwise equal).
+pub const USE_GPU_FIT: bool = false;

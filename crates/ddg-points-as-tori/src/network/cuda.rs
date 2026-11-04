@@ -30,7 +30,10 @@ use burn::tensor::{Device, Tensor, TensorData};
 /// Neighborhoods per GPU batch (a constant: the shape of every launch, NOTES-GPU.md).
 pub const GPU_BATCH: usize = 256;
 
+/// A linear layer on the device: `W` as is (TF32 mode), its exact split `W = W_h + W_l`
+/// (Split3) and the bias.
 struct Lin {
+    full: Tensor<3>,
     hi: Tensor<3>,
     lo: Tensor<3>,
     b: Tensor<3>,
@@ -38,9 +41,8 @@ struct Lin {
 
 struct Block {
     norm1: LayerNorm,
-    q: Lin,
-    k: Lin,
-    v: Lin,
+    /// q, k and v side by side (`E → 3E`): one matmul for the three projections.
+    qkv: Lin,
     o: Lin,
     norm2: LayerNorm,
     ffn1: Lin,
@@ -65,10 +67,20 @@ fn split_host(w: &[f32]) -> (Vec<f32>, Vec<f32>) {
     (hi, lo)
 }
 
-fn lin(w: &LinearW, dev: &Device) -> Lin {
-    let (hi, lo) = split_host(&w.w);
-    let t = |v: Vec<f32>| Tensor::<3>::from_data(TensorData::new(v, [1, w.din, w.dout]), dev);
-    Lin { hi: t(hi), lo: t(lo), b: Tensor::<3>::from_data(TensorData::new(w.b.clone(), [1, 1, w.dout]), dev) }
+/// The layers `ws` (same `din`) side by side along the outputs, uploaded.
+fn lin(ws: &[&LinearW], dev: &Device) -> Lin {
+    let din = ws[0].din;
+    let dout: usize = ws.iter().map(|w| w.dout).sum();
+    let mut w = Vec::with_capacity(din * dout);
+    for r in 0..din {
+        for l in ws {
+            w.extend_from_slice(&l.w[r * l.dout..(r + 1) * l.dout]);
+        }
+    }
+    let bias: Vec<f32> = ws.iter().flat_map(|l| l.b.iter().copied()).collect();
+    let (hi, lo) = split_host(&w);
+    let t = |v: Vec<f32>| Tensor::<3>::from_data(TensorData::new(v, [1, din, dout]), dev);
+    Lin { full: t(w), hi: t(hi), lo: t(lo), b: Tensor::<3>::from_data(TensorData::new(bias, [1, 1, dout]), dev) }
 }
 
 fn norm(w: &NormW, dev: &Device) -> LayerNorm {
@@ -99,40 +111,41 @@ impl GpuNet {
             .iter()
             .map(|b| Block {
                 norm1: norm(&b.norm1, dev),
-                q: lin(&b.q, dev),
-                k: lin(&b.k, dev),
-                v: lin(&b.v, dev),
-                o: lin(&b.o, dev),
+                qkv: lin(&[&b.q, &b.k, &b.v], dev),
+                o: lin(&[&b.o], dev),
                 norm2: norm(&b.norm2, dev),
-                ffn1: lin(&b.ffn1, dev),
-                ffn2: lin(&b.ffn2, dev),
+                ffn1: lin(&[&b.ffn1], dev),
+                ffn2: lin(&[&b.ffn2], dev),
             })
             .collect();
         GpuNet {
-            input: lin(&w.input, dev),
+            input: lin(&[&w.input], dev),
             input_norm: norm(&w.input_norm, dev),
             blocks,
             final_norm: norm(&w.final_norm, dev),
-            head: lin(&w.head, dev),
+            head: lin(&[&w.head], dev),
             heads,
             mode,
         }
     }
 
-    /// `a·b` for `[.., m, k]·[.., k, n]` (b given split).
+    /// `a·b` with `b = b_h + b_l` given split: Split3 `a_h b_h + (a_h b_l + a_l b_h)`.
     fn mm<const D: usize>(&self, a: Tensor<D>, b_hi: Tensor<D>, b_lo: Tensor<D>) -> Tensor<D> {
+        let (ah, al) = split_dev(a);
+        let small = ah.clone().matmul(b_lo) + al.matmul(b_hi.clone());
+        ah.matmul(b_hi) + small
+    }
+
+    /// `x W + b`.
+    fn linear(&self, x: Tensor<3>, l: &Lin) -> Tensor<3> {
         match self.mode {
-            GpuMatmul::Tf32 => a.matmul(b_hi + b_lo),
-            GpuMatmul::Split3 => {
-                let (ah, al) = split_dev(a);
-                let small = ah.clone().matmul(b_lo) + al.matmul(b_hi.clone());
-                ah.matmul(b_hi) + small
-            }
+            GpuMatmul::Tf32 => x.matmul(l.full.clone()) + l.b.clone(),
+            GpuMatmul::Split3 => self.mm(x, l.hi.clone(), l.lo.clone()) + l.b.clone(),
         }
     }
 
-    /// `a·b` with both operands activations.
-    fn mm_act<const D: usize>(&self, a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
+    /// `a·b` for activations.
+    fn mm_act(&self, a: Tensor<4>, b: Tensor<4>) -> Tensor<4> {
         match self.mode {
             GpuMatmul::Tf32 => a.matmul(b),
             GpuMatmul::Split3 => {
@@ -142,19 +155,14 @@ impl GpuNet {
         }
     }
 
-    fn linear(&self, x: Tensor<3>, l: &Lin) -> Tensor<3> {
-        self.mm(x, l.hi.clone(), l.lo.clone()) + l.b.clone()
-    }
-
     /// The attention of burn's `MultiHeadAttention` (no mask), with our matmuls: scores
     /// `q kᵀ / √d`, softmax over keys, context, output projection.
     fn attention(&self, x: Tensor<3>, blk: &Block) -> Tensor<3> {
         let [b, t, e] = x.dims();
         let (h, d) = (self.heads, e / self.heads);
-        let heads = |y: Tensor<3>| y.reshape([b, t, h, d]).swap_dims(1, 2);
-        let q = heads(self.linear(x.clone(), &blk.q));
-        let k = heads(self.linear(x.clone(), &blk.k));
-        let v = heads(self.linear(x, &blk.v));
+        let qkv = self.linear(x, &blk.qkv);
+        let heads = |i: usize| qkv.clone().narrow(2, i * e, e).reshape([b, t, h, d]).swap_dims(1, 2);
+        let (q, k, v) = (heads(0), heads(1), heads(2));
         let scores = self.mm_act(q, k.transpose()).div_scalar((d as f32).sqrt());
         let w = softmax(scores, 3);
         let ctx = self.mm_act(w, v).swap_dims(1, 2).reshape([b, t, e]);
@@ -208,8 +216,9 @@ impl CudaRunner {
         self.ordinal
     }
 
-    /// Raw outputs of `b ≤ batch` neighborhoods of `t` tokens, run as one padded batch.
-    pub(crate) fn run_batch(&self, features: &[f32], b: usize, t: usize) -> Result<Vec<f32>, PatError> {
+    /// Queue the forward pass of `b ≤ batch` neighborhoods of `t` tokens as one padded batch; the
+    /// returned tensor is read back later ([`CudaRunner::read`]).
+    fn launch(&self, features: &[f32], b: usize, t: usize) -> Result<Tensor<2>, PatError> {
         let row = t * 6;
         if b == 0 || b > self.batch || features.len() != b * row {
             return Err(PatError::SizeMismatch { what: format!("{} feature values for {b} neighborhoods of {t} tokens", features.len()) });
@@ -219,20 +228,34 @@ impl CudaRunner {
         for _ in b..self.batch {
             data.extend_from_slice(&features[..row]);
         }
-        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let x = Tensor::<3>::from_data(TensorData::new(data, [self.batch, t, 6]), &self.dev);
-            self.net.forward(x).into_data().try_into_vec::<f32>().map_err(|e| format!("{e:?}"))
-        }));
+            self.net.forward(x)
+        }))
+        .map_err(|_| PatError::Gpu { reason: "burn-cuda panicked during the forward pass".into() })
+    }
+
+    /// Read back one queued batch (`b` real rows).
+    fn read(y: Tensor<2>, b: usize) -> Result<Vec<f32>, PatError> {
+        let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| y.into_data().try_into_vec::<f32>().map_err(|e| format!("{e:?}"))));
         let mut y = match out {
             Ok(Ok(y)) => y,
             Ok(Err(reason)) => return Err(PatError::Backend { reason }),
-            Err(_) => return Err(PatError::Gpu { reason: "burn-cuda panicked during the forward pass".into() }),
+            Err(_) => return Err(PatError::Gpu { reason: "burn-cuda panicked reading the outputs".into() }),
         };
         y.truncate(b * 6);
         Ok(y)
     }
 
-    /// Raw outputs of any number of neighborhoods, in batches of the runner's batch shape.
+    /// Raw outputs of `b ≤ batch` neighborhoods of `t` tokens, run as one padded batch.
+    pub(crate) fn run_batch(&self, features: &[f32], b: usize, t: usize) -> Result<Vec<f32>, PatError> {
+        Self::read(self.launch(features, b, t)?, b)
+    }
+
+    /// Raw outputs of any number of neighborhoods, in batches of the runner's batch shape, one
+    /// batch at a time with a read-back after each (NOTES-GPU.md: queueing several batches before
+    /// reading back, or dispatching from several host threads, gave no gain, and queueing changed
+    /// burn's fusion segments and with them the bits of the Split3 outputs).
     pub(crate) fn run(&self, features: &[f32], t: usize) -> Result<Vec<f32>, PatError> {
         let row = t * 6;
         let mut out = Vec::with_capacity(features.len() / row.max(1) * 6);
@@ -336,4 +359,23 @@ pub(crate) fn predict_coefficients_cuda(
     }
     report.seconds = t0.elapsed().as_secs_f64();
     Ok((coeffs, sigma, report))
+}
+
+/// A network kept on a CUDA device (weights uploaded once) for repeated calls; see
+/// [`forward_features_cuda`]. Measurements only.
+pub struct CudaNetwork(CudaRunner);
+
+impl CudaNetwork {
+    /// Upload `model` to device `ordinal`.
+    pub fn new(model: &Model, ordinal: usize, mode: GpuMatmul) -> Result<Self, PatError> {
+        Ok(CudaNetwork(CudaRunner::new(model, ordinal, mode)?))
+    }
+
+    /// Raw outputs of precomputed features (`b·t·6` values).
+    pub fn forward(&self, features: &[f32], tokens: usize) -> Result<Vec<f32>, PatError> {
+        if tokens == 0 || !features.len().is_multiple_of(6 * tokens) {
+            return Err(PatError::SizeMismatch { what: format!("{} feature values for {tokens} tokens", features.len()) });
+        }
+        self.0.run(features, tokens)
+    }
 }

@@ -80,7 +80,7 @@ fn network_throughput() {
     let cloud = ellipsoid_cloud(n, 9, [0.6, 0.45, 0.3]);
     let f = features(&cloud, 64);
     for mode in [GpuMatmul::Tf32, GpuMatmul::Split3] {
-        for b in [128usize, 256, 512, 1024] {
+        for b in [256usize, 512, 1024, 2048] {
             let r = ddg_points_as_tori::network::cuda::forward_features_cuda(&model, &f[..b * 64 * 6], 64, ord, Some(b), mode).unwrap();
             let t = std::time::Instant::now();
             let r2 = forward_features_cuda(&model, &f, 64, ord, Some(b), mode).unwrap();
@@ -584,4 +584,274 @@ fn stable_form_in_f64_equals_cpu() {
     }
     eprintln!("stable form in f64 vs Eq. 23 (CPU): φ {:.1e}, ∇φ {:.1e}, Δφ {:.1e}", worst[0], worst[1], worst[2]);
     assert!(worst[0] < 1e-13 && worst[1] < 1e-11 && worst[2] < 1e-9, "{worst:?}");
+}
+
+// ------------------------------------------------------------------------------------------------
+// Timings (ignored; run alone: `--ignored timing_ --test-threads 1 --nocapture`). PAT_SIZES sets the
+// cloud sizes (default 100000,1000000), PAT_CPU=0 skips the CPU rows.
+// ------------------------------------------------------------------------------------------------
+
+fn machine(tag: &str) {
+    let up = std::process::Command::new("uptime").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let smi = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=memory.used,utilization.gpu,temperature.gpu,clocks.sm", "--format=csv,noheader"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    eprintln!("[{tag}] uptime: {up} | nvidia-smi: {smi}");
+}
+
+/// `n` points sampled area-uniformly on Keenan Crane's spot (data/models), with interpolated vertex
+/// normals; `None` when the mesh is absent.
+fn spot_cloud(n: usize, seed: u64) -> Option<PointCloud> {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/models/spot/spot/spot_triangulated.obj");
+    let mesh = ddg_core::io::read_obj(&path).ok()?;
+    let tris = mesh.triangles()?;
+    let v = &mesh.positions;
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let mut vn = vec![[0.0f64; 3]; v.len()];
+    let mut cum = Vec::with_capacity(tris.len());
+    let mut tot = 0.0;
+    for t in &tris {
+        let nf = cross(sub(v[t[1] as usize], v[t[0] as usize]), sub(v[t[2] as usize], v[t[0] as usize]));
+        for &i in t {
+            for a in 0..3 {
+                vn[i as usize][a] += nf[a];
+            }
+        }
+        tot += 0.5 * (nf[0] * nf[0] + nf[1] * nf[1] + nf[2] * nf[2]).sqrt();
+        cum.push(tot);
+    }
+    let mut s = seed;
+    let mut p = Vec::with_capacity(n);
+    let mut nr = Vec::with_capacity(n);
+    for _ in 0..n {
+        let f = cum.partition_point(|&c| c < lcg(&mut s) * tot).min(tris.len() - 1);
+        let (r1, r2) = (lcg(&mut s).sqrt(), lcg(&mut s));
+        let w = [1.0 - r1, r1 * (1.0 - r2), r1 * r2];
+        let t = tris[f];
+        let mut q = [0.0; 3];
+        let mut m = [0.0; 3];
+        for (k, &i) in t.iter().enumerate() {
+            for a in 0..3 {
+                q[a] += w[k] * v[i as usize][a];
+                m[a] += w[k] * vn[i as usize][a];
+            }
+        }
+        let l = (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt();
+        p.push(q);
+        nr.push([m[0] / l, m[1] / l, m[2] / l]);
+    }
+    Some(PointCloud::new(p, nr, ddg_points_as_tori::NormalPolicy::default()).ok()?.0)
+}
+
+fn sizes() -> Vec<usize> {
+    std::env::var("PAT_SIZES").ok().map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect()).unwrap_or(vec![100_000, 1_000_000])
+}
+
+fn build_row(tag: &str, n: usize, r: &ddg_points_as_tori::BuildReport) {
+    eprintln!(
+        "{tag:<22} n {n:>8}: kNN {:7.2} s ({:?}), features {:7.2} s (CPU{}), network {:7.2} s ({:?}), predict wall {:7.2} s, fit {:6.2} s ({:?}), total {:7.2} s = {:.1} s per 1M",
+        r.knn_seconds,
+        r.knn_device,
+        r.predict.features_seconds,
+        if matches!(r.predict.device, Device::Cpu) { ", summed over workers" } else { ", overlapped" },
+        r.predict.forward_seconds,
+        r.predict.device,
+        r.predict.seconds,
+        r.fit.seconds,
+        r.fit_device,
+        r.seconds,
+        r.seconds * 1e6 / n as f64
+    );
+}
+
+#[test]
+#[ignore]
+fn timing_precompute() {
+    let Some(ord) = gpu() else { return };
+    let model = Model::reference().unwrap();
+    let cpu_rows = std::env::var("PAT_CPU").map(|v| v != "0").unwrap_or(true);
+    for n in sizes() {
+        let Some(cloud) = spot_cloud(n, 1) else {
+            eprintln!("SKIP: data/models/spot missing");
+            return;
+        };
+        // stage comparisons: fitting kNN and fit, CPU (64 threads) vs GPU
+        let pool = ddg_points_as_tori::pool::make_pool(None).unwrap();
+        let t = std::time::Instant::now();
+        let tree = pool.install(|| KdTree::new(cloud.positions(), KdTreeOptions::default())).unwrap();
+        let t_tree = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let nb_cpu = pool.install(|| fitting_neighborhoods(&tree, cloud.positions(), 64));
+        let t_knn_cpu = t.elapsed().as_secs_f64();
+        let g = GpuContext::new(ord).unwrap();
+        let _ = gfit_nb(&g, &tree, &cloud.positions()[..1000.min(n)], 64).ok();
+        let t = std::time::Instant::now();
+        let nb_gpu = gfit_nb(&g, &tree, cloud.positions(), 64).unwrap();
+        let t_knn_gpu = t.elapsed().as_secs_f64();
+        assert_eq!(nb_cpu, nb_gpu);
+        machine("stages");
+        eprintln!("stages n {n}: kd-tree (CPU) {t_tree:.3} s, 64-NN CPU 64 threads {t_knn_cpu:.3} s, GPU {t_knn_gpu:.3} s (incl. upload/download)");
+        drop((nb_cpu, nb_gpu));
+        for mode in [GpuMatmul::Split3, GpuMatmul::Tf32] {
+            let mut o = BuildOptions::default();
+            o.predict.device = Device::Cuda { ordinal: ord };
+            o.predict.gpu_matmul = mode;
+            // warm-up: the first forward pass JIT-compiles CubeCL's fused kernels (once per process)
+            let small = spot_cloud(3000, 9).unwrap();
+            let t = std::time::Instant::now();
+            let (_, rw) = PointsAsTori::build(&small, &model, &o).unwrap();
+            eprintln!("warm-up {mode:?}: 3000 points in {:.2} s (network {:.2} s, includes the JIT compile)", t.elapsed().as_secs_f64(), rw.predict.forward_seconds);
+            machine("before");
+            let (field, r) = PointsAsTori::build(&cloud, &model, &o).unwrap();
+            machine("after");
+            build_row(&format!("GPU {mode:?}"), n, &r);
+            if mode == GpuMatmul::Split3 {
+                let co = field.tori().coefficients.clone();
+                let sg = field.tori().sigma.clone();
+                let t = std::time::Instant::now();
+                let _ = fit_tori_with(&cloud, &co, &sg, 0, &FitOptions::default()).unwrap();
+                let t_fit_cpu = t.elapsed().as_secs_f64();
+                let t = std::time::Instant::now();
+                let _ = gfit(&g, &cloud, &co, &sg, 0, &FitOptions::default()).unwrap();
+                eprintln!("stages n {n}: fit CPU 64 threads {t_fit_cpu:.3} s, GPU {:.3} s (incl. transfers)", t.elapsed().as_secs_f64());
+            }
+        }
+        if cpu_rows && n <= 1_000_000 {
+            machine("before");
+            let (_, r) = PointsAsTori::build(&cloud, &model, &BuildOptions::default()).unwrap();
+            machine("after");
+            build_row("CPU 64 threads", n, &r);
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn timing_evaluation() {
+    let Some(ord) = gpu() else { return };
+    let model = Model::reference().unwrap();
+    let n = std::env::var("PAT_EVAL_N").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000usize);
+    let Some(cloud) = spot_cloud(n, 2) else { return };
+    let mut o = BuildOptions::default();
+    o.predict.device = Device::Cuda { ordinal: ord };
+    let (field, _) = PointsAsTori::build(&cloud, &model, &o).unwrap();
+    let tori = field.tori().clone();
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in cloud.positions() {
+        for a in 0..3 {
+            lo[a] = lo[a].min(p[a]);
+            hi[a] = hi[a].max(p[a]);
+        }
+    }
+    let grid = |m: usize| -> Vec<[f64; 3]> {
+        let mut g = Vec::with_capacity(m * m * m);
+        for i in 0..m {
+            for j in 0..m {
+                for k in 0..m {
+                    let f = |a: usize, t: usize| lo[a] - 0.05 + (hi[a] - lo[a] + 0.1) * t as f64 / (m - 1) as f64;
+                    g.push([f(0, i), f(1, j), f(2, k)]);
+                }
+            }
+        }
+        g
+    };
+    let fields = [
+        ("CPU f64 64 threads", field_with(&cloud, &tori, EvalOptions { threads: None, ..Default::default() }, Device::Cpu)),
+        ("GPU f64", field_with(&cloud, &tori, EvalOptions::default(), Device::Cuda { ordinal: ord })),
+        ("GPU F32Stable", field_with(&cloud, &tori, EvalOptions { precision: EvalPrecision::F32Stable, ..Default::default() }, Device::Cuda { ordinal: ord })),
+    ];
+    for m in [64usize, 256] {
+        let qs = grid(m);
+        for (name, f) in &fields {
+            for (what, grad, lap) in [("φ", false, false), ("φ+∇φ", true, false), ("φ+∇φ+Δφ", true, true)] {
+                if m == 256 && lap {
+                    continue;
+                }
+                let mut d = vec![0.0; qs.len()];
+                let mut gr = vec![[0.0; 3]; if grad { qs.len() } else { 0 }];
+                let mut l = vec![0.0; if lap { qs.len() } else { 0 }];
+                machine("before");
+                let t = std::time::Instant::now();
+                let rep = f
+                    .evaluate(
+                        &qs,
+                        EvalOut { distance: Some(&mut d), gradient: if grad { Some(&mut gr) } else { None }, laplacian: if lap { Some(&mut l) } else { None } },
+                    )
+                    .unwrap();
+                let s = t.elapsed().as_secs_f64();
+                eprintln!("eval n {n} grid {m}³ {name:<20} {what:<10}: {s:8.3} s ({:.2e} s/query, device {:?})", s / qs.len() as f64, rep.device);
+            }
+        }
+    }
+    // per-query latency: single queries on the CPU (one thread, sequential), one-query batches on the GPU
+    let mut s = 3;
+    let qs: Vec<[f64; 3]> = (0..20_000).map(|_| [lo[0] + (hi[0] - lo[0]) * lcg(&mut s), lo[1] + (hi[1] - lo[1]) * lcg(&mut s), lo[2] + (hi[2] - lo[2]) * lcg(&mut s)]).collect();
+    machine("latency");
+    let t = std::time::Instant::now();
+    let mut acc = 0.0;
+    for q in &qs {
+        acc += fields[0].1.distance(*q).unwrap();
+    }
+    let cpu_lat = t.elapsed().as_secs_f64() / qs.len() as f64;
+    let t = std::time::Instant::now();
+    let mut acc2 = 0.0;
+    for q in &qs {
+        let (_, gq) = fields[0].1.distance_gradient(*q).unwrap();
+        acc2 += gq[0];
+    }
+    let cpu_lat_g = t.elapsed().as_secs_f64() / qs.len() as f64;
+    let mut d = [0.0];
+    let t = std::time::Instant::now();
+    for q in qs.iter().take(2000) {
+        fields[1].1.evaluate(std::slice::from_ref(q), EvalOut { distance: Some(&mut d), gradient: None, laplacian: None }).unwrap();
+        acc += d[0];
+    }
+    let gpu_lat = t.elapsed().as_secs_f64() / 2000.0;
+    eprintln!(
+        "latency n {n}: CPU sequential 32-NN φ {cpu_lat:.2e} s, φ+∇φ {cpu_lat_g:.2e} s per query; GPU one-query batch {gpu_lat:.2e} s ({acc:.3} {acc2:.3})"
+    );
+}
+
+/// Five identical builds per matmul mode: the network time per build and the coefficient hash
+/// (bitwise equal in every repetition, NOTES-GPU.md).
+#[test]
+#[ignore]
+fn timing_repeated_builds() {
+    let Some(ord) = gpu() else { return };
+    let model = Model::reference().unwrap();
+    let n: usize = std::env::var("PAT_N").ok().and_then(|s| s.parse().ok()).unwrap_or(50_000);
+    let c = spot_cloud(n, 1).unwrap();
+    for mode in [GpuMatmul::Tf32, GpuMatmul::Split3] {
+        let mut o = BuildOptions::default();
+        o.predict.device = Device::Cuda { ordinal: ord };
+        o.predict.gpu_matmul = mode;
+        for rep in 0..5 {
+            let (f, r) = PointsAsTori::build(&c, &model, &o).unwrap();
+            let h = hash32(&f.tori().coefficients.iter().flatten().copied().collect::<Vec<f32>>());
+            machine(&format!("{mode:?} rep {rep}: network {:.2} s = {:.0}/s, coefficients {h:016x}", r.predict.forward_seconds, n as f64 / r.predict.forward_seconds));
+        }
+    }
+}
+
+/// One network on the device, six passes over the same 50,000 neighborhoods.
+#[test]
+#[ignore]
+fn timing_one_network() {
+    let Some(ord) = gpu() else { return };
+    let model = Model::reference().unwrap();
+    let n = 50_000;
+    let f = features(&spot_cloud(n, 1).unwrap(), 64);
+    for mode in [GpuMatmul::Tf32, GpuMatmul::Split3] {
+        let net = ddg_points_as_tori::network::cuda::CudaNetwork::new(&model, ord, mode).unwrap();
+        for rep in 0..6 {
+            let t = std::time::Instant::now();
+            let y = net.forward(&f, 64).unwrap();
+            let s = t.elapsed().as_secs_f64();
+            machine(&format!("one runner {mode:?} rep {rep}: {:.0}/s {:016x}", n as f64 / s, hash32(&y)));
+        }
+    }
 }
