@@ -1235,3 +1235,23 @@ proposals accepted).**
 4. Vesicas with `d < 0` are a union of two discs, as in the reference, and kept as such.
 5. The npz writer has no ZIP64: files stay below 4 GiB (≈ 500 shapes, as the authors' files).
 6. Blob fields are not SDFs: MC on them uses `Band::Dense`.
+
+**Resolutions after the training core (WP7, 2026-11-04; `NOTES-WP7.md`; proposals accepted).**
+1. §10.4: the blend weights are host constants, since they do not depend on θ. Pairs below
+   e^{−40} of the largest weight are dropped (truncation T = 40, kd-tree plan: 3.7M pairs instead
+   of 251M). The fit, per-torus SDF and loss are framework ops.
+2. CITED entries for `pat-query-sampling`, `pat-triangle-sampling` (WP15 audit).
+3. API as built: `train`, `train_on`, `batch_rows` per curriculum phase.
+4. Adam state is keyed by parameter name, so resumption is bitwise exact.
+5. Validation is reported with unit normals. The authors' validation files have norm-2 normals,
+   and their own validation numbers come from broken tori (distance 0.99 / eikonal 10.6, against
+   0.0195 / 0.296 with unit normals).
+6. Retraining (WP10) uses `EigenRule::Robust`: in f32 the reference form is wrong by 0.35–0.75
+   below `|v2/v1|` ≈ 3e-7. Robust changes the loss on the authors' weights by ≤ 8e-6.
+7. Rows with exactly zero gradient are skipped (exact).
+8. Parity: our loss with the authors' weights equals the reference's JAX `SDF_loss` within
+   7.1e-6 relative (20 batches of `ABC17_validation_3`, same queries).
+9. Open for WP10: whether burn-cuda's backward of `select` (scatter-add) uses atomics, which
+   would break run-to-run determinism; host-plan and ground-truth prefetch on CPU threads so the
+   GPU is never idle; matmul precision (TF32 ≈ 30–35 h vs f32-accurate 3×TF32 ≈ 80–85 h for the
+   full curriculum, estimated) — **[user]**.
