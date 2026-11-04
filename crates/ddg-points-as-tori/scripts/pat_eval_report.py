@@ -253,7 +253,7 @@ def main():
     T.append('**Mechanism at the largest jumps (finest grid, top edges by slope)**\n\n' + table(
         ['cloud', 'rule', 'edges', 'continuous (no jump after bisection)', 'neighbor set changes', 'far field (ρmin/σ > 1)', 'ρmin/σ median', '|φ_true| median', 'weight share entering'], rows))
     # ---------------------------------------------------------------- orientation
-    ors = load(cases, 'orient', 'orient.json') + sum((load(cases, d, 'orient.json') for d in ['orient2048']), [])
+    ors = sum((load(cases, d, 'orient.json') for d in ['orient', 'abc2048', 'blobs2048', 'thingi2048']), [])
     if ors:
         rows = [[os.path.basename(o['case']), o['n'], o['flipped'], fmt(100 * o['it10']['residual'], 2), fmt(100 * o['it30']['residual'], 2), o['it10']['converged'], o['it30']['converged'], len(o['it30']['flips'])] for o in ors]
         r10 = np.array([o['it10']['residual'] for o in ors])

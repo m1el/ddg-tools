@@ -13,7 +13,8 @@ deterministic.
 
 **Status.** Complete: the 315-shape accuracy run (all methods), the sign-rule study, the §16.3
 sweep, the black-box comparison (`COMPARISON.md`), the continuity study (32 clouds) and Fig. 7.
-Partial: Fig. 29 (110k and 880k points; 7.3M is running) and orientation (running). These sections say what they cover and
+Complete as well: orientation (41 clouds). Partial: Fig. 29 (110k and 880k points; 7.3M is
+running). These sections say what they cover and
 will be extended. Everything is reproducible with `scripts/pat_eval.sh`.
 
 ## Recommendations for the user
@@ -397,9 +398,35 @@ slopes.** Three measurements:
 
 ## Orientation (Fig. 27; WP9a resolution 1)
 
-*Queued (runs after the continuity study under the thread cap): 41 clouds (WP9a's 11, plus 10 ABC,
-10 blob and 10 Thingi10K shapes at 2048 points), 30 % flipped, 10 and 30 iterations
-(`eval orient`).*
+Protocol: clean clouds with true normals; flip a seeded random 30 %; run `orient_normals` with
+defaults (k = 64, ε = 1/σ_i, 32-NN blend), once with `max_iterations` 10 (the paper) and once with
+30. The residual is the fraction of points whose final normal is opposite to the true one. Clouds:
+WP9a's 11 (5 analytic solids at 2048 points; golden synth_torus, tooth, knot, block, femur, snail),
+plus the first 10 ABC (the unseen validation shapes), the first 10 blobs and the first 10 Thingi10K
+shapes, each at 2048 points.
+
+| set | clouds | wrong after 10 it. (mean / median / max) | wrong after 30 it. (mean / median / max) | converged (10 / 30) | 30 worse than 10 |
+|---|---|---|---|---|---|
+| WP9a's 11 | 11 | 1.00 % / 0 % / 6.0 % | 1.00 % / 0 % / 6.0 % | 8 / 8 | 0 |
+| blobs | 10 | 1.52 % / 0 % / 9.2 % | 1.52 % / 0 % / 9.2 % | 7 / 7 | 0 |
+| ABC (validation) | 10 | 18.0 % / 9.3 % / 46.7 % | 20.5 % / 18.8 % / 46.8 % | 3 / 4 | 5 |
+| Thingi10K | 10 | 25.9 % / 24.0 % / 46.6 % | 26.8 % / 26.9 % / 46.7 % | 0 / 1 | 6 |
+
+Per cloud: `runs_tmp/pat-wp14/report/tables.md`.
+
+- **Smooth shapes match the paper, and WP9a.** On the paper's kind of input the result is 0 % on most
+  clouds (paper: 0.3 %). WP9a's numbers reproduce on new samples: femur 6.0 % (WP9a 6.6 %), snail
+  1.9 % (2.0 %), arc extrusion 2.6 % (3.2 %).
+- **30 iterations do not help.** No cloud improves from 10 to 30. The unconverged ones keep flipping
+  small sets back and forth, or settle into consistent wrong patches (WP9a resolution 2). On CAD
+  shapes, more iterations make it worse in 11 of 20 clouds (`abc0val_8`, a box: 13 % → 32 %).
+  Keep `max_iterations = 10`.
+- **CAD shapes with sharp edges and thin parts fail.** 4 of 10 ABC and 6 of 10 Thingi10K clouds end
+  with more than the 30 % they started with. Nothing reaches 50 %, so this is not a global inversion
+  but independently oriented patches. The vote weights neighbors through the fitted torus's metric.
+  Across a 90° edge, and across the two sides of a thin plate inside one 64-NN neighborhood, the
+  near-sphere tori (see "Sign rule") give votes for the wrong side. Fig. 27's claim holds for smooth
+  shapes only. Being explicit about this in the operator's documentation (WP13) seems warranted.
 
 ## Density (§16.4)
 
