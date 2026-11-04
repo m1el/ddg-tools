@@ -1,0 +1,138 @@
+fce4101a7c4b8aab02a4a94d168fa209b80b2cc097d9ac7f4e2200a93cf6f0de  pat-reference.safetensors
+# source points-as-tori src/pointsastori/models/FundamentalFormPredictor.pkl sha256 aaa2f3882c36ac32d57361377a73ac830c47d03d6167d51249127a6c40ef7ff9
+# tensor blocks.0.attention.key.bias [8, 16] f92cc6baddd9e4cfb7ad30caa9129f170d869b026e7e4667889b3baee27dac24
+# tensor blocks.0.attention.key.kernel [128, 8, 16] 80267fc73099cac68868639a1e00f299302c2812bf97bcabd8380445452377be
+# tensor blocks.0.attention.out.bias [128] 27046b56a3c5a8567f06480cc805cb5c894f7eb5acada650043e40226daaa245
+# tensor blocks.0.attention.out.kernel [8, 16, 128] cd3419e6056ef5036e33e2efc8e7ed60b1dea34d4355a76a5d767f6c98e12cda
+# tensor blocks.0.attention.query.bias [8, 16] d27eab06a475f1bc86288d2040df622cfe96cde77c6e12a2f568c05f1e27f365
+# tensor blocks.0.attention.query.kernel [128, 8, 16] 7ad5c13f096eb648112faba1ffc24f58b2d868af3eae029e506fd203181e0f32
+# tensor blocks.0.attention.value.bias [8, 16] 7113810c2ef6a054c4704d82ac7f1fab94d1635293e9350f4bcd892e5fc3fd41
+# tensor blocks.0.attention.value.kernel [128, 8, 16] e33b963665ee14087771f03c8d3b65bf663ed917d6889eebf00e0ec3b87085ad
+# tensor blocks.0.ffn.layers.0.bias [512] a01cf43a194fe8014862c0d9ce3e15b3b120bdc684170c803b8527ab5acbfef0
+# tensor blocks.0.ffn.layers.0.kernel [128, 512] e270537dd1abe7172f18ea5bad57a4f037c71cdf560a2a9f02016a65347d016c
+# tensor blocks.0.ffn.layers.3.bias [128] 9bc16874c64a2a6f2742e9b4c4576074160777027865d40550637d44681cebc9
+# tensor blocks.0.ffn.layers.3.kernel [512, 128] 49a5528cdf930e3a4142ef3be259df6bf8fdede36a37a44aa9673d3d5c10a1e1
+# tensor blocks.0.norm1.bias [128] 5b201321c5def4c5a6844d10d55c527170b68a4d9b6e9a810a1c625ce2202559
+# tensor blocks.0.norm1.scale [128] 1a7cb030f3670f7c87979ba1acc04987471027743044535582fc48a05408b5f0
+# tensor blocks.0.norm2.bias [128] 956f0de437f55b7e791e3e04486b905b56a0edd8e9739b1dafd4cb2cf4302627
+# tensor blocks.0.norm2.scale [128] b7f2ec09aa84e43846ad64acfc4658e7b64de0587e9a2a1f22a4fd7b3e200511
+# tensor blocks.1.attention.key.bias [8, 16] 7f57f28d753b51ec8364de19675719dadc42028b852a566f5ed422d0591a6595
+# tensor blocks.1.attention.key.kernel [128, 8, 16] 5eb3bd0ab26ec602f24ca84c50c185025ae9f6f4042cb07326afb7aa056e3413
+# tensor blocks.1.attention.out.bias [128] 48444a3d6b2bc45f5a52386b22ea426f373e80c6c0905c3a3a69863b859393f6
+# tensor blocks.1.attention.out.kernel [8, 16, 128] 9cc339796ca6d6119b1a15db3ff9cfd17cff3f8b92e9ecc0f720ea7704e87f5e
+# tensor blocks.1.attention.query.bias [8, 16] 38cbe40287eb6928cc92af33f93c1b88323dc4fb6c5eda7de3ee1cdeca33d7e9
+# tensor blocks.1.attention.query.kernel [128, 8, 16] 1649e2965e5cae34bf8e7f4527db2c7850500e0f8150dfa1cce4aff9734d40b9
+# tensor blocks.1.attention.value.bias [8, 16] 56832a78d1a123583c516ca1b7f5d043ded675d9e48e0a010fda6a3747fb2ec6
+# tensor blocks.1.attention.value.kernel [128, 8, 16] 8f4e98d180a22020c6c6d262372739716758e8efe36e5eefd100d417fc040dbc
+# tensor blocks.1.ffn.layers.0.bias [512] b36fd85b5d988319b670bd5da7376cd60b31951f6c63fa4e44a40a7fdf8af8d0
+# tensor blocks.1.ffn.layers.0.kernel [128, 512] 861caa539d2eb907acfbfd9db83f6751011b8cfb90eeec0c84bcd02afab0cb49
+# tensor blocks.1.ffn.layers.3.bias [128] 4153f317e80874cdb26b7005b4493010d924e39abe320e2c9a738f97abfe79fe
+# tensor blocks.1.ffn.layers.3.kernel [512, 128] 5250aac45b9980b6f7867686e05ca309321a2161a36fff3c859b58343d03b774
+# tensor blocks.1.norm1.bias [128] 553e8792d214744a9299b91cb0c6fe0b1c536bfa837314abce58556247763fd9
+# tensor blocks.1.norm1.scale [128] 4a90db4bbf83824b73d305dc0baf85c4eedb95f2e83fddc73da540d1658df317
+# tensor blocks.1.norm2.bias [128] 8597c397778dbe3aa1720a2fc432769f9d03fc6286120e0c4a688e8746df1ecf
+# tensor blocks.1.norm2.scale [128] fc63dbb09d9c8c49169fa1fd7064de8b2f33597203a74b75b27af563e0d79a02
+# tensor blocks.2.attention.key.bias [8, 16] a71b1be2e5c15392c942a9e637491f3b6675d110494b3126a78561372612db94
+# tensor blocks.2.attention.key.kernel [128, 8, 16] 2e18a9bd487292379495e93ca2ae7f80e86cdd96b2d79173f5d50ecf739294aa
+# tensor blocks.2.attention.out.bias [128] c3843854b6e80ed538298d5e11c97aca940b8df2944ff58bef1dc294522fa629
+# tensor blocks.2.attention.out.kernel [8, 16, 128] 7fa987013df105ac2940a54bd5a188316b3690dab179cdecc13c5107f8d7bf5f
+# tensor blocks.2.attention.query.bias [8, 16] 7fb695fd2a633fe4ef3888adc0fd53f3add867259a5e504753f3fc9c180a2991
+# tensor blocks.2.attention.query.kernel [128, 8, 16] b0ede1776ecc96c04eef841a5aaf06786652f90da7fbf1c4c64f05066766132e
+# tensor blocks.2.attention.value.bias [8, 16] d33cf1a3c17060431ce1ed465c2f7c909bd3cdf7a27f9ea1f2eaeced99385468
+# tensor blocks.2.attention.value.kernel [128, 8, 16] 798dd591c416b6bf62782036624af751c6e0d7c2c79f882414adfdbdb8bf6cb5
+# tensor blocks.2.ffn.layers.0.bias [512] 1c6ea9a3289cb6cf52cc07f9272369c5601bda1c3546eda7e581221d35912602
+# tensor blocks.2.ffn.layers.0.kernel [128, 512] c82608647161d32218c24058a740af4d8d63467a081085137f731ce58f888b6b
+# tensor blocks.2.ffn.layers.3.bias [128] fc5cc53d620346bf1c9189dc8d6abd7a60394f23a501882eeda5ed4e4792b1f7
+# tensor blocks.2.ffn.layers.3.kernel [512, 128] badf0df6ee128a8576a6779be2172d2e9139f78225ea399395137a4e3c7d03c0
+# tensor blocks.2.norm1.bias [128] 23cb3882873a7918d6039554b4eca520a1e5b7a1da7ea35764c4feb4a61ba4f3
+# tensor blocks.2.norm1.scale [128] 39f15b15de7d74a77ba644c9e50b942e4074ad25b064f0755e5f94ad08be8162
+# tensor blocks.2.norm2.bias [128] a07cc80befd77497ee257c48e943e479a290ce2b07a4edbdf6c549b3e03b3d83
+# tensor blocks.2.norm2.scale [128] 6699062db13d183bc68cec439fbfa816d1d58d928c3058c0da0a9784fe10e3b1
+# tensor blocks.3.attention.key.bias [8, 16] 16c6df3a657dbfdc38c053ce292bce1013e22a2cebb900822842bd927d200c1a
+# tensor blocks.3.attention.key.kernel [128, 8, 16] 6adcafd955a0b40e880eb5d919eed84b23f434a457d8d8bc584ba01212df3507
+# tensor blocks.3.attention.out.bias [128] 6204d0cff0b86de4fe3e44d50acc27b6f244e8da8599bb411bc00eec927fc01c
+# tensor blocks.3.attention.out.kernel [8, 16, 128] 0b4fd0b403d1b1cd2afd5c75ee07543ea26660f72baef761d157fbf5eadf72a6
+# tensor blocks.3.attention.query.bias [8, 16] 621e1f67b71403cde4f91b3b20536e03dc61de33aa9fee0b1d9a38ad960870dc
+# tensor blocks.3.attention.query.kernel [128, 8, 16] d087b9387645260b0f7c3587580f61368b165c924bb7c669d489cb0bae093826
+# tensor blocks.3.attention.value.bias [8, 16] 2189ccf5f1012cf2a74c4565aac23e39bd45b9d43f9f4ceec749befd47657ff5
+# tensor blocks.3.attention.value.kernel [128, 8, 16] 1b56907b89af476c2af7d419c2025232d09d255ae2aafa1111802747738a7eb5
+# tensor blocks.3.ffn.layers.0.bias [512] c6675e648fcf103c32a8d3f5cd86277a489f39e092b8dfb89d4f0a1b979366b7
+# tensor blocks.3.ffn.layers.0.kernel [128, 512] 9e8b35d762ec254e88025912c5eba1b88aa7329eba25f076d7ad3771b29dfa48
+# tensor blocks.3.ffn.layers.3.bias [128] 4b65a8e5e68de4eef849696f63aa6c2b41c20fe4a7fce7efc3b4a8cb7a571d3d
+# tensor blocks.3.ffn.layers.3.kernel [512, 128] e93f8794e41a53ef6f99839ee6082346c84d2c18dc39d8e37dfd728af2b8ced4
+# tensor blocks.3.norm1.bias [128] 87e59641c6358ef77ff12e358e2a0310334162bf12794843c215e515dbff6d89
+# tensor blocks.3.norm1.scale [128] a2c84e05313eebc6a0cbf617efaab3465450336e25f362fcaa54356b5ee07cd4
+# tensor blocks.3.norm2.bias [128] d1617862befbeb957d39a3697d2ebb01c32748057d35d9d6f4204afe8ab28950
+# tensor blocks.3.norm2.scale [128] e04f2920d90fa1c04312e47d09d770885cb19b17ae6c3e3e4dbf2fa462adac5c
+# tensor blocks.4.attention.key.bias [8, 16] 2c810ba6f8e9753e9669795cbde6d36bea3738f6042ca544e08115aa68b561c0
+# tensor blocks.4.attention.key.kernel [128, 8, 16] 774e2e2bd1fcdd6ca0a1a9ee87f443238a30813ba24579f9056b5577c49810ac
+# tensor blocks.4.attention.out.bias [128] eea24e301ecf0e9e967256f7f8d031285b591819b5e333d08286966288cee0d3
+# tensor blocks.4.attention.out.kernel [8, 16, 128] a9a757f101a67cd619bfc59d52ad751a2af9d446319b45bcd818a5bbc72f6c68
+# tensor blocks.4.attention.query.bias [8, 16] 8e2c1269d53176cf52e7ef440df089ef360e05bc76c89ddaf97139bf777d0449
+# tensor blocks.4.attention.query.kernel [128, 8, 16] 0d40e16991534fab324b2dcb413da559c96d78575759fae888388f715c1c2037
+# tensor blocks.4.attention.value.bias [8, 16] 69aabcdb8122b1450364c00a041dbd929afeb2a764cc93d7e2fad4ec543b26a0
+# tensor blocks.4.attention.value.kernel [128, 8, 16] 8ab68a988ad9a41bdbb3588ccbd719bc90a1ba6ba8bae1bdf5b8176a1904506c
+# tensor blocks.4.ffn.layers.0.bias [512] 208c5b45356560f5aa86d52599caefff17021df59fc9e32dfd6c3d8de5577a04
+# tensor blocks.4.ffn.layers.0.kernel [128, 512] 6fa4ada1b174359e0c8072e0230f678121961ec4a205b68291e1abfc8cd3f820
+# tensor blocks.4.ffn.layers.3.bias [128] e07e9bc32799c93e25ab0a3bf7e6bb39164fe63afd7717b40d127c680b28a18a
+# tensor blocks.4.ffn.layers.3.kernel [512, 128] 68c768ffade9956de16d218f4b6e1bd6f68ca45534f345feeef15d3a7fa02469
+# tensor blocks.4.norm1.bias [128] c2f4f0c0c5894330bc3430f8261f15a29ac6014de63cd2721f2795a3f2e50e8d
+# tensor blocks.4.norm1.scale [128] 764e44c9ae21f51329066a0c06b5df81af2bc668ae971b96d3d09a088aee8915
+# tensor blocks.4.norm2.bias [128] e208f855585e0a889781ff8bb2fa012edb41e92c74c3349a5857b9c6f771c173
+# tensor blocks.4.norm2.scale [128] 4534be340a017779e80bc6cd496c8c42ddc0a31c2439f426eca2a8429edcf665
+# tensor blocks.5.attention.key.bias [8, 16] b132fcb1c68cedafe5217224d1f9fabe6dccb31aa48af83d5258e65534880ea2
+# tensor blocks.5.attention.key.kernel [128, 8, 16] 3da4f21a9be8d9b33df084ba4b4b9d2fbc51580212d3ec36c3b511a1cb10cdc8
+# tensor blocks.5.attention.out.bias [128] 84cf7a8128d159e421c9154254d274c8e979ffd6e7156938637449947eb01f34
+# tensor blocks.5.attention.out.kernel [8, 16, 128] 09441d7532c8900e0357682e28d4264b1c02430922b8201f10c9c2493ad36360
+# tensor blocks.5.attention.query.bias [8, 16] ce9cc16dd4b80812f38d5f8d1f3839cacd0185b47a66c7349390fde1d2c54d6b
+# tensor blocks.5.attention.query.kernel [128, 8, 16] 24c90f3bf481e17e2d5d1147f8cdb60b4441bab8f0cf879501f3101d4e8bf7b1
+# tensor blocks.5.attention.value.bias [8, 16] c6f3850457f2520edf36ac170ace6262e345dc083bed6a21ea65b719a77a4307
+# tensor blocks.5.attention.value.kernel [128, 8, 16] c41454f434b7a788b3581866ebfbcd78710106ca39bf12f8b28592a7cd2e5358
+# tensor blocks.5.ffn.layers.0.bias [512] cfbdf88fdfa8da831fb215cd74bd9b3cada718d271cf9fffad0f311f6b8f613a
+# tensor blocks.5.ffn.layers.0.kernel [128, 512] 0dfdf71a87510d66737c2aba3361fd23ab63037dee5aecf5f5cb0c1d4fdd1992
+# tensor blocks.5.ffn.layers.3.bias [128] 3391c73c1d37dc65ae402b2f751663fbb19d19a10f7a0b18654099badf8136ac
+# tensor blocks.5.ffn.layers.3.kernel [512, 128] 35d1f81ae0e9351b883028f0bcc8408966804705669d8ef3e4080ce5d0cfa0ca
+# tensor blocks.5.norm1.bias [128] e11cff3f23208102b4bd8988d1b6c68e504f10889e60eece1b0c1b7743226911
+# tensor blocks.5.norm1.scale [128] aa4edbcc1ca567c41a5dc4d6cf1c93c7bfc778d9bd22b519c30c1bb71ad30a87
+# tensor blocks.5.norm2.bias [128] b1f289086c6e1dd6b850d7a6b315682acbc39b6b9fbec522f6e0fa6c5094f57a
+# tensor blocks.5.norm2.scale [128] 6eaafbc7d5b778ce0d4e5aa576c5efa4149c959467556ef8f82ce9421412bd03
+# tensor blocks.6.attention.key.bias [8, 16] ddd3cac048ecca97f6763463e005f717e274788d47248f5c83cad2c7fd75e004
+# tensor blocks.6.attention.key.kernel [128, 8, 16] c69cb476709702ca05c14c5c39bba4e5731f5cece27366b4b1bd14d126ceac21
+# tensor blocks.6.attention.out.bias [128] 8c233310bafbfcf257f00288802624a6d93456afb89463b108cd508d83a9c78f
+# tensor blocks.6.attention.out.kernel [8, 16, 128] 2795098005e8750843b3d4264074ebc4fc9f0d7d66e5293177b1c5a7cc0b93f8
+# tensor blocks.6.attention.query.bias [8, 16] 27eafd290988c2d7033e1093a5a24489264f30df65ae3ff0c11d2d090da9c313
+# tensor blocks.6.attention.query.kernel [128, 8, 16] 6f46195e34036332161e4ec35d4ac1b9a635d0eb12341d4af66467b8318d481d
+# tensor blocks.6.attention.value.bias [8, 16] 197cc2757bd08f8c912c4d7929dae6a59f16165220bd0a9701f5fdda6101a42f
+# tensor blocks.6.attention.value.kernel [128, 8, 16] 83c2bdcb162b0a5fa53dccba26c2d284490cf99a5d371cdacf00e90d32daa9cd
+# tensor blocks.6.ffn.layers.0.bias [512] d02ed7ec3461115763e1314d2995f082bd5c456588c2bfe69ef227df6e62761d
+# tensor blocks.6.ffn.layers.0.kernel [128, 512] 7be3de176beb3494523102183373b7096fc5ee33116da8eadc611a757359edb0
+# tensor blocks.6.ffn.layers.3.bias [128] 13938565c8d5ffc88b93bd6f5d0a5fc575dba58f196a0db5679e8d36e85455e9
+# tensor blocks.6.ffn.layers.3.kernel [512, 128] 164f049439845ce6b53d7e2adc5cd4fd6a80b1d653ee0ec8c36e335b69ce4b1a
+# tensor blocks.6.norm1.bias [128] e90d4e740c9edb85eababee4221e97af0b5d5d808a1005f3586335de3511a915
+# tensor blocks.6.norm1.scale [128] b9fb6e7b3c00b1cffbb06b67306ee8ef9c11ecc039542ff92c3210ed3b4c45dd
+# tensor blocks.6.norm2.bias [128] f5e7745fcd0accf3d263c26fe5d95c82cf81cbd6213afa6286d1a269e8e2abb1
+# tensor blocks.6.norm2.scale [128] b07caaad437ffe3a19f62980083099a57baeb91bfc0802cf0df83b058a370bca
+# tensor blocks.7.attention.key.bias [8, 16] 9a8de4d31567d6db71400ad20b81074e8e0af40e49f5f2e0f4c19a6d07b7089c
+# tensor blocks.7.attention.key.kernel [128, 8, 16] 737c5adf9d895eadc8533befe9b9ccda518983faa27f9dc599f5b26341c5d5b8
+# tensor blocks.7.attention.out.bias [128] 5d4b9f53fda78393bdbb1bdd84433dd2b47ae79c68fdcfec88707af2ff6579cf
+# tensor blocks.7.attention.out.kernel [8, 16, 128] 8671c470fa6e89a77b9ade0b39b10b8b8b276239c9376b3cd899a47740662aea
+# tensor blocks.7.attention.query.bias [8, 16] e98e890b69bad0001324edd9772c6bef5c4f620fa5ae0b428b16e22042137a6d
+# tensor blocks.7.attention.query.kernel [128, 8, 16] 847e6d230ed36312013a050de764f47dbfd09f817848eca12ed77322039d48de
+# tensor blocks.7.attention.value.bias [8, 16] 4df64b27c90e0802cdd5e762d650aeddf4146d6c277de93f2c4110a47e575571
+# tensor blocks.7.attention.value.kernel [128, 8, 16] c9bbd0ef0099ccae0679092171f3a7ea8860db620ddc808b924cb90aeabc7773
+# tensor blocks.7.ffn.layers.0.bias [512] 723690ea0e8b228a3ec50a4d985773b961654c9f446bc361c450cb1e232781e4
+# tensor blocks.7.ffn.layers.0.kernel [128, 512] 0119c89c2a9e3c40a1f5e41747aa4927a9926ad126e68a1194141cf07fa620cd
+# tensor blocks.7.ffn.layers.3.bias [128] f54bf44e48216ffcd5fccf571c672e3df4bf7f3f493a0d9c3c868ad7b0117116
+# tensor blocks.7.ffn.layers.3.kernel [512, 128] 8aabbca35b4b360e0c4f2a87f1b4ca2265506d7f1f47264794b89e27b3937e21
+# tensor blocks.7.norm1.bias [128] f6cfae9f9aaa26c5ac44812a25251849fa58dfd3a83562c9b5c1308241ef064f
+# tensor blocks.7.norm1.scale [128] 4e19518cc009774d973c4a3b3b6598eefbe1c4e8a23d7603003faf1a0c16c062
+# tensor blocks.7.norm2.bias [128] b83d8631ab10f664c2c15158a72fa371f78d1752e8407c598dd9c67c647d543a
+# tensor blocks.7.norm2.scale [128] e156933fa9273b89237d1b7c45de9ffd27eb1c66ac2bf8e44b9903f69b2dd150
+# tensor final_norm.bias [128] 1cbfa0d6f102ab2b0a16e4384d306a3d25c43890e3877e9d477fdcf6aa557647
+# tensor final_norm.scale [128] 235e979600d5048a638c946ddc287a4d404f5ff094ffee9cc436f56b93fef7d7
+# tensor input_encoder.mlp.layers.0.bias [128] 11e3efbaabf9244ecd7010d3aed1a02d52caa8aed2724f64de205dcd613e45ad
+# tensor input_encoder.mlp.layers.0.kernel [6, 128] cf90c74279d5ba79e57ef489d3c0177754652798ef0547c7d93d5bf29bf483da
+# tensor input_encoder.mlp.layers.1.bias [128] ae81ba8a89637fe2e28a53ad0ef81c33f8b8eff5f148f25b98aa28574e7b45d8
+# tensor input_encoder.mlp.layers.1.scale [128] c3acbb7e376306b4a6d2a228cc2658141ea2db0d70682417b2ed9bddd53ad42b
+# tensor mlp.layers.0.bias [6] 0c262772ce97d008b3c6135da39074b3ca3cfdc52288bfb6e2b5e63dd8797c72
+# tensor mlp.layers.0.kernel [128, 6] 4c7fd28032099074011c4d372066b569f0547715de5963505562c20e38ef4b1b
