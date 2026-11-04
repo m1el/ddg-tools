@@ -49,6 +49,7 @@ fn main() {
         Some("continuity") => continuity(&args[1..]),
         Some("orient") => orient(&args[1..]),
         Some("selfint") => selfint(&args[1..]),
+        Some("gpu") => gpu(&args[1..]),
         _ => Err("usage: eval prepare|case|continuity|orient ... (see the file header)".into()),
     };
     if let Err(e) = r {
@@ -1179,6 +1180,63 @@ fn selfint(a: &[String]) -> R<()> {
         let v = center_and_scale(&obj.positions);
         let s = self_intersections(&v, &f);
         println!("{p}\tfaces {}\tcrossings {}\tfolds {}\tcoplanar_close {}\tpairs {}", f.len(), s.crossings, s.folds, s.coplanar_close, s.pairs_tested);
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ GPU matmul precision
+
+/// `eval gpu <case-dir>... [--threads T]` (build with `--features cuda`): the network on the GPU
+/// with `GpuMatmul::Tf32` (default) and `Split3`, against the CPU network; the fit and the blend
+/// run on the CPU in f64 in all three, so the differences are the network's. Writes
+/// `<case>/gpu.json`: coefficient differences, φ differences on the 64³ grid (32-NN and all
+/// points), and the grid MAE of each against the truth.
+fn gpu(a: &[String]) -> R<()> {
+    use ddg_points_as_tori::Device;
+    use ddg_points_as_tori::network::GpuMatmul;
+    let a = parse(a);
+    let th = threads(&a)?;
+    let model = Model::reference().map_err(err)?;
+    let xs = grid(64);
+    for d in &a.pos {
+        let dir = PathBuf::from(d);
+        let meta = Meta::read(&dir)?;
+        let cloud = load_cloud(&dir)?;
+        let tv = eval_truth(&load_truth(&dir, &meta, th, SignMode::Auto)?, &xs, th)?;
+        let mut fields = Vec::new();
+        for (lab, dev, mm) in [("cpu", Device::Cpu, GpuMatmul::Tf32), ("tf32", Device::Cuda { ordinal: 0 }, GpuMatmul::Tf32), ("split3", Device::Cuda { ordinal: 0 }, GpuMatmul::Split3)] {
+            let mut o = BuildOptions::default().with_threads(th);
+            o.predict.device = dev;
+            o.predict.gpu_matmul = mm;
+            let (f, rep) = PointsAsTori::build(&cloud, &model, &o).map_err(err)?;
+            let all = TorusField::new(&cloud, f.tori().clone(), EvalOptions { neighborhood: Neighborhood::All, threads: th, ..Default::default() }).map_err(err)?;
+            let (p, _) = pat_eval(&f, &xs)?;
+            let (pa, _) = pat_eval(&all, &xs)?;
+            fields.push((lab, f, p, pa, rep.seconds));
+        }
+        let mut j = Json::new();
+        for (lab, f, p, pa, s) in &fields {
+            let mut k = Json::new();
+            k.num("build_s", *s);
+            if let Some(tv) = &tv {
+                k.num("mae", metrics(64, p, tv).mae).num("mae_all", metrics(64, pa, tv).mae);
+            }
+            if *lab != "cpu" {
+                let (_, fc, pc, pac, _) = &fields[0];
+                let c0 = &fc.tori().coefficients;
+                let c1 = &f.tori().coefficients;
+                let dc = c0.iter().zip(c1).flat_map(|(x, y)| (0..6).map(move |i| (x[i] as f64 - y[i] as f64).abs() / (1.0 + (x[i] as f64).abs()))).fold(0.0, f64::max);
+                let mut dp: Vec<f64> = p.iter().zip(pc).map(|(x, y)| (x - y).abs()).collect();
+                let mut dpa: Vec<f64> = pa.iter().zip(pac).map(|(x, y)| (x - y).abs()).collect();
+                let mx = dp.iter().copied().fold(0.0, f64::max);
+                let mxa = dpa.iter().copied().fold(0.0, f64::max);
+                let sf = f.tori().tori.iter().zip(&fc.tori().tori).filter(|(x, y)| x.minor.signum() != y.minor.signum()).count();
+                k.num("coeff_rel_max", dc).num("phi_max", mx).num("phi_median", quantile(&mut dp, 0.5)).num("phi_p999", quantile(&mut dp, 0.999)).num("phi_all_max", mxa).num("phi_all_p999", quantile(&mut dpa, 0.999)).int("minor_sign_flips", sf as i64);
+            }
+            j.raw(lab, &k.finish());
+        }
+        std::fs::write(dir.join("gpu.json"), j.finish()).map_err(err)?;
+        println!("{d}: {}", j.finish());
     }
     Ok(())
 }

@@ -97,6 +97,9 @@ def main():
     os.makedirs(os.path.join(out, 'fig'), exist_ok=True)
     T = []
     data = {ds: load(cases, ds) for ds, _ in DATASETS}
+    # WP10's retrained weights, when the case stage ran with --retrained label=path
+    extra = sorted({k for rs in data.values() for r in rs for k in r['methods'] if k.startswith('retrained')})
+    METHODS.extend((k, f'PAT {k} weights') for k in extra if k not in dict(METHODS))
     # ---------------------------------------------------------------- headline
     T.append('## Headline accuracy (512 points, 64³ grid over [−1, 1]³)\n')
     for ds, label in DATASETS:
