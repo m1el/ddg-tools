@@ -42,14 +42,15 @@ pub struct LossOptions {
     pub sigma_k: usize,
     /// Truncation `T` of the pair list (40; `f64::INFINITY` keeps all pairs).
     pub cutoff: f64,
-    /// Queries per autodiff chunk (memory bound; the result does not depend on it beyond round-off
-    /// of the final sum).
-    pub query_chunk: usize,
+    /// Padded pairs per autodiff chunk (memory bound). Queries are sorted by their pair count and
+    /// cut into chunks of at most this many padded pairs ([`chunks`]), so padding stays small; the
+    /// result depends on it only through the round-off of the final sum.
+    pub pair_chunk: usize,
 }
 
 impl Default for LossOptions {
     fn default() -> Self {
-        LossOptions { fit: TensorFitOptions::default(), lambda_c: 64.0, sigma_k: 64, cutoff: 40.0, query_chunk: 2048 }
+        LossOptions { fit: TensorFitOptions::default(), lambda_c: 64.0, sigma_k: 64, cutoff: 40.0, pair_chunk: 1 << 16 }
     }
 }
 
@@ -102,6 +103,52 @@ impl BlendPlan {
 #[inline]
 fn d3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// The truncated plan of one query through the kd-tree: `σ` from the `k` nearest, then only the
+/// points within `ρ_min + T/λ` (every other weight is below `e^{−T}` times the largest, so `W` and
+/// `Σ ŵ r̂` over this set differ from the full sums by less than `n·e^{−T}` relatively).
+fn plan_query_tree(q: [f64; 3], p: &[[f64; 3]], tree: &crate::spatial::KdTree, o: &LossOptions, buf: &mut Vec<crate::spatial::Neighbor>) -> Option<QueryPlan> {
+    let n = p.len();
+    tree.knn(q, o.sigma_k.min(n), buf);
+    let sigma = 0.5 * buf.last()?.d2.sqrt();
+    if !(sigma > 0.0 && sigma.is_finite()) {
+        return None;
+    }
+    let lam = o.lambda_c / sigma;
+    let rmin = buf[0].d2.sqrt();
+    tree.radius(q, rmin + o.cutoff / lam, buf);
+    buf.sort_unstable_by_key(|nb| nb.index);
+    let rho: Vec<f64> = buf.iter().map(|nb| nb.d2.sqrt()).collect();
+    let w: Vec<f64> = rho.iter().map(|&r| (-lam * (r - sigma)).exp()).collect();
+    let big_w: f64 = w.iter().sum();
+    let guarded = big_w < 1e-10;
+    let ws = big_w.max(1e-10);
+    let rhat: Vec<[f64; 3]> = buf
+        .iter()
+        .zip(&rho)
+        .map(|(nb, &r)| {
+            let d = d3(q, p[nb.index as usize]);
+            let l = r.max(1e-10);
+            [d[0] / l, d[1] / l, d[2] / l]
+        })
+        .collect();
+    let mut bbar = [0.0; 3];
+    for (wi, rh) in w.iter().zip(&rhat) {
+        for k in 0..3 {
+            bbar[k] += wi / ws * rh[k];
+        }
+    }
+    let wmax = w.iter().copied().fold(0.0, f64::max);
+    let dropped_bound = (n - buf.len()) as f64 * wmax * (-o.cutoff).exp() / ws;
+    Some(QueryPlan {
+        sigma,
+        idx: buf.iter().map(|nb| nb.index).collect(),
+        c: rhat.iter().map(|rh| std::array::from_fn(|k| lam * (bbar[k] - rh[k]))).collect(),
+        w: w.iter().map(|wi| wi / ws).collect(),
+        dropped_mass: dropped_bound,
+        guarded,
+    })
 }
 
 struct QueryPlan {
@@ -180,17 +227,25 @@ pub fn build_plan(q: &[[f64; 3]], truth: &[f64], p: &[[f64; 3]], o: &LossOptions
     if p.is_empty() {
         return Err(PatError::TooFewPoints { n: 0, need: 1 });
     }
-    if !(o.lambda_c > 0.0 && o.sigma_k > 0 && o.cutoff >= 0.0 && o.query_chunk > 0) {
+    if !(o.lambda_c > 0.0 && o.sigma_k > 0 && o.cutoff >= 0.0 && o.pair_chunk > 0) {
         return Err(PatError::InvalidOption { what: format!("LossOptions {o:?}") });
     }
+    let tree = if o.cutoff.is_finite() && frozen_sigma.is_none() {
+        Some(crate::spatial::KdTree::new(p, crate::spatial::KdTreeOptions::default())?)
+    } else {
+        None
+    };
     let per: Vec<Option<QueryPlan>> = q
         .par_iter()
         .enumerate()
-        .map_init(Vec::new, |s, (j, &x)| {
+        .map_init(|| (Vec::new(), Vec::new()), |(s, b), (j, &x)| {
             if !truth[j].is_finite() || !x.iter().all(|v| v.is_finite()) {
                 return None;
             }
-            plan_query(x, p, o, frozen_sigma.map(|f| f[j]), s)
+            match &tree {
+                Some(t) => plan_query_tree(x, p, t, o, b),
+                None => plan_query(x, p, o, frozen_sigma.map(|f| f[j]), s),
+            }
         })
         .collect();
     let mut plan = BlendPlan { offset: vec![0], ..Default::default() };
@@ -246,9 +301,9 @@ struct Dense {
     truth: Vec<f64>,
 }
 
-fn dense(plan: &BlendPlan, lo: usize, hi: usize) -> Dense {
-    let kk = (lo..hi).map(|j| (plan.offset[j + 1] - plan.offset[j]) as usize).max().unwrap_or(1).max(1);
-    let qn = hi - lo;
+fn dense(plan: &BlendPlan, qs: &[u32]) -> Dense {
+    let kk = qs.iter().map(|&j| (plan.offset[j as usize + 1] - plan.offset[j as usize]) as usize).max().unwrap_or(1).max(1);
+    let qn = qs.len();
     let mut d = Dense {
         qn,
         kk,
@@ -256,9 +311,9 @@ fn dense(plan: &BlendPlan, lo: usize, hi: usize) -> Dense {
         idx: Vec::with_capacity(qn * kk),
         w: Vec::with_capacity(qn * kk),
         c: Vec::with_capacity(qn * kk * 3),
-        truth: plan.truth[lo..hi].to_vec(),
+        truth: qs.iter().map(|&j| plan.truth[j as usize]).collect(),
     };
-    for j in lo..hi {
+    for j in qs.iter().map(|&j| j as usize) {
         let (a, b) = (plan.offset[j] as usize, plan.offset[j + 1] as usize);
         let first = if b > a { plan.idx[a] } else { 0 };
         for k in 0..kk {
@@ -312,6 +367,26 @@ fn blend_dense(ctx: &Ctx, tori: &TorusTensor, d: &Dense) -> (Tensor<2>, Tensor<2
     (phi, gphi)
 }
 
+/// The queries sorted by `(pairs, index)` and cut into chunks of at most `budget` padded pairs
+/// (a chunk holds at least one query).
+pub fn chunks(plan: &BlendPlan, budget: usize) -> Vec<Vec<u32>> {
+    let cnt = |j: u32| (plan.offset[j as usize + 1] - plan.offset[j as usize]).max(1) as usize;
+    let mut order: Vec<u32> = (0..plan.len() as u32).collect();
+    order.sort_by_key(|&j| (cnt(j), j));
+    let mut out: Vec<Vec<u32>> = Vec::new();
+    let mut cur: Vec<u32> = Vec::new();
+    for j in order {
+        if !cur.is_empty() && (cur.len() + 1) * cnt(j) > budget {
+            out.push(std::mem::take(&mut cur));
+        }
+        cur.push(j);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
 /// Values of one evaluation of the loss.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LossValue {
@@ -337,9 +412,9 @@ pub struct CloudFit<'a> {
 }
 
 /// The loss and, if `ctx.dev` is an autodiff device, `∂L/∂a` (`[n, 6]` row major, f64) for
-/// coefficients `a` (`n × 6`, f64 values in the dtype of `ctx`). Chunks of
-/// [`LossOptions::query_chunk`] queries run on the current rayon pool, each on its own graph;
-/// chunk sums are combined in chunk order.
+/// coefficients `a` (`n × 6`, f64 values in the dtype of `ctx`). Chunks of at most
+/// [`LossOptions::pair_chunk`] padded pairs ([`chunks`]) run on the current rayon pool, each on its
+/// own graph; chunk sums are combined in chunk order.
 ///
 /// [formula: pat-loss]
 pub fn loss_and_grad(ctx: &Ctx, cloud: &CloudFit<'_>, a: &[f64], plan: &BlendPlan, o: &LossOptions, want_grad: bool) -> Result<(LossValue, Option<Vec<f64>>), PatError> {
@@ -353,17 +428,17 @@ pub fn loss_and_grad(ctx: &Ctx, cloud: &CloudFit<'_>, a: &[f64], plan: &BlendPla
         return Ok((val, want_grad.then(|| vec![0.0; 6 * n])));
     }
     let inv = 1.0 / nq as f64;
-    let chunks: Vec<(usize, usize)> = (0..nq).step_by(o.query_chunk).map(|lo| (lo, (lo + o.query_chunk).min(nq))).collect();
+    let chunks = chunks(plan, o.pair_chunk);
     let outs: Vec<(f64, f64, usize, Option<Vec<f64>>)> = chunks
         .par_iter()
-        .map(|&(lo, hi)| {
+        .map(|qs| {
             let geo = FitGeometry::new(ctx, cloud.p, cloud.n);
             let mut leaf = ctx.t2(a.to_vec(), [n, 6]);
             if want_grad {
                 leaf = leaf.autodiff().require_grad();
             }
             let tori = fit_tensor(leaf.clone(), &geo, &o.fit);
-            let d = dense(plan, lo, hi);
+            let d = dense(plan, qs);
             let (phi, gphi) = blend_dense(ctx, &tori, &d);
             let truth = ctx.t2(d.truth.clone(), [d.qn, 1]);
             let err = (phi - truth).abs();

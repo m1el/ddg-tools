@@ -176,6 +176,7 @@ pub fn row_box(positions: &[[f64; 3]], cols: &[usize]) -> ([f64; 3], [f64; 3]) {
 /// `positions`).
 ///
 /// [formula: pat-query-sampling]
+#[allow(clippy::too_many_arguments)]
 fn sample_row(f: &Faces, all: &[u32], all_cum: &[f64], positions: &[[f64; 3]], cols: &[usize], opts: &QueryOptions, r: &mut ChaCha8Rng, out: &mut Vec<[f64; 3]>) -> bool {
     let (lo, hi) = row_box(positions, cols);
     let center: [f64; 3] = std::array::from_fn(|a| 0.5 * (lo[a] + hi[a]));

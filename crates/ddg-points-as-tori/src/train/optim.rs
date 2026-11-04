@@ -66,6 +66,9 @@ pub fn learning_rate(s: Schedule, count: u64, peak: f64, warmup: u64, phase_step
     }
 }
 
+/// A named f32 tensor: name, shape, values.
+pub type NamedTensor = (String, Vec<usize>, Vec<f32>);
+
 #[derive(Clone)]
 enum St {
     D1(AdamState<1>),
@@ -131,7 +134,7 @@ impl AdamTrainer {
     }
 
     /// The moments as named f32 tensors (`m.<name>`, `v.<name>`) and the per-tensor step count.
-    pub fn to_named(&self, params: &NetParams) -> (Vec<(String, Vec<usize>, Vec<f32>)>, u64) {
+    pub fn to_named(&self, params: &NetParams) -> (Vec<NamedTensor>, u64) {
         let mut out = Vec::new();
         let mut time = 0u64;
         for (p, s) in params.items.iter().zip(&self.state) {

@@ -363,7 +363,7 @@ fn robust_rule_is_continuous_across_the_switch() {
 fn fd_setup(n: usize, seed: u64) -> (TrainShape, StepOptions) {
     let s = synth_shape(n, 16, seed);
     let o = StepOptions {
-        loss: LossOptions { cutoff: f64::INFINITY, query_chunk: 97, ..Default::default() },
+        loss: LossOptions { cutoff: f64::INFINITY, pair_chunk: 1500, ..Default::default() },
         queries: QueryOptions { per_kind: 4, ..Default::default() },
         network_chunk: 3,
         groups: 5,
@@ -378,7 +378,7 @@ fn tensor_blend_matches_host_blend() {
     let ctx = ctx64();
     let mut r = ChaCha8Rng::seed_from_u64(13);
     let a = random_coefficients(&mut r, 150);
-    let o = LossOptions { cutoff: f64::INFINITY, query_chunk: 50, ..Default::default() };
+    let o = LossOptions { cutoff: f64::INFINITY, pair_chunk: 2000, ..Default::default() };
     let mesh = MeshTruth::new(&s.vertices, &s.faces);
     let q: Vec<[f64; 3]> = (0..200).map(|_| [u(&mut r) - 0.5, 0.8 * u(&mut r) - 0.4, 0.6 * u(&mut r) - 0.3]).collect();
     let truth: Vec<f64> = q.iter().map(|&x| mesh.signed_distance(x, GwnPrecision::F64)).collect();
@@ -409,7 +409,7 @@ fn fd_loss_wrt_coefficients() {
     let mut r = ChaCha8Rng::seed_from_u64(14);
     let a = random_coefficients(&mut r, 150);
     for fit in [TensorFitOptions::default(), TensorFitOptions { sign_rule: SignRule::Geometric, eigen_rule: EigenRule::Robust, ..Default::default() }] {
-        let o = LossOptions { fit, cutoff: f64::INFINITY, query_chunk: 61, ..Default::default() };
+        let o = LossOptions { fit, cutoff: f64::INFINITY, pair_chunk: 3000, ..Default::default() };
         let mesh = MeshTruth::new(&s.vertices, &s.faces);
         let q: Vec<[f64; 3]> = (0..240).map(|_| [u(&mut r) - 0.5, 0.8 * u(&mut r) - 0.4, 0.6 * u(&mut r) - 0.3]).collect();
         let truth: Vec<f64> = q.iter().map(|&x| mesh.signed_distance(x, GwnPrecision::F64)).collect();
@@ -640,3 +640,244 @@ fn curriculum_file() {
 }
 
 const DATA: &str = "/var/data/discrete-geometry/PointsAsTori/PAT_training_data/PAT_training_data";
+
+fn out_dir(name: &str) -> std::path::PathBuf {
+    let d = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runs_tmp/pat-wp7").join(name);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn peak_rss_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("VmHWM")).and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse::<f64>().ok()))
+        .map(|kb| kb / 1024.0)
+        .unwrap_or(0.0)
+}
+
+/// Our loss with the authors' weights on `ABC17_validation_3.npz` (raw normals and the reference's
+/// feature order, as the reference computes it), and an export of the exact inputs for
+/// `runs_tmp/pat-wp7/refloss/ref_loss.py` (the reference's `SDF_loss` in JAX).
+#[test]
+#[ignore]
+fn reference_loss_export() {
+    use ddg_points_as_tori::features::FeatureOrder;
+    use ddg_points_as_tori::train::data::{DataOptions, load_file};
+    let dir = out_dir("refloss");
+    let file = std::path::Path::new(DATA).join("ABC17_validation_3.npz");
+    let model = ddg_points_as_tori::Model::reference().unwrap();
+    let ctx = ctx32();
+    let params = NetParams::from_model(&model, &ctx);
+    let mut json = String::from("[\n");
+    for raw_normals in [true, false] {
+        let (shapes, rep) = load_file(&file, &DataOptions { raw_normals, ..Default::default() }).unwrap();
+        eprintln!("{} shapes, {} non-unit normals, lengths {:?}", rep.shapes, rep.nonunit_normals, rep.normal_length_range);
+        for (si, s) in shapes.iter().enumerate() {
+            let base = StepOptions { feature_order: FeatureOrder::Reference, ..Default::default() };
+            let prep = prepare_shape(s, &base, (42, 0, 10_000 + si as u64)).unwrap();
+            let variants: Vec<(&str, StepOptions)> = vec![
+                ("T40", base),
+                ("Tinf", StepOptions { loss: LossOptions { cutoff: f64::INFINITY, ..base.loss }, ..base }),
+                ("robust", StepOptions { loss: LossOptions { fit: TensorFitOptions { eigen_rule: EigenRule::Robust, ..Default::default() }, ..base.loss }, ..base }),
+                ("geometric", StepOptions { loss: LossOptions { fit: TensorFitOptions { sign_rule: SignRule::Geometric, ..Default::default() }, ..base.loss }, ..base }),
+                ("diff_first", StepOptions { feature_order: FeatureOrder::DifferenceFirst, ..base }),
+            ];
+            for (name, o) in variants {
+                for (b, lo) in [0usize, 1024].iter().enumerate() {
+                    let t = std::time::Instant::now();
+                    let v = step(&params, &ctx, &prep, *lo, lo + 1024, &o, false).unwrap().value;
+                    json += &format!(
+                        "{{\"raw_normals\": {raw_normals}, \"shape\": {si}, \"batch\": {b}, \"variant\": \"{name}\", \"distance\": {:e}, \"eikonal\": {:e}, \"queries\": {}, \"seconds\": {:.3}}},\n",
+                        v.distance, v.eikonal, v.queries, t.elapsed().as_secs_f64()
+                    );
+                }
+            }
+            if raw_normals {
+                // the inputs for the JAX script: the cloud as stored, our queries and ground truth
+                let p = s.rows;
+                let m = 120;
+                let flat = |v: &[[f64; 3]]| v.iter().flatten().copied().collect::<Vec<f64>>();
+                let pos = NpzArray { shape: vec![p, 3], data: NpzData::F64(flat(&s.positions)) };
+                let nrm = NpzArray { shape: vec![p, 3], data: NpzData::F64(flat(&s.normals)) };
+                let nbr = NpzArray { shape: vec![p, s.k], data: NpzData::I32(s.neighbors.clone()) };
+                let msk = NpzArray { shape: vec![p], data: NpzData::Bool((0..p).map(|i| i < s.n).collect()) };
+                let q = NpzArray { shape: vec![s.n, m, 3], data: NpzData::F64(flat(&prep.queries.points)) };
+                let tr = NpzArray { shape: vec![s.n, m], data: NpzData::F64(prep.queries.truth.clone()) };
+                let ver = NpzArray { shape: vec![s.vertices.len(), 3], data: NpzData::F64(flat(&s.vertices)) };
+                let fac = NpzArray { shape: vec![s.faces.len(), 3], data: NpzData::I32(s.faces.iter().flat_map(|t| t.map(|j| j as i32)).collect()) };
+                write_npz(&dir.join(format!("shape{si}.npz")), &[("positions", &pos), ("normals", &nrm), ("neighbors", &nbr), ("mask", &msk), ("queries", &q), ("truth", &tr), ("vertices", &ver), ("faces", &fac)]).unwrap();
+            }
+        }
+    }
+    json.truncate(json.len() - 2);
+    json += "\n]\n";
+    std::fs::write(dir.join("ours.json"), json).unwrap();
+}
+
+/// Step time and peak memory on the CPU: a blob shape at batch 1024 (phases 0–4) and the
+/// pretraining blob at batch 32.
+#[test]
+#[ignore]
+fn step_timing() {
+    use ddg_points_as_tori::train::data::{DataOptions, load_file};
+    let ctx = ctx32();
+    let model = ddg_points_as_tori::Model::reference().unwrap();
+    let params = NetParams::from_model(&model, &ctx);
+    let threads: usize = std::env::var("PAT_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+    let chunk: usize = std::env::var("PAT_CHUNK").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+    let o = StepOptions { network_chunk: chunk, ..Default::default() };
+    for (file, batch) in [("pretraining_blob.npz", 32usize), ("pretraining_blob.npz", 1024)] {
+        let (shapes, _) = load_file(&std::path::Path::new(DATA).join(file), &DataOptions::default()).unwrap();
+        pool.install(|| {
+            let t = std::time::Instant::now();
+            let prep = prepare_shape(&shapes[0], &o, (1, 0, 0)).unwrap();
+            let tp = t.elapsed().as_secs_f64();
+            for rep in 0..3 {
+                let t = std::time::Instant::now();
+                let out = step(&params, &ctx, &prep, 0, batch, &o, true).unwrap();
+                eprintln!(
+                    "{file} batch {batch} threads {threads} chunk {chunk} rep {rep}: step {:.2} s (plan {:.2}, forward {:.2}, loss {:.2}, backward {:.2}); prepare {tp:.2} s; rows fwd/bwd {}/{}; pairs {}; loss {:.4}; peak RSS {:.0} MB",
+                    t.elapsed().as_secs_f64(), out.seconds[0], out.seconds[1], out.seconds[2], out.seconds[3], out.rows_forward, out.rows_backward, out.pairs, out.value.loss, peak_rss_mb()
+                );
+            }
+        });
+    }
+}
+
+/// A short CPU run of the pretraining phase on the blob, from scratch (logged to
+/// `runs_tmp/pat-wp7/short/log.jsonl`), with a resume check.
+#[test]
+#[ignore]
+fn short_run() {
+    use ddg_points_as_tori::train::{Curriculum, TrainOptions, train};
+    let steps: u64 = std::env::var("PAT_STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
+    let dir = out_dir("short");
+    for f in ["checkpoint.safetensors", "checkpoint-adam.safetensors", "log.jsonl"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+    let mut c = Curriculum::reference().unwrap();
+    c.phases.truncate(1);
+    let mut o = TrainOptions::reference(dir.clone()).unwrap();
+    o.curriculum = c;
+    o.max_steps = Some(steps);
+    o.checkpoint_every = 64;
+    o.validate = false;
+    let t = std::time::Instant::now();
+    let mut losses = Vec::new();
+    let (_, rep) = train(std::path::Path::new(DATA), None, &o, &mut |l| {
+        losses.push(l.loss);
+        if l.step % 10 == 0 {
+            eprintln!("step {} epoch {} lr {:.1e} loss {:.5} (distance {:.5}, eikonal {:.5}) {:.2} s", l.step, l.epoch, l.lr, l.loss, l.distance, l.eikonal, l.seconds.iter().sum::<f64>());
+        }
+    })
+    .unwrap();
+    eprintln!("{rep:?}; {:.1} s, peak RSS {:.0} MB", t.elapsed().as_secs_f64(), peak_rss_mb());
+    let first: f64 = losses[..10].iter().sum::<f64>() / 10.0;
+    let last: f64 = losses[losses.len() - 10..].iter().sum::<f64>() / 10.0;
+    eprintln!("mean loss of the first 10 steps {first:.5}, of the last 10 {last:.5}");
+    assert!(last < first);
+}
+
+/// Resumption: 2 × k steps with a restart in between equal 2k steps straight (bitwise).
+#[test]
+#[ignore]
+fn resume_is_exact() {
+    use ddg_points_as_tori::train::{Curriculum, TrainOptions, train};
+    let mut c = Curriculum::reference().unwrap();
+    c.phases.truncate(1);
+    let run = |name: &str, plan: &[u64]| {
+        let dir = out_dir(name);
+        for f in ["checkpoint.safetensors", "checkpoint-adam.safetensors", "log.jsonl"] {
+            let _ = std::fs::remove_file(dir.join(f));
+        }
+        let mut model = None;
+        for &m in plan {
+            let mut o = TrainOptions::reference(dir.clone()).unwrap();
+            o.curriculum = c.clone();
+            o.max_steps = Some(m);
+            o.checkpoint_every = 1;
+            o.validate = false;
+            model = Some(train(std::path::Path::new(DATA), None, &o, &mut |_| {}).unwrap().0);
+        }
+        model.unwrap()
+    };
+    // 64 steps per shape-epoch: stop at a shape boundary, resume at the next epoch
+    let a = run("resume-a", &[128]);
+    let b = run("resume-b", &[64, 128]);
+    assert_eq!(a.weights(), b.weights());
+}
+
+/// The loss alone on one thread (profiling aid): 2048 queries of the pretraining blob.
+#[test]
+#[ignore]
+fn loss_profile() {
+    use ddg_points_as_tori::train::data::{DataOptions, load_file};
+    let (shapes, _) = load_file(&std::path::Path::new(DATA).join("pretraining_blob.npz"), &DataOptions::default()).unwrap();
+    let s = &shapes[0];
+    let o = StepOptions::default();
+    let prep = prepare_shape(s, &o, (1, 0, 0)).unwrap();
+    let q = &prep.queries.points[..2048];
+    let t = &prep.queries.truth[..2048];
+    let plan = build_plan(q, t, &s.positions, &o.loss, None).unwrap();
+    let mut r = ChaCha8Rng::seed_from_u64(1);
+    let a: Vec<f64> = (0..s.n).flat_map(|_| [0.001 * u(&mut r), 0.1 * u(&mut r), 0.1 * u(&mut r), u(&mut r), -20.0 - u(&mut r), -20.0 - u(&mut r)]).collect();
+    let cloud = CloudFit { p: &s.positions, n: &s.normals };
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    pool.install(|| {
+        for want in [false, true, false, true] {
+            let tm = std::time::Instant::now();
+            let (v, _) = loss_and_grad(&ctx32(), &cloud, &a, &plan, &o.loss, want).unwrap();
+            eprintln!("grad {want}: {:.3} s, {} pairs, loss {:.4}", tm.elapsed().as_secs_f64(), plan.pairs(), v.loss);
+        }
+    });
+}
+
+/// Padded clouds (D19): `n < P` rows and neighborhoods shorter than `k`.
+#[test]
+fn padded_clouds() {
+    let ctx = ctx32();
+    let params = small_params(&ctx, 7);
+    for n in [10usize, 60] {
+        let full = synth_shape(n, 16.min(n), 23);
+        // pad to P = 80 rows and k = 16 columns
+        let (p, k) = (80, 16);
+        let mut s = full.clone();
+        s.rows = p;
+        s.k = k;
+        s.positions.resize(p, [0.0; 3]);
+        s.normals.resize(p, [0.0; 3]);
+        s.neighbors = vec![-1; p * k];
+        for i in 0..n {
+            for c in 0..full.k {
+                s.neighbors[i * k + c] = full.neighbors[i * full.k + c];
+            }
+        }
+        let o = StepOptions { queries: QueryOptions { per_kind: 4, ..Default::default() }, ..Default::default() };
+        let prep = prepare_shape(&s, &o, (1, 2, 3)).unwrap();
+        assert_eq!(prep.net_rows.len(), n);
+        assert_eq!(prep.feats.pad.is_some(), n < k);
+        let out = step(&params, &ctx, &prep, 0, 64, &o, true).unwrap();
+        assert!(out.value.loss.is_finite() && out.nonfinite_grads == 0, "n {n}: {:?} {}", out.value, out.nonfinite_grads);
+        // the pad mask makes the padded tokens irrelevant: garbage in them changes nothing
+        if n < k {
+            let mut prep2 = prep.clone();
+            for r in 0..prep2.feats.b {
+                for t in n..k {
+                    prep2.feats.feats[(r * k + t) * 6] = 7.0;
+                }
+            }
+            let out2 = step(&params, &ctx, &prep2, 0, 64, &o, false).unwrap();
+            assert_eq!(out2.value.loss, out.value.loss);
+        }
+        // the reference's padding: all P rows through the network, −1 → row P − 1
+        let or = StepOptions { reference_padding: true, ..o };
+        let prep_r = prepare_shape(&s, &or, (1, 2, 3)).unwrap();
+        assert_eq!(prep_r.net_rows.len(), p);
+        let out_r = step(&params, &ctx, &prep_r, 0, 64, &or, true).unwrap();
+        assert!(out_r.value.loss.is_finite());
+        eprintln!("n = {n}: loss {:.5} (ours) vs {:.5} (reference padding), non-finite gradient entries zeroed {}", out.value.loss, out_r.value.loss, out_r.nonfinite_grads);
+        // empty slices have no queries
+        assert_eq!(step(&params, &ctx, &prep, 64, 80, &o, true).unwrap().value.queries, 0);
+    }
+}

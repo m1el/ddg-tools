@@ -48,7 +48,7 @@ pub fn point_triangle_d2(p: [f64; 3], a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> 
     let n = cross(ab, ac);
     let nn = dot(n, n);
     let scale = dot(ab, ab).max(dot(ac, ac));
-    if !(nn > 1e-24 * scale * scale) {
+    if nn.is_nan() || nn <= 1e-24 * scale * scale {
         return segment_d2(p, a, b).min(segment_d2(p, b, c)).min(segment_d2(p, c, a));
     }
     let ap = sub(p, a);
@@ -218,12 +218,7 @@ impl MeshTruth {
     }
 
     fn box_d2(n: &Node, p: [f64; 3]) -> f64 {
-        let mut d = 0.0;
-        for a in 0..3 {
-            let e = (n.lo[a] - p[a]).max(0.0).max(p[a] - n.hi[a]);
-            d += e * e;
-        }
-        d
+        (0..3).map(|a| (n.lo[a] - p[a]).max(0.0).max(p[a] - n.hi[a])).map(|e| e * e).sum()
     }
 
     /// Unsigned distance to the mesh (`+∞` without faces).

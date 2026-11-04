@@ -93,7 +93,7 @@ impl Curriculum {
                 return Err(terr(format!("phase {i}: init = {init:?} (scratch or previous)")));
             }
             let batch_rows = int("batch_rows")? as usize;
-            if batch_rows == 0 || !(lr > 0.0) {
+            if batch_rows == 0 || lr.is_nan() || lr <= 0.0 {
                 return Err(terr(format!("phase {i}: batch_rows and lr must be positive")));
             }
             out.push(Phase {
@@ -330,7 +330,10 @@ fn permutation(n: usize, key: (u64, u64, u64)) -> Vec<usize> {
 }
 
 /// The epoch's sequence of `(file, shape)` and its buffers (ranges into the sequence).
-fn epoch_order(counts: &[(usize, usize)], seed: u64, phase: usize, epoch: u64, per_buffer: usize) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
+/// `(file, shape)` pairs, or `[lo, hi)` ranges.
+type Pairs = Vec<(usize, usize)>;
+
+fn epoch_order(counts: &[(usize, usize)], seed: u64, phase: usize, epoch: u64, per_buffer: usize) -> (Pairs, Pairs) {
     let fo = permutation(counts.len(), (seed, 1_000_000 * phase as u64 + epoch, 0xf11e));
     let mut seq = Vec::new();
     let mut bufs = Vec::new();
@@ -407,6 +410,7 @@ fn load_checkpoint(dir: &Path, ctx: &Ctx, opts: &AdamOptions) -> Result<Option<(
 
 /// Mean validation (distance, eikonal) over the shapes of `file`, as the reference: per shape the
 /// mean over its batches, then the mean over shapes; queries keyed by `(seed, epoch, 10000 + i)`.
+#[allow(clippy::too_many_arguments)]
 pub fn validate(params: &NetParams, ctx: &Ctx, file: &Path, data: &DataOptions, o: &StepOptions, batch: usize, seed: u64, epoch: u64) -> Result<(f64, f64), PatError> {
     let (shapes, _) = load_file(file, data)?;
     let (mut sd, mut se, mut c) = (0.0, 0.0, 0usize);
