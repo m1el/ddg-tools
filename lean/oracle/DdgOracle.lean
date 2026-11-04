@@ -20,3 +20,4 @@ import DdgOracle.RepulsiveCurves
 import DdgOracle.RepulsiveSurfaces
 import DdgOracle.IntegerCoords
 import DdgOracle.IntrinsicSimplification
+import DdgOracle.PointsAsTori

@@ -1,0 +1,4 @@
+case pat-error-features-sigma
+task features
+status error DegenerateNeighborhood median distance sigma is 0
+end

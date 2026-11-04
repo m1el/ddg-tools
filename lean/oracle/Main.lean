@@ -52,6 +52,10 @@ usage:
                                     (Liu et al. 2023); tasks step, flatten, weights, removal
   ddg-oracle iem-selftest           internal checks of the intrinsic-simplification oracle
   ddg-oracle iem-fixtures write DIR | check DIR   golden fixtures (fixtures/iem)
+  ddg-oracle pat [IN [OUT]]         features, torus fitting, per-torus SDF, blend and SHC/SSPD baselines of 'Points as Tori'
+                                    (Feng, Crane 2025); tasks features, fit, sdf, blend, baselines
+  ddg-oracle pat-selftest [N]       internal checks of the points-as-tori oracle (N seeded cases, default 60)
+  ddg-oracle pat-fixtures write DIR | check DIR   golden fixtures (fixtures/pat)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -213,6 +217,22 @@ def main (args : List String) : IO UInt32 := do
     | none => IO.eprintln usage; return 2
   | ["rs-fixtures", "write", dir] => RepulsiveSurfaces.writeFixtures dir; return 0
   | ["rs-fixtures", "check", dir] => return if (← RepulsiveSurfaces.checkFixtures dir) == 0 then 0 else 1
+  | "pat" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← PointsAsTori.runStream input output
+    output.flush
+    return 0
+  | ["pat-selftest"] => return if (← PointsAsTori.selftest) == 0 then 0 else 1
+  | ["pat-selftest", n] =>
+    match n.toNat? with
+    | some k => return if (← PointsAsTori.selftest k) == 0 then 0 else 1
+    | none => IO.eprintln usage; return 2
+  | ["pat-fixtures", "write", dir] => PointsAsTori.writeFixtures dir; return 0
+  | ["pat-fixtures", "check", dir] => return if (← PointsAsTori.checkFixtures dir) == 0 then 0 else 1
   | "ic" :: rest =>
     if rest.length > 2 then
       IO.eprintln usage

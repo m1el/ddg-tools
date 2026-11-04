@@ -1,0 +1,35 @@
+pat-features-even	features	ok	6 explicit neighbors (even median), network output y to coefficients	
+pat-features-frame-branch	features	ok	normal with |c_x| > 0.9 (second branch of the frame rule), auto neighborhood of 9	
+pat-features-k64	features	ok	100-point sphere, 64 tokens as in the network	
+pat-features-duplicate	features	ok	exact duplicate of the center: self first, then the duplicate (distance 0) by index	
+pat-features-fewer-than-k	features	ok	5 points, k = 64: the neighborhood has 5 tokens	
+pat-error-features-sigma	features	error	all points coincide: DegenerateNeighborhood	status error DegenerateNeighborhood median distance sigma is 0
+pat-error-nonunit-normal	features	error	normal of length 2: NonUnitNormal	status error NonUnitNormal normal 1 has norm 2.000000
+pat-fit-sphere	fit	ok	tangent-sphere initialization a02 = a20 = -0.5 at six points (both frame branches): R = 0, r = 1, center p - n	
+pat-fit-sphere-concave	fit	ok	umbilic points, positive curvature (sign -1) and other radii	
+pat-fit-saddle	fit	ok	saddles (kappa+ kappa- < 0), tilted tangent planes, pure a11	
+pat-fit-ellipsoid-like	fit	ok	elliptic points: kappa+ kappa- > 0, spindle (|kmin| > |kmax|/2) and ring cases	
+pat-fit-cylinder	fit	ok	cylinder-like (one curvature exactly 0 or 1e-12): curvature floor, huge major radius; a plane with offset	
+pat-fit-nearplanar	fit	ok	planar and near-planar coefficients: disc clamp, eigenvector clamps, curvature floor all active	
+pat-fit-nearplanar-eps	fit	ok	custom clamp options eps = 1e-6, floor = 1e-4	
+pat-fit-random	fit	ok	48 random coefficient vectors at the points of an ellipsoid cloud	
+pat-error-fit-nonunit	fit	error	normal of length 1.5: NonUnitNormal	status error NonUnitNormal normal 0 has norm 1.500000
+pat-sdf-torus	sdf	ok	z-axis torus R = 1, r = 0.25: queries on the core circle (1,0,0), (0,1,0), (-0.6,0.8,0) [kind 2], on the axis (0,0,0.5), (0,0,-2), (0,0,0) [kind 1], inside and outside the tube	
+pat-sdf-inverted	sdf	ok	negative minor radius (sign -1): the SDF is negated; a tilted second torus; core circle at (1.5,-0.5,0.25) and axis point (0.5,-0.5,0.75)	
+pat-sdf-spindle-sphere	sdf	ok	R < |r| (spindle) and R = 0 (sphere of radius |r|; the center is the only core point, kind 2; points on the axis kind 1)	
+pat-sdf-random	sdf	ok	six random tori with skewed axes, 40 random queries each	
+pat-blend-sphere-default	blend	ok	50-point unit sphere, tangent-sphere coefficients, defaults (knn 32, PerQuery C = 64); queries include a data point (singR), the center (all tori on their core, singG) and near-data-point queries	
+pat-blend-sphere-all	blend	ok	same cloud, all points (Eq. 26 exactly)	
+pat-blend-sphere-constant	blend	ok	constant lambda = 20, knn 16 (the exact gradient equals the frozen one)	
+pat-blend-sphere-paper	blend	ok	paper heuristic: lambda = 1e3/D, R_eval = 2C/lambda (D is printed in the paper line), kmean = 20, area weights; empty radius sets fall back to 32-NN	
+pat-blend-sphere-radius	blend	ok	fixed radius 0.9, fallback 5, PerQuery	
+pat-blend-random-default	blend	ok	50 points of an ellipsoid cloud with random coefficients, defaults; queries include data points and the origin	
+pat-blend-random-knn8-iso	blend	ok	knn 8, C = 16, isovalue 0.1 (subtracted at the end)	
+pat-blend-random-areas	blend	ok	area weights, knn 20, constant lambda 8	
+pat-blend-singular	blend	ok	three explicit tori, all points: queries on a core circle (singG), on an axis, at a data point (singR)	
+pat-blend-duplicate	blend	ok	two coincident data points (ties by index), knn 3: the order of the sums	
+pat-error-blend-single	blend	error	one point, query at the point: sigma = 0, DegenerateQuery	status error DegenerateQuery shift sigma is 0 (lambda = C / sigma)
+pat-error-blend-count	blend	error	one coefficient line for two points: ValueCount	status error ValueCount 1 coef lines for 2 points
+pat-baselines-sphere-default	baselines	ok	SHC and SSPD on the unit sphere with areas 4 pi / 50, defaults; queries include a data point (skipped SHC term)	
+pat-baselines-sphere-all	baselines	ok	all points, constant lambda 6	
+pat-baselines-random-paper	baselines	ok	ellipsoid cloud, random areas, paper rule with radius auto	

@@ -1,0 +1,4 @@
+case pat-error-nonunit-normal
+task features
+status error NonUnitNormal normal 1 has norm 2.000000
+end

@@ -1,0 +1,4 @@
+case pat-error-blend-count
+task blend
+status error ValueCount 1 coef lines for 2 points
+end

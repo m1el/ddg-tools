@@ -1,0 +1,4 @@
+case pat-error-fit-nonunit
+task fit
+status error NonUnitNormal normal 0 has norm 1.500000
+end

@@ -1,0 +1,4 @@
+case pat-error-blend-single
+task blend
+status error DegenerateQuery shift sigma is 0 (lambda = C / sigma)
+end
