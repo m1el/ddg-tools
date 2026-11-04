@@ -1,11 +1,11 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["numpy", "matplotlib"]
+# dependencies = ["numpy", "matplotlib", "pillow"]
 # ///
 """Aggregate WP14's per-case results into the tables of EVALUATION.md / COMPARISON.md and draw the
 figures (SPEC.md §16).
 
-    uv run --no-project --with numpy --with matplotlib python -I \
+    uv run --no-project --with numpy --with matplotlib --with pillow python -I \
         crates/ddg-points-as-tori/scripts/pat_eval_report.py runs_tmp/pat-wp14/cases runs_tmp/pat-wp14/report
 
 Reads `<cases>/<dataset>/<case>/{result,continuity,orient}.json` and `<cases>/density*/density.json`;
@@ -97,6 +97,13 @@ def main():
     os.makedirs(os.path.join(out, 'fig'), exist_ok=True)
     T = []
     data = {ds: load(cases, ds) for ds, _ in DATASETS}
+    # exact duplicates of training shapes among the validation shapes (scripts/pat_eval_data.py)
+    ov = os.path.join(cases, 'src', 'overlap.json')
+    if os.path.isfile(ov):
+        per = json.load(open(ov)).get('per_shape', {})
+        for r in data['abc']:
+            if per.get(r['name'], {}).get('exact'):
+                r['training'] = 'duplicate-of-training'
     # WP10's retrained weights, when the case stage ran with --retrained label=path
     extra = sorted({k for rs in data.values() for r in rs for k in r['methods'] if k.startswith('retrained')})
     METHODS.extend((k, f'PAT {k} weights') for k in extra if k not in dict(METHODS))
@@ -110,7 +117,7 @@ def main():
     # PAT vs GWN-sign + distance, per shape
     rows = []
     for ds, label in DATASETS[:4]:
-        for a, b in [('pat', 'gwn-nearest'), ('pat', 'spsr'), ('pat', 'shc'), ('pat-all', 'pat'), ('pat', 'authors')]:
+        for a, b in [('pat', 'gwn-nearest'), ('pat', 'lse-gwn'), ('pat', 'spsr'), ('pat', 'shc'), ('pat-all', 'pat')]:
             pw = pairwise(data[ds], a, b)
             if pw:
                 rows.append([label, f'{a} < {b}', f'{pw[0]}/{pw[1]}'])
@@ -118,6 +125,8 @@ def main():
     # ABC by training status
     for st in ['unseen', 'duplicate-of-training', 'seen']:
         rs = [r for r in data['abc'] if r.get('training') == st]
+        if st == 'unseen':
+            rs = rs
         if rs:
             T.append(headline(rs, f'ABC, {st} ({len(rs)})', [x for x in METHODS if x[0] in ('pat', 'pat-all', 'gwn-nearest', 'lse-gwn', 'shc', 'spsr', 'authors')]))
     # SHC degenerate counts, saddles predicted
@@ -202,20 +211,21 @@ def main():
     rules = ['knn32', 'paper', 'all', 'taper']
     for res in ['64', '128', '256']:
         rows = []
+        # only clouds with a truth and all four rules at this resolution, so the rows compare like with like
+        cl = [c for c in cont if res in c['res'] and 'truth_mc_components' in c['res'][res] and all(r in c['res'][res] for r in rules)]
         for rule in rules:
-            vals = [c['res'][res][rule] for c in cont if res in c['res'] and rule in c['res'][res]]
+            vals = [c['res'][res][rule] for c in cl]
             if not vals:
                 continue
             mx = [v['jumps']['max'] for v in vals]
             p999 = [v['jumps']['p999'] for v in vals]
-            o5 = [v['jumps']['over5'] for v in vals]
-            withm = [v for v in vals if 'm' in v]
+            o5 = [v['jumps']['over5'] / v['jumps']['edges'] * 1e3 for v in vals]
             comps = [v['mc_components'] for v in vals]
             det = [v['mc_detached'] for v in vals]
-            rows.append([rule, len(vals), fmt(np.median(mx), 1), fmt(max(mx), 1), fmt(np.median(p999), 2), fmt(np.mean(o5), 0),
-                         fmt(np.mean([v['m']['mae'] for v in withm]), 4) if withm else '–', fmt(np.mean([v['m']['band_mae'] for v in withm]), 4) if withm else '–',
-                         fmt(np.mean([v['m']['eik'] for v in withm]), 3) if withm else '–', sum(comps), sum(det)])
-        T.append(f'**{res}³**\n\n' + table(['rule', 'clouds', 'max |Δφ|/h (median)', 'max (worst)', 'p99.9 (median)', 'edges > 5 (mean)', 'MAE', 'band MAE', 'eikonality', 'MC components (sum)', 'detached (sum)'], rows))
+            rows.append([rule, len(vals), fmt(np.median(mx), 1), fmt(max(mx), 1), fmt(np.median(p999), 2), fmt(np.mean(o5), 2),
+                         fmt(np.mean([v['m']['mae'] for v in vals]), 4), fmt(np.mean([v['m']['band_mae'] for v in vals]), 4),
+                         fmt(np.mean([v['m']['eik'] for v in vals]), 3), sum(comps), sum(c['res'][res]['truth_mc_components'] for c in cl), sum(det)])
+        T.append(f'**{res}³**\n\n' + table(['rule', 'clouds', 'max |Δφ|/h (median)', 'max (worst)', 'p99.9 (median)', 'edges > 5 (‰, mean)', 'MAE', 'band MAE', 'eikonality', 'MC components (sum)', 'truth components (sum)', 'detached (sum)'], rows))
     # per cloud components at 256 vs truth
     rows = []
     for c in cont:
@@ -224,7 +234,8 @@ def main():
         row = [c.get('dataset'), c.get('name'), c['n'], top, r.get('truth_mc_components', c.get('truth_components', '–'))]
         for rule in rules:
             v = r.get(rule)
-            row.append(f"{v['mc_components']} ({v['mc_detached']})" if v else '–')
+            has_truth = 'truth_mc_components' in r or 'truth_components' in c
+            row.append((f"{v['mc_components']} ({v['mc_detached']})" if has_truth else f"{v['mc_components']}") if v else '–')
         for rule in rules:
             v = r.get(rule)
             row.append(fmt(v['jumps']['max'], 1) if v else '–')
@@ -260,6 +271,10 @@ def main():
     open(os.path.join(out, 'tables.md'), 'w').write('\n'.join(T))
     print('\n'.join(T))
     figures(cases, out, data, cont)
+    # 8-bit palette PNGs (small enough to commit)
+    from PIL import Image
+    for p in glob.glob(os.path.join(out, 'fig', '*.png')):
+        Image.open(p).convert('RGB').quantize(colors=96, method=Image.Quantize.MEDIANCUT).save(p, optimize=True)
     return 0
 
 
@@ -272,26 +287,28 @@ def figures(cases, out, data, cont):
            'gwn-nearest': gray, 'rwn-nearest': gray, 'lse-gwn': gray, 'spsr': violet}
     keys = ['pat', 'pat-all', 'pat-paper', 'authors', 'shc', 'sspd', 'gwn-nearest', 'lse-gwn', 'spsr']
     names = dict(METHODS)
-    # Fig. 18 analogue: per-dataset mean grid MAE, small multiples
-    fig, axs = plt.subplots(1, 4, figsize=(14, 3.6), sharey=True)
-    for ax, (ds, label) in zip(axs, DATASETS[:4]):
-        rs = data[ds]
-        vals = [np.nanmean([m(r, k) for r in rs if k in r['methods']]) if rs else np.nan for k in keys]
-        ax.barh(range(len(keys)), vals, color=[fam[k] for k in keys], height=0.7)
-        for i, v in enumerate(vals):
-            if math.isfinite(v):
-                ax.text(v, i, f' {v:.3f}', va='center', fontsize=7, color='#52514e')
-        ax.set_title(label, fontsize=10)
-        ax.set_yticks(range(len(keys)))
-        ax.set_yticklabels([names[k] for k in keys], fontsize=8)
-        ax.invert_yaxis()
-        ax.set_xlabel('mean |φ − φ_true| on 64³', fontsize=8)
-        ax.spines[['top', 'right']].set_visible(False)
-        ax.tick_params(axis='x', labelsize=7)
-        ax.set_xlim(0, max(v for v in vals if math.isfinite(v)) * 1.35)
-    fig.suptitle('Grid error, 512 points (blue: PAT, aqua: authors\' program, orange: paper baselines, gray: winding-number baselines, violet: SPSR)', fontsize=9)
+    # Fig. 18 analogue: per-dataset mean grid MAE (top) and band MAE (bottom), small multiples
+    fig, axs = plt.subplots(2, 4, figsize=(14, 6.4), sharey=True)
+    for row, (key_m, xl) in enumerate([('mae', 'grid MAE (64³)'), ('band_mae', 'band MAE (|φ_true| < 0.05)')]):
+        for ax, (ds, label) in zip(axs[row], DATASETS[:4]):
+            rs = data[ds]
+            vals = [np.nanmean([m(r, k, key_m) for r in rs if k in r['methods']]) if rs else np.nan for k in keys]
+            ax.barh(range(len(keys)), vals, color=[fam[k] for k in keys], height=0.7)
+            for i, v in enumerate(vals):
+                if math.isfinite(v):
+                    ax.text(v, i, f' {v:.3f}', va='center', fontsize=7, color='#52514e')
+            if row == 0:
+                ax.set_title(label, fontsize=10)
+            ax.set_yticks(range(len(keys)))
+            ax.set_yticklabels([names[k] for k in keys], fontsize=8)
+            ax.set_xlabel(xl, fontsize=8)
+            ax.spines[['top', 'right']].set_visible(False)
+            ax.tick_params(axis='x', labelsize=7)
+            ax.set_xlim(0, max(v for v in vals if math.isfinite(v)) * 1.35)
+    axs[0, 0].invert_yaxis()
+    fig.suptitle('512 points; mean over shapes (blue: PAT, aqua: authors\' program, orange: paper baselines, gray: winding-number baselines, violet: SPSR)', fontsize=9)
     fig.tight_layout()
-    fig.savefig(os.path.join(out, 'fig', 'accuracy.png'), dpi=110)
+    fig.savefig(os.path.join(out, 'fig', 'accuracy.png'), dpi=100)
     plt.close(fig)
     # Fig. 17 analogue: z-slices of truth and methods for a few shapes
     picks = []
@@ -324,7 +341,7 @@ def figures(cases, out, data, cont):
                     ax.set_ylabel(f"{ds}\n{r['name']}", fontsize=7)
         fig.suptitle('z ≈ 0 slices (red outside, blue inside, ±0.5; black: zero level, dashed: truth)', fontsize=8)
         fig.tight_layout()
-        fig.savefig(os.path.join(out, 'fig', 'slices.png'), dpi=100)
+        fig.savefig(os.path.join(out, 'fig', 'slices.png'), dpi=60)
         plt.close(fig)
     # continuity: max slope vs resolution per rule (median over clouds)
     if cont:
@@ -363,7 +380,7 @@ def figures(cases, out, data, cont):
             ax.set_yticks([])
             ax.set_title('truth' if i == 0 else f"{d['rows'][i - 1]['n']:,} points\nMAE {d['rows'][i - 1]['m']['mae']:.4f}", fontsize=8)
         fig.tight_layout()
-        fig.savefig(os.path.join(out, 'fig', f"{os.path.basename(os.path.dirname(p))}.png"), dpi=100)
+        fig.savefig(os.path.join(out, 'fig', f"{os.path.basename(os.path.dirname(p))}.png"), dpi=70)
         plt.close(fig)
 
 

@@ -79,7 +79,7 @@ for st in "${stages[@]}"; do
 		nice -n 19 $B/density data/thingi10k/converted/59340.obj $W/density-fig29-thingi59340 --counts 110000,880000,7300000 --grid 128 --mc 256 --threads 32 > $L/density-fig29.log 2>&1
 		;;
 	report)
-		uv run --no-project --with numpy --with matplotlib python -I $S/pat_eval_report.py $C $W/report > $L/report.log 2>&1
+		uv run --no-project --with numpy --with matplotlib --with pillow python -I $S/pat_eval_report.py $C $W/report > $L/report.log 2>&1
 		;;
 	*) echo "unknown stage $st" >&2; exit 2 ;;
 	esac

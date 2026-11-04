@@ -52,6 +52,7 @@ fn main() {
         Some("gpu") => gpu(&args[1..]),
         Some("swaps") => swaps(&args[1..]),
         Some("profile") => profile(&args[1..]),
+        Some("curv") => curv(&args[1..]),
         _ => Err("usage: eval prepare|case|continuity|orient ... (see the file header)".into()),
     };
     if let Err(e) = r {
@@ -216,7 +217,12 @@ fn prepare(a: &[String]) -> R<()> {
                         let go = || -> R<()> {
                             let v = read3(&d.join("vertices.npy"))?;
                             let f = read_faces(&d.join("faces.npy"))?;
-                            let dup = overlap.contains(&format!("\"{name}\": {{\"exact\": [\""));
+                            // overlap.json: "<name>": {"exact": [<training ids>], "coarse": [...]}
+                            let dup = overlap.find(&format!("\"{name}\": {{")).is_some_and(|at| {
+                                let rest = &overlap[at..];
+                                let end = rest.find("\"coarse\"").unwrap_or(rest.len());
+                                rest[..end].contains(".npz:")
+                            });
                             let training = if r[3] == "unseen" && dup { "duplicate-of-training" } else { r[3].as_str() };
                             let mut m = Meta::new();
                             m.set("dataset", "abc").set("name", &name).set("source", format!("{}:{}", r[1], r[2])).set("training", training);
@@ -946,7 +952,7 @@ fn continuity(a: &[String]) -> R<()> {
             rj.int("truth_mc_triangles", m.faces.len() as i64);
         }
         for (lab, rule) in &rules {
-            if *lab == "all" && n > 128 && cloud.len() > 4096 {
+            if *lab == "all" && n > 128 && cloud.len() > 2048 {
                 continue;
             }
             let t = Instant::now();
@@ -1400,5 +1406,71 @@ fn profile(a: &[String]) -> R<()> {
         .finish();
     std::fs::write(dir.join(format!("profile-{rule}.json")), &out).map_err(err)?;
     println!("{out}");
+    Ok(())
+}
+
+// ------------------------------------------------------------------ predicted vs true curvature
+
+/// `eval curv <case-dir>... [--threads T]` (analytic and saddle cases): the network's principal
+/// curvatures (`fit_diagnostics`) against the exact ones of the solid (central differences of its
+/// exact gradient, h = 1e-4) at every point. Reports the true and the predicted saddle fractions
+/// and, at true saddle points, the medians of the true and predicted `κmin σ_i`, `κmax σ_i`.
+fn curv(a: &[String]) -> R<()> {
+    use ddg_points_as_tori::analytic::principal_curvatures;
+    use ddg_points_as_tori::fit_diagnostics;
+    let a = parse(a);
+    let th = threads(&a)?;
+    let model = Model::reference().map_err(err)?;
+    for d in &a.pos {
+        let dir = PathBuf::from(d);
+        let meta = Meta::read(&dir)?;
+        let Truth::Solid(solid) = load_truth(&dir, &meta, th, SignMode::Auto)? else { continue };
+        let cloud = load_cloud(&dir)?;
+        let opts = BuildOptions::default().with_threads(th);
+        let (f, _) = PointsAsTori::build(&cloud, &model, &opts).map_err(err)?;
+        let t = f.tori();
+        let (mut ts, mut ps, mut both) = (0, 0, 0);
+        let (mut tmin, mut tmax, mut pmin, mut pmax) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut all_t, mut all_p, mut all_tk, mut all_pk) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for i in 0..cloud.len() {
+            let (k1, k2) = principal_curvatures(&solid, cloud.positions()[i], 1e-4).map_err(err)?;
+            let dg = fit_diagnostics(&cloud, &t.coefficients, i, &opts.fit).map_err(err)?;
+            let s = t.sigma[i];
+            let ts_i = k1 < -1e-4 && k2 > 1e-4;
+            let ps_i = dg.kappa_min * dg.kappa_max < 0.0;
+            ts += ts_i as usize;
+            ps += ps_i as usize;
+            both += (ts_i && ps_i) as usize;
+            let an = |a: f64, b: f64| a.abs().min(b.abs()) / a.abs().max(b.abs()).max(1e-300);
+            all_t.push(an(k1, k2));
+            all_p.push(an(dg.kappa_min, dg.kappa_max));
+            all_tk.push(k1.abs().max(k2.abs()) * s);
+            all_pk.push(dg.kappa_min.abs().max(dg.kappa_max.abs()) * s);
+            if ts_i {
+                tmin.push(k1 * s);
+                tmax.push(k2 * s);
+                pmin.push(dg.kappa_min * s);
+                pmax.push(dg.kappa_max * s);
+            }
+        }
+        let n = cloud.len() as f64;
+        let j = Json::new()
+            .str("case", d)
+            .int("n", cloud.len() as i64)
+            .num("true_saddle_frac", ts as f64 / n)
+            .num("pred_saddle_frac", ps as f64 / n)
+            .int("both", both as i64)
+            .num("true_kmin_sigma_median", quantile(&mut tmin, 0.5))
+            .num("true_kmax_sigma_median", quantile(&mut tmax, 0.5))
+            .num("pred_kmin_sigma_median", quantile(&mut pmin, 0.5))
+            .num("pred_kmax_sigma_median", quantile(&mut pmax, 0.5))
+            .num("true_anisotropy_median", quantile(&mut all_t, 0.5))
+            .num("pred_anisotropy_median", quantile(&mut all_p, 0.5))
+            .num("true_maxk_sigma_median", quantile(&mut all_tk, 0.5))
+            .num("pred_maxk_sigma_median", quantile(&mut all_pk, 0.5))
+            .finish();
+        std::fs::write(dir.join("curv.json"), &j).map_err(err)?;
+        println!("{j}");
+    }
     Ok(())
 }
