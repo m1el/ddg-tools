@@ -168,9 +168,20 @@ Per step (batch 1024, 2048 neighborhoods):
   independent of the parameters, so they can be computed for the next shape while the GPU trains
   (a prefetch thread; WP10).
 
-So ≈ 0.17–0.21 s per step if the host work is overlapped: **≈ 24–29 h** for the 497,858 steps (the
-paper: 45 h on a 3090). If burn-cuda reaches only 10 TFLOPS on these shapes, ≈ 0.3 s/step ≈ 42 h. The
-largest lever is a fused LayerNorm/GELU (or burn's fusion feature); measure first.
+From FLOPs alone that is ≈ 0.17–0.21 s per step. **WP4's measured burn-cuda inference
+throughput** (NOTES-GPU.md: 15k neighborhoods/s f32-accurate `Split3`, 42k/s TF32, near idle, bound by
+burn's per-op host dispatch) is the better basis: a step is ≈ 4 forward-equivalents of 2048
+neighborhoods (pass 2 forward; pass 4 forward + backward ≈ 3×), i.e. 8,192 → **0.55 s (Split3) or
+0.2 s (TF32)** of network, plus the loss (≈ 0.02–0.05 s). With the host work overlapped:
+
+| precision | s/step | 497,858 steps |
+|---|---|---|
+| TF32 (as JAX on the authors' 3090 by default) | ≈ 0.22–0.25 | **≈ 30–35 h** |
+| Split3 (f32-accurate) | ≈ 0.6 | **≈ 80–85 h** |
+
+(the paper: 45 h on a 3090, 0.33 s/step). Autodiff doubles the op count, so if the dispatch bound
+holds for the backward too these are lower bounds on the dispatch side; a larger network chunk on the
+GPU (256–2048 neighborhoods per taped forward, all of them fit in 16 GB at 256) amortizes it.
 
 GPU caveats for WP10: `select` (the gather of tori per pair) back-propagates as a scatter-add, which on
 CUDA may use atomics (not run-to-run deterministic; D4 allows tolerance for the framework part, but
