@@ -68,9 +68,9 @@ pub fn torus_sdf_gradient(t: &Torus, x: [f64; 3]) -> (f64, [f64; 3], Singular) {
         return (g, [s * w2 * u[0], s * w2 * u[1], s * w2 * u[2]], Singular::Axis);
     }
     let gr = [
-        s * (w1 * (rv[0] - d2 * u[0]) / v + w2 * u[0]),
-        s * (w1 * (rv[1] - d2 * u[1]) / v + w2 * u[1]),
-        s * (w1 * (rv[2] - d2 * u[2]) / v + w2 * u[2]),
+        s * ((rv[0] - d2 * u[0]) / v * w1 + w2 * u[0]),
+        s * ((rv[1] - d2 * u[1]) / v * w1 + w2 * u[1]),
+        s * ((rv[2] - d2 * u[2]) / v * w1 + w2 * u[2]),
     ];
     (g, gr, Singular::None)
 }

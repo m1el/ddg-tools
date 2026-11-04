@@ -200,8 +200,8 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
             let lap = matches!(want, BlendWant::Laplacian);
             let mut asum = [0.0; 3]; // Σ w (∇g − λ r̂ g)
             let mut nsum = [0.0; 3]; // Σ w r̂
-            let mut numer1 = 0.0; // Σ w (Δg − 2λ r̂·∇g + g(λ² − 2λ/ρ))
-            let mut numer2 = 0.0; // Σ w (2/ρ − λ)
+            let mut dn = 0.0; // ΔN = Σ w [(λ² − 2λ/ρ) g − 2λ r̂·∇g + Δg]
+            let mut dw = 0.0; // ΔW = Σ w (λ² − 2λ/ρ)
             let mut esum = 0.0; // Σ w ρ g (exact-gradient term)
             let mut ersum = 0.0; // Σ w ρ
             for &i in nbrs {
@@ -228,7 +228,7 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
                     Singular::None => {}
                 }
                 for a in 0..3 {
-                    asum[a] += w * (gr[a] - lambda * rhat[a] * g);
+                    asum[a] += w * (gr[a] - rhat[a] * (lambda * g));
                     nsum[a] += w * rhat[a];
                 }
                 gsum += w * g;
@@ -236,9 +236,9 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
                 esum += w * rho * g;
                 ersum += w * rho;
                 if lap {
-                    let inv = if rho > 0.0 { 2.0 / rho } else { 0.0 };
-                    numer1 += w * (lg - 2.0 * lambda * dot(rhat, gr) + g * lambda * (lambda - inv));
-                    numer2 += w * (inv - lambda);
+                    let lap_rho = if rho > 0.0 { 2.0 * lambda / rho } else { 0.0 };
+                    dn += w * ((lambda * lambda - lap_rho) * g - 2.0 * lambda * dot(rhat, gr) + lg);
+                    dw += w * (lambda * lambda - lap_rho);
                 }
             }
             let a = [asum[0] / wsum, asum[1] / wsum, asum[2] / wsum];
@@ -260,9 +260,9 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
                 }
             }
             let laplacian = if lap {
-                let first = numer1 / wsum + dot(a, b);
-                let second = dot(grad, b) + phi * (lambda * numer2 / wsum + dot(b, b));
-                first + second
+                // Δφ = (ΔN − φ ΔW)/W + 2 B·∇φ (the oracle's operation order; the algebraically
+                // equal split into A·B + ∇φ·B + φ(…) cancels differently, by up to 1e-9 at λ ~ 1e3)
+                (dn - phi * dw) / wsum + 2.0 * dot(b, grad)
             } else {
                 0.0
             };

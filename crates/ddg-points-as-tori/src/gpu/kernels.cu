@@ -285,9 +285,9 @@ __device__ __forceinline__ int torus_sdf_grad(const TorusArrays& T, u32 i, const
         gr[2] = s * w2 * u[2];
         return SING_AXIS;
     }
-    gr[0] = s * (w1 * (rv[0] - d2 * u[0]) / v + w2 * u[0]);
-    gr[1] = s * (w1 * (rv[1] - d2 * u[1]) / v + w2 * u[1]);
-    gr[2] = s * (w1 * (rv[2] - d2 * u[2]) / v + w2 * u[2]);
+    gr[0] = s * ((rv[0] - d2 * u[0]) / v * w1 + w2 * u[0]);
+    gr[1] = s * ((rv[1] - d2 * u[1]) / v * w1 + w2 * u[1]);
+    gr[2] = s * ((rv[2] - d2 * u[2]) / v * w1 + w2 * u[2]);
     if (lap) *lg = s * (1.0 / nd + d1 / (nd * v));
     return SING_NONE;
 }
@@ -389,7 +389,7 @@ __device__ void blend(const BlendParams& P, const double* pos, const TorusArrays
         if (sing == SING_AXIS) o->axis += 1;
         if (sing == SING_CORE) o->core += 1;
         for (int c = 0; c < 3; ++c) {
-            asum[c] += w * (gr[c] - lambda * rh[c] * g);
+            asum[c] += w * (gr[c] - rh[c] * (lambda * g));
             nsum[c] += w * rh[c];
         }
         gsum += w * g;
@@ -397,10 +397,10 @@ __device__ void blend(const BlendParams& P, const double* pos, const TorusArrays
         esum += w * rho * g;
         ersum += w * rho;
         if (lap) {
-            double inv = rho > 0.0 ? 2.0 / rho : 0.0;
+            double lap_rho = rho > 0.0 ? 2.0 * lambda / rho : 0.0;
             double dt = rh[0] * gr[0] + rh[1] * gr[1] + rh[2] * gr[2];
-            numer1 += w * (lg - 2.0 * lambda * dt + g * lambda * (lambda - inv));
-            numer2 += w * (inv - lambda);
+            numer1 += w * ((lambda * lambda - lap_rho) * g - 2.0 * lambda * dt + lg);
+            numer2 += w * (lambda * lambda - lap_rho);
         }
     }
     double A[3] = {asum[0] / wsum, asum[1] / wsum, asum[2] / wsum};
@@ -419,10 +419,7 @@ __device__ void blend(const BlendParams& P, const double* pos, const TorusArrays
     }
     double laplacian = 0.0;
     if (lap) {
-        double first = numer1 / wsum + (A[0] * B[0] + A[1] * B[1] + A[2] * B[2]);
-        double second = (grad[0] * B[0] + grad[1] * B[1] + grad[2] * B[2]) +
-                         phi * (lambda * numer2 / wsum + (B[0] * B[0] + B[1] * B[1] + B[2] * B[2]));
-        laplacian = first + second;
+        laplacian = (numer1 - phi * numer2) / wsum + 2.0 * (B[0] * grad[0] + B[1] * grad[1] + B[2] * grad[2]);
     }
     o->distance = phi - P.isovalue;
     o->grad[0] = grad[0]; o->grad[1] = grad[1]; o->grad[2] = grad[2];
