@@ -27,19 +27,19 @@ fn wrong(a: &[[f64; 3]], truth: &[[f64; 3]]) -> usize {
 }
 
 /// Clean clouds: (name, positions, true normals).
-fn clouds(golden: bool) -> Vec<(String, Vec<[f64; 3]>, Vec<[f64; 3]>)> {
+type Named = (String, Vec<[f64; 3]>, Vec<[f64; 3]>);
+
+fn clouds(golden: bool) -> Vec<Named> {
     let mut v = Vec::new();
     for seed in [3u64, 12, 26, 40, 52] {
         let inst = Instance::from_seed(seed).expect("instance");
         let (p, n) = inst.solid.sample_surface(2048, seed).expect("sample");
         v.push((inst.name(), p, n));
     }
-    if golden {
-        if let Some(root) = common::golden_root() {
-            for name in ["synth_torus", "tooth", "knot", "block", "femur", "snail"] {
-                let g = common::Golden::open(&root, name);
-                v.push((name.to_string(), g.cloud.positions().to_vec(), g.cloud.normals().to_vec()));
-            }
+    if golden && let Some(root) = common::golden_root() {
+        for name in ["synth_torus", "tooth", "knot", "block", "femur", "snail"] {
+            let g = common::Golden::open(&root, name);
+            v.push((name.to_string(), g.cloud.positions().to_vec(), g.cloud.normals().to_vec()));
         }
     }
     v

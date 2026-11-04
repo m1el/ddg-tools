@@ -121,8 +121,8 @@ fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
     for i in 0..3 {
         for j in 0..=i {
             let mut s = m[i][j];
-            for k in 0..j {
-                s -= l[i][k] * l[j][k];
+            for (a, b) in l[i][..j].iter().zip(&l[j][..j]) {
+                s -= a * b;
             }
             if i == j {
                 if s <= 1e-12 * scale {
@@ -283,7 +283,7 @@ pub fn fit_circles(cloud: &Cloud2, coeffs: &[Quad2], sigma: &[f64], opts: &Fit2d
                 let ns = [(-q.a1 * t[0] + nn[0]) / a, (-q.a1 * t[1] + nn[1]) / a];
                 let o = [p[0] + q.a0 * nn[0], p[1] + q.a0 * nn[1]];
                 let scale = if sigma[i].is_finite() && sigma[i] > 0.0 { sigma[i] } else { 1.0 };
-                let prim = if !(kappa.abs() * scale >= opts.line_threshold) || kappa == 0.0 {
+                let prim = if kappa == 0.0 || kappa.abs() * scale < opts.line_threshold {
                     CirclePrimitive::Line { point: o, normal: ns }
                 } else {
                     let c = [o[0] + ns[0] / kappa, o[1] + ns[1] / kappa];

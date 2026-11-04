@@ -67,7 +67,7 @@ impl Pat2dField {
             return Err(PatError::SizeMismatch { what: format!("{} circles for {n} points", circles.primitives.len()) });
         }
         match options.neighborhood {
-            Neighborhood::Knn { k } if k == 0 => return Err(PatError::InvalidOption { what: "Neighborhood::Knn { k: 0 }".into() }),
+            Neighborhood::Knn { k: 0 } => return Err(PatError::InvalidOption { what: "Neighborhood::Knn { k: 0 }".into() }),
             Neighborhood::Radius { r, fallback_k } if !(r.is_finite() && r > 0.0) || fallback_k == 0 => {
                 return Err(PatError::InvalidOption { what: format!("Neighborhood::Radius {{ r: {r}, fallback_k: {fallback_k} }}") });
             }

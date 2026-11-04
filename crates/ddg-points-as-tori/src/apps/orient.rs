@@ -108,6 +108,9 @@ pub fn orientation_metric(r: [f64; 3], d: &FitDiagnostics, normal: [f64; 3], eps
     (a * a + b * b + c * c).sqrt()
 }
 
+/// The votes `ñ_i` and the field gradients `∇φ(p_i)` of [`orientation_votes`].
+pub type Votes = (Vec<[f64; 3]>, Vec<[f64; 3]>);
+
 /// The vote `ñ_i` of every point for the field `field` that was built from `cloud` (one
 /// iteration's step 1, exposed for tests and diagnostics). Returns `(ñ, ∇φ(p_i))`.
 ///
@@ -119,7 +122,7 @@ pub fn orientation_votes(
     epsilon: Epsilon,
     opts: &BuildOptions,
     threads: Option<usize>,
-) -> Result<(Vec<[f64; 3]>, Vec<[f64; 3]>), PatError> {
+) -> Result<Votes, PatError> {
     let n = cloud.len();
     if neighbors.len() != n {
         return Err(PatError::SizeMismatch { what: format!("{} neighborhood rows for {n} points", neighbors.len()) });
@@ -135,8 +138,7 @@ pub fn orientation_votes(
     }
     let pos = cloud.positions();
     let mut grad = vec![[0.0f64; 3]; n];
-    let mut eo = EvalOut::default();
-    eo.gradient = Some(&mut grad);
+    let eo = EvalOut { gradient: Some(&mut grad), ..Default::default() };
     // the field's own pool is used (its thread count was set by the caller)
     field.evaluate(pos, eo)?;
     let tori = field.tori();
@@ -240,8 +242,7 @@ pub fn orient_normals(
             let (cloud, _) = PointCloud::new(positions.to_vec(), cur.clone(), NormalPolicy::Normalize)?;
             let (field, _) = PointsAsTori::build(&cloud, model, &build)?;
             let mut grad = vec![[0.0f64; 3]; n];
-            let mut eo = EvalOut::default();
-            eo.gradient = Some(&mut grad);
+            let eo = EvalOut { gradient: Some(&mut grad), ..Default::default() };
             field.evaluate(cloud.positions(), eo)?;
             (0..n).filter(|&i| dot(cur[i], grad[i]) < 0.0).count()
         }

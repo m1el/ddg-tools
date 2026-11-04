@@ -59,8 +59,8 @@ impl Raster {
             return;
         }
         let o = 3 * (py as usize * self.width + px as usize);
-        for k in 0..3 {
-            self.rgb[o + k] = (self.rgb[o + k] as f64 * (1.0 - alpha) + c[k] as f64 * alpha).round() as u8;
+        for (dst, &src) in self.rgb[o..o + 3].iter_mut().zip(&c) {
+            *dst = (*dst as f64 * (1.0 - alpha) + src as f64 * alpha).round() as u8;
         }
     }
 
