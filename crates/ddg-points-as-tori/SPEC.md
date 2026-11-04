@@ -1314,3 +1314,27 @@ proposals accepted).**
 3. Open (crate items for WP15): no progress/cancel hook in the native calls (a cancelled build
    finishes in the background); `reconstruct` sets no `eval_report`; `smooth = 0` is an error in
    the library (the panel maps 0 to None).
+
+**Resolutions after the audit and the shared `exp` (WP15 + WP4b, 2026-11-04; `NOTES-WP15.md`;
+accepted).**
+1. Oracle replay: all 35 fixtures pass (71,426 tokens at 1e-12 relative, integers exact). The
+   torus gradient and Δφ now use the oracle's operation order in `sdf.rs`, `blend.rs` and
+   `kernels.cu`, because the old order lost up to 1e-9 in Δφ, where terms of size λ² cancel to
+   about 1 (§7.4 "oracle-form Laplacian"). Golden parity still holds. The Δφ token alone gets an
+   allowance of 16·ε·λ² (§15.3), since the fits differ at 1e-16 and Δφ amplifies that by λ².
+2. Determinism audit (`tests/determinism_audit.rs`): every public CPU entry point is bitwise
+   identical at 1, 3, 8 and 32 threads and run to run.
+3. `check-formulas.sh`: 0 missing. Lean `torus_sdf_stable_general` (any expansion point,
+   `‖d‖² − r²` step) covers §7.3.
+4. API: `EigenRule` and `GpuMatmul` are at the crate root; `Morph::levels` is public;
+   `morphology()` returns `(field, cloud, report)`; `TorusField::{cloud, cloud_hash, sign_rule,
+   to_bytes, totals}`; the tori file carries a sign-rule marker (old files still read);
+   `smooth = 0` is the sharp Boolean; `reconstruct` fills `McReport::eval`.
+   `Progress` (counter + cancel flag) is in `BuildOptions`/`EvalOptions`, with
+   `PatError::Cancelled`, and Python and Blender use it. Orientation and level-set sampling
+   have no hook yet.
+5. Crate-owned `exp` (`src/exp.rs`, CUDA `pat_exp`): ≤ 1 ulp against glibc on 1e8 arguments
+   (0.94 ulp against mpmath); 11.0 ns against libm's 4.9 ns; CPU blend +5–15 % single-threaded
+   (measured at load ≈ 13). The blend is level 2 by construction; **the GPU bitwise tests
+   (`pat_exp_bitwise_host_device`, `blend_bitwise_cpu_gpu`) run after the training run frees the
+   GPU** (WP16).
