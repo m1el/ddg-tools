@@ -540,6 +540,104 @@ theorem torus_contact_curvatures {kmin kmax : ℝ} (h0 : kmin ≠ 0) (h1 : kmax 
     refine ⟨fun _ => ⟨by ring, by ring⟩, fun h => absurd h (not_lt.mpr hp.le), ⟨by ring, by ring⟩,
       by ring, by ring⟩
 
+/-! ## The Laplacian (ours, D24) -/
+
+/-- The trace of a linear map of `ℝ³` (the divergence of a field with that derivative). -/
+def trace3 (D : V3 →L[ℝ] V3) : ℝ := ∑ i : Fin 3, D (Pi.single i 1) i
+
+theorem trace3_add (A B : V3 →L[ℝ] V3) : trace3 (A + B) = trace3 A + trace3 B := by
+  simp [trace3, Finset.sum_add_distrib]
+
+theorem trace3_smul (c : ℝ) (A : V3 →L[ℝ] V3) : trace3 (c • A) = c * trace3 A := by
+  simp [trace3, Finset.mul_sum]
+
+theorem trace3_sub (A B : V3 →L[ℝ] V3) : trace3 (A - B) = trace3 A - trace3 B := by
+  simp [trace3, Finset.sum_sub_distrib]
+
+theorem trace3_id : trace3 (ContinuousLinearMap.id ℝ V3) = 3 := by
+  simp [trace3]
+
+/-- `tr(h ↦ L(h) b) = L(b)`. -/
+theorem trace3_smulRight (L : V3 →L[ℝ] ℝ) (b : V3) : trace3 (L.smulRight b) = L b := by
+  have hb : b = b 0 • Pi.single 0 1 + b 1 • Pi.single 1 1 + b 2 • Pi.single 2 1 := by
+    ext i; fin_cases i <;> simp
+  conv_rhs => rw [hb]
+  simp only [trace3, Fin.sum_univ_three, ContinuousLinearMap.smulRight_apply, map_add, map_smul,
+    smul_eq_mul, Pi.smul_apply]
+  ring
+
+theorem hasFDerivAt_inv_comp {f : V3 → ℝ} {f' : V3 →L[ℝ] ℝ} {x : V3} (hf : HasFDerivAt f f' x)
+    (h : f x ≠ 0) : HasFDerivAt (fun y => (f y)⁻¹) ((-(f x ^ 2)⁻¹) • f') x := by
+  have := (hasFDerivAt_inv h).comp x hf
+  refine this.congr_fderiv ?_
+  ext v; simp [mul_comm]
+
+theorem proj_sq {u : V3} (hu : u ⬝ᵥ u = 1) (X : V3) :
+    (X - (X ⬝ᵥ u) • u) ⬝ᵥ (X - (X ⬝ᵥ u) • u) = vnorm (X ⨯₃ u) ^ 2 := by
+  rw [vnorm_sq, cross_unit_sq hu]
+  simp only [sub_dotProduct, dotProduct_sub, smul_dotProduct, dotProduct_smul, hu, smul_eq_mul,
+    dotProduct_comm u X]; ring
+
+theorem proj_dot_u {u : V3} (hu : u ⬝ᵥ u = 1) (X : V3) : (X - (X ⬝ᵥ u) • u) ⬝ᵥ u = 0 := by
+  simp only [sub_dotProduct, smul_dotProduct, hu, smul_eq_mul]; ring
+
+/-- **The Laplacian of the torus SDF** (ours, replaces the reference's placeholder, D24): off
+the axis and the core circle, the gradient field `torusGrad` (the gradient of `g` there,
+`torus_sdf_gradient`) has a derivative `D` with
+`Δg = tr D = sgn(r)(1/|d| + d₁/(|d| v))`, `d₁ = v − R`: the 2D Laplacian `1/|d|` of the
+distance to the core point in the meridian plane plus the axisymmetric term `∂_v|d|/v`.
+
+[formula: pat-torus-sdf-laplacian] -/
+theorem torus_sdf_laplacian {c u : V3} (hu : u ⬝ᵥ u = 1) (R r : ℝ) {x : V3}
+    (hv : (x - c) ⨯₃ u ≠ 0)
+    (hd : (vnorm ((x - c) ⨯₃ u) - R) ^ 2 + ((x - c) ⬝ᵥ u) ^ 2 ≠ 0) :
+    ∃ D : V3 →L[ℝ] V3, HasFDerivAt (torusGrad c u R r) D x ∧
+      trace3 D = Real.sign r * (1 / coreDist c u R x +
+        (vnorm ((x - c) ⨯₃ u) - R) / (coreDist c u R x * vnorm ((x - c) ⨯₃ u))) := by
+  set v := vnorm ((x - c) ⨯₃ u) with hvdef
+  set q := coreDist c u R x with hqdef
+  set z := (x - c) ⬝ᵥ u with hzdef
+  set P := (x - c) - z • u with hPdef
+  have hvpos : 0 < v := vnorm_pos_iff.mpr hv
+  have hqpos : 0 < q := Real.sqrt_pos.mpr (lt_of_le_of_ne (by positivity) (Ne.symm hd))
+  have hq2 : q ^ 2 = (v - R) ^ 2 + z ^ 2 := Real.sq_sqrt (by positivity)
+  have hPP : P ⬝ᵥ P = v ^ 2 := proj_sq hu (x - c)
+  have hPu : P ⬝ᵥ u = 0 := proj_dot_u hu (x - c)
+  -- derivatives of the pieces
+  have hV := hasFDerivAt_axisDist hu hv
+  have hZ : HasFDerivAt (fun y => (y - c) ⬝ᵥ u) (dualOf u) x := by
+    refine ((hasFDerivAt_dot_const u x).sub_const (u ⬝ᵥ c)).congr_of_eventuallyEq
+      (Filter.Eventually.of_forall fun y => ?_)
+    simp [sub_dotProduct, dotProduct_comm u]
+  have hQ : HasFDerivAt (fun y => coreDist c u R y) (dualOf (torusGrad c u R 1 x)) x := by
+    have := (torus_sdf_gradient hu R 1 hv hd).add_const 1
+    refine this.congr_of_eventuallyEq (Filter.Eventually.of_forall fun y => ?_)
+    simp [torusSDF, coreDist]
+  have hPd : HasFDerivAt (fun y => (y - c) - ((y - c) ⬝ᵥ u) • u)
+      (ContinuousLinearMap.id ℝ V3 - (dualOf u).smulRight u) x :=
+    ((hasFDerivAt_id x).sub_const c).sub (hZ.smul_const u)
+  have hqv : HasFDerivAt (fun y => coreDist c u R y * vnorm ((y - c) ⨯₃ u))
+      (q • dualOf (v⁻¹ • P) + v • dualOf (torusGrad c u R 1 x)) x := hQ.mul hV
+  have hφ1 := (hV.sub_const R).mul (hasFDerivAt_inv_comp hqv (by positivity))
+  have hφ2 := hZ.mul (hasFDerivAt_inv_comp hQ hqpos.ne')
+  have hG := ((hφ1.smul hPd).add (hφ2.smul_const u)).const_smul (Real.sign r)
+  refine ⟨_, hG.congr_of_eventuallyEq (Filter.Eventually.of_forall fun y => ?_), ?_⟩
+  · simp only [torusGrad, div_eq_mul_inv, mul_inv, Pi.smul_apply, Pi.add_apply, Pi.mul_apply]
+    congr 1
+  · rw [trace3_smul, trace3_add, trace3_add, trace3_smul, trace3_sub, trace3_id,
+      trace3_smulRight, trace3_smulRight, trace3_smulRight]
+    have hT : torusGrad c u R 1 x = ((v - R) / (q * v)) • P + (z / q) • u := by
+      simp [torusGrad, Real.sign_one, hvdef, hqdef, hzdef, hPdef]
+    simp only [Pi.mul_apply, ContinuousLinearMap.add_apply, ContinuousLinearMap.smul_apply,
+      _root_.smul_apply, dualOf_apply, smul_eq_mul]
+    simp only [← hvdef, ← hqdef, ← hzdef, ← hPdef, hT, add_dotProduct, dotProduct_add,
+      smul_dotProduct, dotProduct_smul, hu, hPP, hPu, dotProduct_comm u P, smul_eq_mul,
+      ContinuousLinearMap.one_apply, (dualOf_smul), map_smul]
+    have hv0 := hvpos.ne'
+    have hq0 := hqpos.ne'
+    field_simp
+    linear_combination (Real.sign r * v) * hq2
+
 end PAT
 
 end DdgProofs
