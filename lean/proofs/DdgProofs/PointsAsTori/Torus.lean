@@ -309,6 +309,73 @@ theorem torusSDF_stable_eq {c u o : V3} (hu : u ⬝ᵥ u = 1) (hm : (o - c) ⬝�
   obtain ⟨h1, h2⟩ := torus_sdf_stable hu hm R x hpos
   rw [torusSDF, h1, h2]
 
+/-- **Stable form of `v − v_o`, any expansion point** (SPEC §7.3, generalizing `torus_sdf_stable`):
+for any `o` (no condition `(o − c)·u = 0`), with `m = o − c`, `δ = x − o`,
+`v² − v_o² = |δ|² + 2 δ·m − (δ·u)² − 2 (δ·u)(m·u)` and `v − v_o = (v² − v_o²)/(v + v_o)` where
+`v + v_o ≠ 0`, with `v = |(x − c) × u|`, `v_o = |(o − c) × u|`; the axial coordinate is
+`(x − c)·u = δ·u + m·u`.
+
+[formula: pat-torus-sdf-stable] -/
+theorem torus_sdf_stable_general {c u o : V3} (hu : u ⬝ᵥ u = 1) (x : V3)
+    (hpos : vnorm ((x - c) ⨯₃ u) + vnorm ((o - c) ⨯₃ u) ≠ 0) :
+    vnorm ((x - c) ⨯₃ u) - vnorm ((o - c) ⨯₃ u) =
+      ((x - o) ⬝ᵥ (x - o) + 2 * ((x - o) ⬝ᵥ (o - c)) - ((x - o) ⬝ᵥ u) ^ 2 -
+        2 * (((x - o) ⬝ᵥ u) * ((o - c) ⬝ᵥ u))) /
+        (vnorm ((x - c) ⨯₃ u) + vnorm ((o - c) ⨯₃ u)) ∧
+    (x - c) ⬝ᵥ u = (x - o) ⬝ᵥ u + (o - c) ⬝ᵥ u := by
+  have hsplit : x - c = (x - o) + (o - c) := by abel
+  have hz : (x - c) ⬝ᵥ u = (x - o) ⬝ᵥ u + (o - c) ⬝ᵥ u := by rw [hsplit, add_dotProduct]
+  refine ⟨?_, hz⟩
+  rw [eq_div_iff hpos]
+  have hv2 : vnorm ((x - c) ⨯₃ u) ^ 2 = (x - c) ⬝ᵥ (x - c) - ((x - c) ⬝ᵥ u) ^ 2 := by
+    rw [vnorm_sq, cross_unit_sq hu]
+  have hw2 : vnorm ((o - c) ⨯₃ u) ^ 2 = (o - c) ⬝ᵥ (o - c) - ((o - c) ⬝ᵥ u) ^ 2 := by
+    rw [vnorm_sq, cross_unit_sq hu]
+  have hexp : (x - c) ⬝ᵥ (x - c) = (x - o) ⬝ᵥ (x - o) + 2 * ((x - o) ⬝ᵥ (o - c)) +
+      (o - c) ⬝ᵥ (o - c) := by
+    rw [hsplit]; simp only [add_dotProduct, dotProduct_add, dotProduct_comm (o - c) (x - o)]; ring
+  rw [hz] at hv2
+  nlinarith [hv2, hw2, hexp]
+
+/-- **The second cancellation** (`‖d‖ − |r|`, SPEC §7.3): for `d = (d₁ + e₁, d₂ + e₂)`,
+`√((d₁ + e₁)² + (d₂ + e₂)²) − |r| = (K + 2 (d₁ e₁ + d₂ e₂) + e₁² + e₂²)/(√(…) + |r|)` with
+`K = d₁² + d₂² − r²` (computed once, without `O(r)` cancellation), where the denominator is
+non-zero.
+
+[formula: pat-torus-sdf-stable] -/
+theorem stable_core_dist (d₁ d₂ e₁ e₂ r : ℝ)
+    (h : √((d₁ + e₁) ^ 2 + (d₂ + e₂) ^ 2) + |r| ≠ 0) :
+    √((d₁ + e₁) ^ 2 + (d₂ + e₂) ^ 2) - |r| =
+      ((d₁ ^ 2 + d₂ ^ 2 - r ^ 2) + 2 * (d₁ * e₁ + d₂ * e₂) + (e₁ ^ 2 + e₂ ^ 2)) /
+        (√((d₁ + e₁) ^ 2 + (d₂ + e₂) ^ 2) + |r|) := by
+  rw [eq_div_iff h]
+  have hs := Real.sq_sqrt (show 0 ≤ (d₁ + e₁) ^ 2 + (d₂ + e₂) ^ 2 by positivity)
+  linear_combination hs - sq_abs r
+
+/-- **The torus SDF in the doubly stable form** (the F32Stable kernel, SPEC §7.3): expanded around
+any `o`, with `d₁ = v_o − R`, `d₂ = (o − c)·u`, `e₁ = (v² − v_o²)/(v + v_o)`, `e₂ = (x − o)·u`
+and `K = d₁² + d₂² − r²`,
+`g(x) = sgn(r) (K + 2 (d₁ e₁ + d₂ e₂) + e₁² + e₂²)/(√((d₁ + e₁)² + (d₂ + e₂)²) + |r|)`.
+No assumption on `o`; the denominators are assumed non-zero.
+
+[formula: pat-torus-sdf-stable] -/
+theorem torusSDF_stable_general {c u o : V3} (hu : u ⬝ᵥ u = 1) (R r : ℝ) (x : V3)
+    {d₁ d₂ e₁ e₂ : ℝ}
+    (hd₁ : d₁ = vnorm ((o - c) ⨯₃ u) - R) (hd₂ : d₂ = (o - c) ⬝ᵥ u)
+    (he₁ : e₁ = ((x - o) ⬝ᵥ (x - o) + 2 * ((x - o) ⬝ᵥ (o - c)) - ((x - o) ⬝ᵥ u) ^ 2 -
+        2 * (((x - o) ⬝ᵥ u) * ((o - c) ⬝ᵥ u))) /
+        (vnorm ((x - c) ⨯₃ u) + vnorm ((o - c) ⨯₃ u)))
+    (he₂ : e₂ = (x - o) ⬝ᵥ u)
+    (hpos : vnorm ((x - c) ⨯₃ u) + vnorm ((o - c) ⨯₃ u) ≠ 0)
+    (hq : √((d₁ + e₁) ^ 2 + (d₂ + e₂) ^ 2) + |r| ≠ 0) :
+    torusSDF c u R r x = Real.sign r *
+      (((d₁ ^ 2 + d₂ ^ 2 - r ^ 2) + 2 * (d₁ * e₁ + d₂ * e₂) + (e₁ ^ 2 + e₂ ^ 2)) /
+        (√((d₁ + e₁) ^ 2 + (d₂ + e₂) ^ 2) + |r|)) := by
+  obtain ⟨h1, h2⟩ := torus_sdf_stable_general (c := c) (u := u) (o := o) hu x hpos
+  have hv : vnorm ((x - c) ⨯₃ u) - R = d₁ + e₁ := by rw [hd₁, he₁, ← h1]; ring
+  have hz : (x - c) ⬝ᵥ u = d₂ + e₂ := by rw [h2, hd₂, he₂]; ring
+  rw [torusSDF_eq, coreDist, hv, hz, ← stable_core_dist d₁ d₂ e₁ e₂ r hq]
+
 /-! ## Contact of the fitted torus with the patch -/
 
 /-- **The fitted torus passes through `o = Q*(0,0)`** (SPEC §7.1, contact): with
