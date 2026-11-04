@@ -26,7 +26,7 @@ use super::truth::MeshTruth;
 use crate::features::{FeatureOrder, FeatureScratch, neighborhood_features, neighborhood_features_f64};
 use crate::network::{scale_outputs, scale_outputs_f64};
 use crate::PatError;
-use burn::tensor::DType;
+use burn::tensor::{DType, Tensor};
 use rayon::prelude::*;
 
 /// Options of a step.
@@ -45,6 +45,9 @@ pub struct StepOptions {
     /// Neighborhoods per launch of the untaped forward pass on the GPU (pass 2); 0: `network_chunk`.
     /// Ignored on the CPU.
     pub forward_chunk: usize,
+    /// Replay the network batches of passes 2 and 4 as captured CUDA graphs (bitwise the same
+    /// results as launching them one by one; removes the per-op host dispatch). Ignored on the CPU.
+    pub gpu_graphs: bool,
     /// Fixed number of gradient groups (pass 4); results depend on it, not on the threads.
     pub groups: usize,
 }
@@ -58,6 +61,7 @@ impl Default for StepOptions {
             reference_padding: false,
             network_chunk: 4,
             forward_chunk: 0,
+            gpu_graphs: true,
             groups: 64,
         }
     }
@@ -421,9 +425,18 @@ pub fn step_planned(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sp: &Sl
         return Ok(out);
     }
     let mut grads = if gpu { gpu_backprop(params, ctx, prep, &rows, &gy, o)? } else { backprop(params, ctx, prep, &rows, &gy, o)? };
-    // non-finite entries
+    // non-finite entries (on the GPU first one device-side test, `Σ 0·g` is NaN iff an entry is
+    // not finite, instead of one read-back per tensor)
     let mut bad = bad_gy;
-    for g in grads.iter_mut() {
+    let any_bad = !gpu || {
+        let z: Vec<Tensor<1>> = grads.iter().map(|g| match g {
+            PT::D1(t) => t.clone().mul_scalar(0.0).sum(),
+            PT::D2(t) => t.clone().mul_scalar(0.0).sum(),
+        }).collect();
+        let v = to_f64(Tensor::cat(z, 0));
+        v.iter().any(|x| !x.is_finite())
+    };
+    for g in grads.iter_mut().filter(|_| any_bad) {
         let v = g.to_f64();
         let nb = v.iter().filter(|x| !x.is_finite()).count();
         if nb > 0 {

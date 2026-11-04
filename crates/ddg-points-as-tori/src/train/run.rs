@@ -263,6 +263,8 @@ pub struct StepLog {
     pub seconds: [f64; 6],
     /// Skipped (non-finite).
     pub skipped: bool,
+    /// Seconds the training loop waited for the prefetched data of this step.
+    pub wait: f64,
     /// Validation (distance, eikonal), at epoch ends.
     pub validation: Option<(f64, f64)>,
 }
@@ -271,9 +273,9 @@ impl StepLog {
     fn json(&self) -> String {
         let v = self.validation.map(|(d, e)| format!(",\"val_distance\":{d:e},\"val_eikonal\":{e:e}")).unwrap_or_default();
         format!(
-            "{{\"phase\":{},\"phase_name\":\"{}\",\"epoch\":{},\"step\":{},\"shape\":\"{}\",\"row\":{},\"lr\":{:e},\"loss\":{:e},\"distance\":{:e},\"eikonal\":{:e},\"queries\":{},\"pairs\":{},\"rows_fwd\":{},\"rows_bwd\":{},\"t_prep\":{:.4},\"t_plan\":{:.4},\"t_fwd\":{:.4},\"t_loss\":{:.4},\"t_bwd\":{:.4},\"t_upd\":{:.4},\"skipped\":{}{v}}}",
+            "{{\"phase\":{},\"phase_name\":\"{}\",\"epoch\":{},\"step\":{},\"shape\":\"{}\",\"row\":{},\"lr\":{:e},\"loss\":{:e},\"distance\":{:e},\"eikonal\":{:e},\"queries\":{},\"pairs\":{},\"rows_fwd\":{},\"rows_bwd\":{},\"t_prep\":{:.4},\"t_plan\":{:.4},\"t_fwd\":{:.4},\"t_loss\":{:.4},\"t_bwd\":{:.4},\"t_upd\":{:.4},\"t_wait\":{:.4},\"skipped\":{}{v}}}",
             self.phase, self.phase_name, self.epoch, self.step, self.shape, self.row, self.lr, self.loss, self.distance, self.eikonal,
-            self.queries, self.pairs, self.rows.0, self.rows.1, self.seconds[0], self.seconds[1], self.seconds[2], self.seconds[3], self.seconds[4], self.seconds[5], self.skipped
+            self.queries, self.pairs, self.rows.0, self.rows.1, self.seconds[0], self.seconds[1], self.seconds[2], self.seconds[3], self.seconds[4], self.seconds[5], self.wait, self.skipped
         )
     }
 }
@@ -655,7 +657,9 @@ pub fn train_on(
         // a burn-cuda failure (out of memory, a lost device) surfaces as a panic at the next read
         // back: it is caught here and returned as an error (the run resumes from its checkpoint)
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), PatError> {
+            let mut tw = std::time::Instant::now();
             for ev in &erx {
+                let waited = tw.elapsed().as_secs_f64();
                 let ev = match ev {
                     Ok(ev) => ev,
                     Err(PatError::Backend { reason }) if reason == "stopped" => break,
@@ -690,7 +694,7 @@ pub fn train_on(
                     Ev::Shape { rows_without_faces } => report.rows_without_faces += rows_without_faces,
                     Ev::Slice { pi, epoch, pos, name, lo, prep, plan, empty, t_prep } => {
                         let ph = &opts.curriculum.phases[pi];
-                        let mut rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, shape: name, row: lo, ..Default::default() };
+                        let mut rec = StepLog { phase: pi, phase_name: ph.name.clone(), epoch, shape: name, row: lo, wait: waited, ..Default::default() };
                         let lr = learning_rate(opts.schedule, adam.count, ph.lr, ph.warmup, phase_steps);
                         rec.lr = lr;
                         if empty {
@@ -730,6 +734,7 @@ pub fn train_on(
                         rec.step = gstep;
                         let _ = writeln!(log, "{}", rec.json());
                         progress(&rec);
+                        tw = std::time::Instant::now();
                         if opts.max_steps.is_some_and(|m| gstep >= m) {
                             // as an interrupted shape: the checkpoint resumes at the next one
                             cur = Cursor { phase: pi, epoch, done: pos + 1, step: gstep, ..cur };

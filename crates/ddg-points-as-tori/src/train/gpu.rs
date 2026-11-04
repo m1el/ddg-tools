@@ -378,43 +378,101 @@ fn groups_for(n: usize, groups: usize) -> usize {
 /// (`[g, n/g, din] · [1, din, dout]`), so that the weight gradient is `g` partial products summed
 /// by a short reduction (a split-K by hand; burn's folded `[din, n]·[n, dout]` weight gradient runs
 /// on a few SMs at these shapes), and the bias through [`bcast`].
-fn lin_split(x: Tensor<2>, l: &burn::nn::Linear, groups: usize) -> Tensor<2> {
+fn lin_split(x: Tensor<2>, w: &Tensor<2>, bias: &Tensor<1>, groups: usize) -> Tensor<2> {
     let [n, din] = x.dims();
-    let w = l.weight.val();
     let dout = w.dims()[1];
     let g = groups_for(n, groups);
-    let y = x.reshape([g, n / g, din]).matmul(w.unsqueeze::<3>());
-    match &l.bias {
-        Some(b) => (y + bcast(b.val(), g)).reshape([n, dout]),
-        None => y.reshape([n, dout]),
-    }
+    let y = x.reshape([g, n / g, din]).matmul(w.clone().unsqueeze::<3>());
+    (y + bcast(bias.clone(), g)).reshape([n, dout])
 }
 
 /// burn's LayerNorm (the backend's default `layer_norm`: mean, centered, two-pass variance,
 /// `√(var + ε)`, scale, shift; the same operations) on `x` `[n, e]` viewed as `[g, n/g, e]`, with
 /// the scale and shift through [`bcast`].
-fn ln_split(x: Tensor<2>, ln: &burn::nn::LayerNorm, groups: usize) -> Tensor<2> {
+fn ln_split(x: Tensor<2>, gamma: &Tensor<1>, beta: &Tensor<1>, groups: usize) -> Tensor<2> {
     let [n, e] = x.dims();
     let g = groups_for(n, groups);
     let x = x.reshape([g, n / g, e]);
     let mean = x.clone().mean_dim(2);
     let c = x - mean;
     let var = (c.clone() * c.clone()).mean_dim(2);
-    let y = c / (var + crate::network::LAYER_NORM_EPS).sqrt() * bcast(ln.gamma.val(), g);
-    let y = match &ln.beta {
-        Some(b) => y + bcast(b.val(), g),
-        None => y,
-    };
+    let y = c / (var + crate::network::LAYER_NORM_EPS).sqrt() * bcast(gamma.clone(), g) + bcast(beta.clone(), g);
     y.reshape([n, e])
+}
+
+/// The parameters as plain tensors in the canonical order of [`NetParams`] (input, input norm,
+/// blocks: norm1, q, k, v, out, norm2, ffn1, ffn2; final norm, head; kernel before bias, scale
+/// before shift).
+pub struct FlatParams<'a> {
+    d2: Vec<&'a Tensor<2>>,
+    d1: Vec<&'a Tensor<1>>,
+}
+
+impl<'a> FlatParams<'a> {
+    /// From parameter tensors in canonical order (`8 + 16·layers` of them).
+    pub fn new(items: &'a [PT]) -> Result<FlatParams<'a>, PatError> {
+        let (mut d2, mut d1) = (Vec::new(), Vec::new());
+        for p in items {
+            match p {
+                PT::D2(t) => d2.push(t),
+                PT::D1(t) => d1.push(t),
+            }
+        }
+        // per block 6 kernels and 10 vectors; input, head: 1 kernel 1 bias; norms: 2 vectors
+        if d2.len() < 2 || (d2.len() - 2) % 6 != 0 || d1.len() != 2 + 4 + 10 * ((d2.len() - 2) / 6) {
+            return Err(PatError::Weights { reason: format!("{} kernels and {} vectors are not a network", d2.len(), d1.len()) });
+        }
+        Ok(FlatParams { d2, d1 })
+    }
+
+    fn layers(&self) -> usize {
+        (self.d2.len() - 2) / 6
+    }
 }
 
 /// The network of [`crate::network::burn::PatNet::forward`] (same parameters, same operations up to
 /// round-off: pre-LN blocks, attention scores divided by `√d_k` after the product, padded keys
 /// filled with burn's `−1e4`, softmax, GELU-tanh) with the linears and norms of [`lin_split`] and
 /// [`ln_split`] on `[groups, rows, ·]` views, whose parameter gradients reduce fast on the GPU.
-/// Raw outputs `[B, 6]` of features `[B, T, 6]`.
+/// Raw outputs `[B, 6]` of features `[B, T, 6]`. The pad mask, if given, fills padded keys; an
+/// all-false mask gives the same values as none.
 ///
 /// [formula: pat-network]
+pub fn forward_flat(p: &FlatParams<'_>, heads: usize, x: Tensor<3>, mask_pad: Option<Tensor<2, burn::tensor::Bool>>, groups: usize) -> Tensor<2> {
+    use burn::tensor::activation::{gelu_approximate, softmax};
+    let [b, t, c] = x.dims();
+    let n = b * t;
+    let g = groups;
+    let (k2, k1) = (&p.d2, &p.d1);
+    let h0 = lin_split(x.reshape([n, c]), k2[0], k1[0], g);
+    let e = h0.dims()[1];
+    let d = e / heads;
+    let mut h = ln_split(h0, k1[1], k1[2], g);
+    let mask = mask_pad.map(|m| m.reshape([b, 1, 1, t]));
+    for l in 0..p.layers() {
+        let (w, v) = (&k2[1 + 6 * l..7 + 6 * l], &k1[3 + 10 * l..13 + 10 * l]);
+        // v: norm1 scale, shift, q b, k b, v b, out b, norm2 scale, shift, ffn1 b, ffn2 b
+        let a = ln_split(h.clone(), v[0], v[1], g);
+        let split = |y: Tensor<2>| y.reshape([b, t, heads, d]).swap_dims(1, 2);
+        let q = split(lin_split(a.clone(), w[0], v[2], g));
+        let kk = split(lin_split(a.clone(), w[1], v[3], g));
+        let vv = split(lin_split(a, w[2], v[4], g));
+        let mut sc = q.matmul(kk.transpose()).div_scalar((d as f32).sqrt());
+        if let Some(m) = &mask {
+            sc = sc.mask_fill(m.clone(), -1.0e4);
+        }
+        let ctx = softmax(sc, 3).matmul(vv).swap_dims(1, 2).reshape([n, e]);
+        h = h + lin_split(ctx, w[3], v[5], g);
+        let f = ln_split(h.clone(), v[6], v[7], g);
+        h = h + lin_split(gelu_approximate(lin_split(f, w[4], v[8], g)), w[5], v[9], g);
+    }
+    let nl = p.layers();
+    let h = ln_split(h, k1[3 + 10 * nl], k1[4 + 10 * nl], g);
+    let center = h.reshape([b, t, e]).narrow(1, 0, 1).reshape([b, e]);
+    lin_split(center, k2[1 + 6 * nl], k1[5 + 10 * nl], 1)
+}
+
+/// [`forward_flat`] on the parameters of a built [`crate::network::burn::PatNet`] (tests).
 pub fn forward_split(
     net: &crate::network::burn::PatNet,
     heads: usize,
@@ -422,41 +480,221 @@ pub fn forward_split(
     mask_pad: Option<Tensor<2, burn::tensor::Bool>>,
     groups: usize,
 ) -> Tensor<2> {
-    use burn::tensor::activation::{gelu_approximate, softmax};
-    let [b, t, c] = x.dims();
-    let n = b * t;
-    let g = groups;
-    let h0 = lin_split(x.reshape([n, c]), &net.input, g);
-    let e = h0.dims()[1];
-    let d = e / heads;
-    let mut h = ln_split(h0, &net.input_norm, g);
-    let mask = mask_pad.map(|m| m.reshape([b, 1, 1, t]));
+    let lin = |l: &burn::nn::Linear| -> [PT; 2] {
+        [
+            PT::D2(l.weight.val()),
+            PT::D1(l.bias.as_ref().map(|b| b.val()).unwrap_or_else(|| l.weight.val().narrow(0, 0, 1).reshape([l.weight.dims()[1]]).zeros_like())),
+        ]
+    };
+    let norm = |n: &burn::nn::LayerNorm| -> [PT; 2] {
+        [PT::D1(n.gamma.val()), PT::D1(n.beta.as_ref().map(|b| b.val()).unwrap_or_else(|| n.gamma.val().zeros_like()))]
+    };
+    let mut items: Vec<PT> = Vec::new();
+    items.extend(lin(&net.input));
+    items.extend(norm(&net.input_norm));
     for blk in &net.blocks {
-        let a = ln_split(h.clone(), &blk.norm1, g);
-        let split = |y: Tensor<2>| y.reshape([b, t, heads, d]).swap_dims(1, 2);
-        let q = split(lin_split(a.clone(), &blk.attention.query, g));
-        let k = split(lin_split(a.clone(), &blk.attention.key, g));
-        let v = split(lin_split(a, &blk.attention.value, g));
-        let mut sc = q.matmul(k.transpose()).div_scalar((d as f32).sqrt());
-        if let Some(m) = &mask {
-            sc = sc.mask_fill(m.clone(), -1.0e4);
+        items.extend(norm(&blk.norm1));
+        for l in [&blk.attention.query, &blk.attention.key, &blk.attention.value, &blk.attention.output] {
+            items.extend(lin(l));
         }
-        let ctx = softmax(sc, 3).matmul(v).swap_dims(1, 2).reshape([n, e]);
-        h = h + lin_split(ctx, &blk.attention.output, g);
-        let f = ln_split(h.clone(), &blk.norm2, g);
-        h = h + lin_split(gelu_approximate(lin_split(f, &blk.ffn1, g)), &blk.ffn2, g);
+        items.extend(norm(&blk.norm2));
+        items.extend(lin(&blk.ffn1));
+        items.extend(lin(&blk.ffn2));
     }
-    let h = ln_split(h, &net.final_norm, g);
-    let center = h.reshape([b, t, e]).narrow(1, 0, 1).reshape([b, e]);
-    lin_split(center, &net.head, 1)
+    items.extend(norm(&net.final_norm));
+    items.extend(lin(&net.head));
+    match FlatParams::new(&items) {
+        Ok(fp) => forward_flat(&fp, heads, x, mask_pad, groups),
+        Err(_) => net.forward(x, None),
+    }
 }
 
-/// [`super::net::forward`] through [`forward_split`].
-fn forward_rows(net: &crate::network::burn::PatNet, heads: usize, ctx: &Ctx, f: &super::net::RowFeatures, lo: usize, hi: usize) -> Tensor<2> {
+/// Network inputs of rows `[lo, hi)` (features and, if any row is short, the pad mask) on `ctx`.
+fn row_inputs(ctx: &Ctx, f: &super::net::RowFeatures, lo: usize, hi: usize) -> (Tensor<3>, Option<Tensor<2, burn::tensor::Bool>>) {
     let (k, b) = (f.k, hi - lo);
     let x = ctx.t3(f.feats[lo * k * 6..hi * k * 6].to_vec(), [b, k, 6]);
     let mask = f.pad.as_ref().map(|p| Tensor::<2, burn::tensor::Bool>::from_data(TensorData::new(p[lo * k..hi * k].to_vec(), [b, k]), &ctx.dev));
-    forward_split(net, heads, x, mask, row_groups())
+    (x, mask)
+}
+
+// ------------------------------------------------------------------------------------------------
+// CUDA graphs of the network batches
+// ------------------------------------------------------------------------------------------------
+
+type Shared<T> = std::rc::Rc<std::cell::RefCell<T>>;
+type BoxFn<T> = Box<dyn FnMut() -> T>;
+
+/// A captured network batch and its stable input buffers.
+struct Slot<T> {
+    graph: burn::tensor::Graph<T, BoxFn<T>>,
+    x: Shared<Tensor<3>>,
+    w: Option<Shared<Tensor<2>>>,
+    mask: Option<Shared<Tensor<2, burn::tensor::Bool>>>,
+}
+
+/// The graphs of one device and network (per thread: GPU steps run on one dispatching thread).
+struct GraphState {
+    key: String,
+    params: Shared<Vec<PT>>,
+    fwd: std::collections::HashMap<bool, Slot<Tensor<2>>>,
+    bwd: std::collections::HashMap<bool, Slot<Vec<PT>>>,
+}
+
+thread_local! {
+    static GRAPHS: std::cell::RefCell<Option<GraphState>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Overwrite `dst` in place (its buffer is the one a graph reads) with `src` of the same shape.
+fn write_in_place<const D: usize>(dst: &mut Tensor<D>, src: Tensor<D>) {
+    let dims = dst.dims();
+    let ranges: [std::ops::Range<usize>; D] = std::array::from_fn(|i| 0..dims[i]);
+    dst.inplace(|t| t.slice_assign(ranges, src));
+}
+
+fn write_mask(dst: &mut Tensor<2, burn::tensor::Bool>, src: Tensor<2, burn::tensor::Bool>) {
+    let [a, b] = dst.dims();
+    dst.inplace(|t| t.slice_assign([0..a, 0..b], src));
+}
+
+/// A uniquely owned device copy of `p` (a stable buffer).
+fn fresh(ctx: &Ctx, p: &PT) -> PT {
+    let v = p.to_f32();
+    match p {
+        PT::D1(t) => PT::D1(Tensor::<1>::from_data(TensorData::new(v, t.dims()), (&ctx.dev, ctx.dtype))),
+        PT::D2(t) => PT::D2(Tensor::<2>::from_data(TensorData::new(v, t.dims()), (&ctx.dev, ctx.dtype))),
+    }
+}
+
+fn graph_key(params: &NetParams, ctx: &Ctx, o: &StepOptions, k: usize) -> String {
+    format!("{:?}|{:?}|{}|{}|{}|{}", ctx.dev, params.cfg, o.network_chunk, o.forward_chunk, row_groups(), k)
+}
+
+/// Run `f` with the thread's graph state for `params` (created on first use, recreated when the
+/// device, network or batch shapes change), with the stable parameter buffers set to `params`.
+fn with_graphs<R>(params: &NetParams, ctx: &Ctx, o: &StepOptions, k: usize, f: impl FnOnce(&mut GraphState) -> R) -> R {
+    let key = graph_key(params, ctx, o, k);
+    GRAPHS.with(|cell| {
+        let mut st = cell.borrow_mut();
+        if st.as_ref().is_none_or(|s| s.key != key) {
+            *st = Some(GraphState {
+                key,
+                params: std::rc::Rc::new(std::cell::RefCell::new(params.items.iter().map(|p| fresh(ctx, &p.value)).collect())),
+                fwd: Default::default(),
+                bwd: Default::default(),
+            });
+        } else if let Some(s) = st.as_mut() {
+            let mut ps = s.params.borrow_mut();
+            for (dst, src) in ps.iter_mut().zip(&params.items) {
+                match (dst, &src.value) {
+                    (PT::D1(d), PT::D1(v)) => write_in_place(d, v.clone()),
+                    (PT::D2(d), PT::D2(v)) => write_in_place(d, v.clone()),
+                    _ => {}
+                }
+            }
+        }
+        f(st.as_mut().expect("graph state was just set"))
+    })
+}
+
+fn batch_inputs(ctx: &Ctx, f: &super::net::RowFeatures, lo: usize, hi: usize) -> (Tensor<3>, Tensor<2, burn::tensor::Bool>) {
+    let (x, mask) = row_inputs(ctx, f, lo, hi);
+    let mask = mask.unwrap_or_else(|| Tensor::<2, burn::tensor::Bool>::from_data(TensorData::new(vec![false; (hi - lo) * f.k], [hi - lo, f.k]), &ctx.dev));
+    (x, mask)
+}
+
+/// Raw outputs of `nb` forward batches through a captured graph.
+fn coefficients_graph(params: &NetParams, ctx: &Ctx, sub: &super::net::RowFeatures, batch: usize, nb: usize, o: &StepOptions) -> Result<Vec<f64>, PatError> {
+    let heads = params.cfg.heads;
+    let has_mask = sub.pad.is_some();
+    with_graphs(params, ctx, o, sub.k, |st| {
+        let mut raw = Vec::with_capacity(6 * batch * nb);
+        for b in 0..nb {
+            let (x, mask) = batch_inputs(ctx, sub, b * batch, (b + 1) * batch);
+            if !st.fwd.contains_key(&has_mask) {
+                let (xs, ms) =
+                    (std::rc::Rc::new(std::cell::RefCell::new(x.clone())), has_mask.then(|| std::rc::Rc::new(std::cell::RefCell::new(mask.clone()))));
+                let (p, xc, mc) = (st.params.clone(), xs.clone(), ms.clone());
+                let body: BoxFn<Tensor<2>> = Box::new(move || {
+                    let ps = p.borrow();
+                    let fp = FlatParams::new(&ps).expect("checked parameter layout");
+                    forward_flat(&fp, heads, xc.borrow().clone(), mc.as_ref().map(|m| m.borrow().clone()), row_groups())
+                });
+                let graph = burn::tensor::capture(&ctx.dev, body);
+                st.fwd.insert(has_mask, Slot { graph, x: xs, w: None, mask: ms });
+            } else if let Some(slot) = st.fwd.get(&has_mask) {
+                write_in_place(&mut slot.x.borrow_mut(), x);
+                if let Some(m) = &slot.mask {
+                    write_mask(&mut m.borrow_mut(), mask);
+                }
+            }
+            let slot = st.fwd.get_mut(&has_mask).ok_or_else(|| PatError::Backend { reason: "graph slot".into() })?;
+            // Safety: the graph's buffers (parameters, inputs, intermediates, output) are owned by
+            // the slot and the thread's state, written only on this thread, before the replay.
+            let y = unsafe { slot.graph.replay() };
+            raw.extend(to_f64(y.clone()));
+        }
+        FlatParams::new(&st.params.borrow()).map(|_| raw)
+    })
+}
+
+/// Pass 4 through a captured graph: the batch gradients, summed in batch order.
+fn backprop_graph(
+    params: &NetParams,
+    ctx: &Ctx,
+    sub: &super::net::RowFeatures,
+    w: &[f64],
+    batch: usize,
+    nb: usize,
+    o: &StepOptions,
+) -> Result<Vec<PT>, PatError> {
+    let heads = params.cfg.heads;
+    let has_mask = sub.pad.is_some();
+    with_graphs(params, ctx, o, sub.k, |st| {
+        let mut acc: Option<Vec<PT>> = None;
+        for b in 0..nb {
+            let (lo, hi) = (b * batch, (b + 1) * batch);
+            let (x, mask) = batch_inputs(ctx, sub, lo, hi);
+            let wt = ctx.t2(w[6 * lo..6 * hi].to_vec(), [batch, 6]);
+            if !st.bwd.contains_key(&has_mask) {
+                let xs = std::rc::Rc::new(std::cell::RefCell::new(x.clone()));
+                let ws = std::rc::Rc::new(std::cell::RefCell::new(wt.clone()));
+                let ms = has_mask.then(|| std::rc::Rc::new(std::cell::RefCell::new(mask.clone())));
+                let (p, xc, wc, mc) = (st.params.clone(), xs.clone(), ws.clone(), ms.clone());
+                let body: BoxFn<Vec<PT>> = Box::new(move || {
+                    let leaves: Vec<PT> = p.borrow().iter().map(|q| q.map(|t| t.autodiff().require_grad(), |t| t.autodiff().require_grad())).collect();
+                    let fp = FlatParams::new(&leaves).expect("checked parameter layout");
+                    let y = forward_flat(&fp, heads, xc.borrow().clone(), mc.as_ref().map(|m| m.borrow().clone()), row_groups());
+                    let g = (y * wc.borrow().clone()).sum_dim(1).sum_dim(0).backward();
+                    leaves
+                        .iter()
+                        .map(|l| match l {
+                            PT::D1(t) => PT::D1(t.grad(&g).unwrap_or_else(|| t.clone().detach().without_autodiff().zeros_like())),
+                            PT::D2(t) => PT::D2(t.grad(&g).unwrap_or_else(|| t.clone().detach().without_autodiff().zeros_like())),
+                        })
+                        .collect()
+                });
+                let graph = burn::tensor::capture(&ctx.dev, body);
+                st.bwd.insert(has_mask, Slot { graph, x: xs, w: Some(ws), mask: ms });
+            } else if let Some(slot) = st.bwd.get(&has_mask) {
+                write_in_place(&mut slot.x.borrow_mut(), x);
+                if let Some(ws) = &slot.w {
+                    write_in_place(&mut ws.borrow_mut(), wt);
+                }
+                if let Some(m) = &slot.mask {
+                    write_mask(&mut m.borrow_mut(), mask);
+                }
+            }
+            let slot = st.bwd.get_mut(&has_mask).ok_or_else(|| PatError::Backend { reason: "graph slot".into() })?;
+            // Safety: as in `coefficients_graph`; the outputs are consumed (copied into `acc`) before
+            // the next replay, which drains the queued copies first.
+            let g = unsafe { slot.graph.replay() };
+            acc = Some(match acc {
+                None => g.iter().map(|t| t.scale(1.0)).collect(),
+                Some(a) => a.iter().zip(g.iter()).map(|(x, y)| x.add(y)).collect(),
+            });
+        }
+        acc.ok_or_else(|| PatError::Backend { reason: "no rows to back-propagate".into() })
+    })
 }
 
 /// `sel` padded to a multiple of `batch` with copies of its first row, and the batch count.
@@ -477,10 +715,15 @@ pub fn coefficients(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[
     let (rows, nb) = padded(sel, batch);
     let sub = select_rows(&prep.feats, &rows);
     let raw = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Vec<f64>, PatError> {
-        let (net, _) = params.build(ctx, false)?;
+        if o.gpu_graphs {
+            return coefficients_graph(params, ctx, &sub, batch, nb, o);
+        }
+        let vals: Vec<PT> = params.items.iter().map(|p| p.value.clone()).collect();
+        let fp = FlatParams::new(&vals)?;
         let mut raw = Vec::with_capacity(6 * rows.len());
         for b in 0..nb {
-            raw.extend(to_f64(forward_rows(&net, params.cfg.heads, ctx, &sub, b * batch, (b + 1) * batch)));
+            let (x, mask) = row_inputs(ctx, &sub, b * batch, (b + 1) * batch);
+            raw.extend(to_f64(forward_flat(&fp, params.cfg.heads, x, mask, row_groups())));
         }
         Ok(raw)
     }))
@@ -501,11 +744,16 @@ pub fn backprop(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32]
     let mut w = gy.to_vec();
     w.resize(6 * rows.len(), 0.0);
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Vec<PT>, PatError> {
-        let (net, leaves) = params.build(ctx, true)?;
+        if o.gpu_graphs {
+            return backprop_graph(params, ctx, &sub, &w, batch, nb, o);
+        }
+        let leaves: Vec<PT> = params.items.iter().map(|p| p.value.map(|t| t.autodiff().require_grad(), |t| t.autodiff().require_grad())).collect();
+        let fp = FlatParams::new(&leaves)?;
         let mut acc: Option<Vec<PT>> = None;
         for b in 0..nb {
             let (lo, hi) = (b * batch, (b + 1) * batch);
-            let y = forward_rows(&net, params.cfg.heads, ctx, &sub, lo, hi);
+            let (x, mask) = row_inputs(ctx, &sub, lo, hi);
+            let y = forward_flat(&fp, params.cfg.heads, x, mask, row_groups());
             let wt = ctx.t2(w[6 * lo..6 * hi].to_vec(), [batch, 6]);
             let grads = (y * wt).sum_dim(1).sum_dim(0).backward();
             let g: Vec<PT> = leaves
@@ -526,6 +774,7 @@ pub fn backprop(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32]
 }
 
 #[cfg(test)]
+#[allow(clippy::type_complexity, clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
     use crate::fit::{EigenRule, SignRule};
@@ -896,6 +1145,91 @@ mod tests {
             let dg = g0.iter().zip(&g1).fold(0f64, |m, (a, b)| m.max((a - b).abs()));
             eprintln!("mask {mask}: outputs max |Δ| {dy:.2e}, gradients max |Δ|/max|g| {:.2e}", dg / gmax);
             assert!(dy < 1e-12 && dg / gmax < 1e-12, "forward_split differs from PatNet");
+        }
+    }
+
+    /// CUDA-graph capture of one network batch (forward with tape, backward, gradients) on stable
+    /// buffers refreshed in place: replays equal eager runs bitwise (measurement and check).
+    #[test]
+    #[ignore]
+    fn graph_replay_matches_eager() {
+        use std::cell::RefCell;
+        let Ok(ctx) = cuda_ctx(0) else { return };
+        let b: usize = std::env::var("PAT_B").ok().and_then(|v| v.parse().ok()).unwrap_or(256);
+        let t = 64usize;
+        let model = crate::Model::reference().unwrap();
+        let host = NetParams::from_model(&model, &Ctx { dev: crate::network::burn::cpu_device(), dtype: DType::F32 });
+        let upload = |p: &PT, scale: f64| -> PT {
+            let v: Vec<f32> = p.to_f32().iter().map(|x| (*x as f64 * scale) as f32).collect();
+            match p {
+                PT::D1(x) => PT::D1(Tensor::<1>::from_data(TensorData::new(v, x.dims()), &ctx.dev)),
+                PT::D2(x) => PT::D2(Tensor::<2>::from_data(TensorData::new(v, x.dims()), &ctx.dev)),
+            }
+        };
+        let mut s = 3u64;
+        let mut rnd = |n: usize| -> Vec<f32> { (0..n).map(|_| (lcg(&mut s) - 0.5) as f32).collect() };
+        let params = RefCell::new(host.items.iter().map(|p| upload(&p.value, 1.0)).collect::<Vec<PT>>());
+        let x = RefCell::new(Tensor::<3>::from_data(TensorData::new(rnd(b * t * 6), [b, t, 6]), &ctx.dev));
+        let w = RefCell::new(Tensor::<2>::from_data(TensorData::new(rnd(b * 6), [b, 6]), &ctx.dev));
+        let mask = RefCell::new(Tensor::<2, burn::tensor::Bool>::from_data(TensorData::new(vec![false; b * t], [b, t]), &ctx.dev));
+        let body = || -> Vec<PT> {
+            let leaves: Vec<PT> = params.borrow().iter().map(|p| p.map(|t| t.autodiff().require_grad(), |t| t.autodiff().require_grad())).collect();
+            let fp = FlatParams::new(&leaves).unwrap();
+            let y = forward_flat(&fp, 8, x.borrow().clone(), Some(mask.borrow().clone()), ROW_GROUPS);
+            let g = (y * w.borrow().clone()).sum_dim(1).sum_dim(0).backward();
+            leaves
+                .iter()
+                .map(|l| match l {
+                    PT::D1(t) => PT::D1(t.grad(&g).unwrap()),
+                    PT::D2(t) => PT::D2(t.grad(&g).unwrap()),
+                })
+                .collect()
+        };
+        let hash =
+            |g: &[PT]| -> u64 { g.iter().flat_map(|t| t.to_f32()).fold(0xcbf29ce484222325u64, |h, x| (h ^ x.to_bits() as u64).wrapping_mul(0x100000001b3)) };
+        let t0 = std::time::Instant::now();
+        let mut graph = burn::tensor::capture(&ctx.dev, body);
+        eprintln!("capture: {:.2} s, hardware graph: {}", t0.elapsed().as_secs_f64(), graph.is_hardware());
+        let refresh3 = |dst: &RefCell<Tensor<3>>, v: Vec<f32>| {
+            let d = dst.borrow().dims();
+            let src = Tensor::<3>::from_data(TensorData::new(v, d), &ctx.dev);
+            dst.borrow_mut().inplace(|t| t.slice_assign([0..d[0], 0..d[1], 0..d[2]], src));
+        };
+        let refresh2 = |dst: &RefCell<Tensor<2>>, v: Vec<f32>| {
+            let d = dst.borrow().dims();
+            let src = Tensor::<2>::from_data(TensorData::new(v, d), &ctx.dev);
+            dst.borrow_mut().inplace(|t| t.slice_assign([0..d[0], 0..d[1]], src));
+        };
+        for it in 0..4 {
+            refresh3(&x, rnd(b * t * 6));
+            refresh2(&w, rnd(b * 6));
+            // parameters changed in place too
+            {
+                let scale = 1.0 + 0.01 * it as f64;
+                let mut ps = params.borrow_mut();
+                for (dst, src) in ps.iter_mut().zip(&host.items) {
+                    let up = upload(&src.value, scale);
+                    match (dst, up) {
+                        (PT::D1(d), PT::D1(u)) => {
+                            let n = d.dims()[0];
+                            d.inplace(|t| t.slice_assign([0..n], u));
+                        }
+                        (PT::D2(d), PT::D2(u)) => {
+                            let [r, c] = d.dims();
+                            d.inplace(|t| t.slice_assign([0..r, 0..c], u));
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            let tr = std::time::Instant::now();
+            let hg = hash(unsafe { graph.replay() });
+            let t_replay = tr.elapsed().as_secs_f64();
+            let te = std::time::Instant::now();
+            let he = hash(&body());
+            let t_eager = te.elapsed().as_secs_f64();
+            eprintln!("iteration {it}: replay {hg:016x} ({:.1} ms), eager {he:016x} ({:.1} ms)", t_replay * 1e3, t_eager * 1e3);
+            assert_eq!(hg, he, "replay differs from eager");
         }
     }
 }

@@ -27,7 +27,8 @@
 //!   --no-resume           start fresh even if --out holds a checkpoint
 //!   --network-batch B     neighborhoods per network launch [256 on the GPU, 4 on the CPU]
 //!   --forward-batch F     neighborhoods per launch of the untaped forward pass on the GPU [= network batch]
-//!   --pair-chunk P        padded pairs per loss chunk [1048576 on the GPU, 65536 on the CPU]
+//!   --no-graphs           launch the network batches op by op instead of replaying CUDA graphs
+//!   --pair-chunk P        padded pairs per loss chunk [524288 on the GPU, 65536 on the CPU]
 //!   --phases a,b          only these phases (names), e.g. pretrain
 //!   --file F --shape I --steps N --reps R    (bench, compare)
 //!   --from DIR|FILE --to FILE                 (export)
@@ -66,6 +67,7 @@ struct Args {
     resume: bool,
     network_batch: Option<usize>,
     forward_batch: Option<usize>,
+    graphs: bool,
     pair_chunk: Option<usize>,
     phases: Option<Vec<String>>,
     file: String,
@@ -102,6 +104,7 @@ fn parse() -> Result<Args, PatError> {
         resume: true,
         network_batch: None,
         forward_batch: None,
+        graphs: true,
         pair_chunk: None,
         phases: None,
         file: "nice/blobs_train_mode0_0.npz".into(),
@@ -154,6 +157,7 @@ fn parse() -> Result<Args, PatError> {
             "--validate-every" => a.validate_every = num(val(&mut i)?, "--validate-every")?,
             "--no-resume" => a.resume = false,
             "--network-batch" => a.network_batch = Some(num(val(&mut i)?, "--network-batch")?.max(1) as usize),
+            "--no-graphs" => a.graphs = false,
             "--forward-batch" => a.forward_batch = Some(num(val(&mut i)?, "--forward-batch")?.max(1) as usize),
             "--pair-chunk" => a.pair_chunk = Some(num(val(&mut i)?, "--pair-chunk")?.max(1) as usize),
             "--phases" => a.phases = Some(val(&mut i)?.split(',').map(str::to_string).collect()),
@@ -195,7 +199,8 @@ fn step_options(a: &Args, gpu: bool) -> StepOptions {
     o.reference_padding = a.reference_padding;
     o.network_chunk = a.network_batch.unwrap_or(if gpu { 256 } else { 4 });
     o.forward_chunk = a.forward_batch.unwrap_or(0);
-    o.loss.pair_chunk = a.pair_chunk.unwrap_or(if gpu { 1 << 20 } else { 1 << 16 });
+    o.gpu_graphs = a.graphs;
+    o.loss.pair_chunk = a.pair_chunk.unwrap_or(if gpu { 1 << 19 } else { 1 << 16 });
     o
 }
 
@@ -505,10 +510,26 @@ fn eval(a: &Args) -> Result<(), PatError> {
     let ctx = ctx_for(&a.device)?;
     let gpu = on_gpu(&ctx);
     let pool = ddg_points_as_tori::pool::make_pool(host_threads(a, gpu))?;
-    let batch = if a.steps != 8 { a.steps } else if a.file.contains("pretraining") { 32 } else { 1024 };
+    let batch = if a.steps != 8 {
+        a.steps
+    } else if a.file.contains("pretraining") {
+        32
+    } else {
+        1024
+    };
     let o = step_options(a, gpu);
     let t = std::time::Instant::now();
-    let (d, e) = ddg_points_as_tori::train::run::validate_on(&NetParams::from_model(&model, &ctx), &ctx, &pool, &a.data.join(&a.file), &DataOptions { raw_normals: a.raw_normals, ..Default::default() }, &o, batch, a.seed, 0)?;
+    let (d, e) = ddg_points_as_tori::train::run::validate_on(
+        &NetParams::from_model(&model, &ctx),
+        &ctx,
+        &pool,
+        &a.data.join(&a.file),
+        &DataOptions { raw_normals: a.raw_normals, ..Default::default() },
+        &o,
+        batch,
+        a.seed,
+        0,
+    )?;
     eprintln!("eval {} on {} (batch {batch}): distance {d:.6}, eikonal {e:.6}, loss {:.6} ({:.1} s)", from.display(), a.file, d + e, t.elapsed().as_secs_f64());
     Ok(())
 }
