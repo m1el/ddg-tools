@@ -62,10 +62,10 @@ BOOLEAN_ITEMS = [
     ('SUBTRACT', "Difference", "The active cloud minus the partner"),
 ]
 SIGN_RULE_ITEMS = [
-    ('REFERENCE', "Reference", "The sign rule of the authors' program (the default; the torus of "
-     "a saddle point is the mirror image of the osculating torus)"),
-    ('GEOMETRIC', "Geometric", "The torus center from the signed curvature: differs from "
-     "Reference only at saddle points"),
+    ('REFERENCE', "Reference", "The sign rule of the authors' program (the torus of a saddle "
+     "point is the mirror image of the osculating torus); for parity with their results"),
+    ('GEOMETRIC', "Geometric", "The default: the torus center from the signed curvature, the "
+     "osculating torus at saddle points too. Differs from Reference only at saddle points"),
 ]
 EVALUATION_ITEMS = [
     ('PER_QUERY', "Per Query", "Blend the 32 nearest tori with a lambda that follows the "
@@ -124,7 +124,7 @@ def option_properties():
                         "extension built with CUDA support"),
         "cuda_ordinal": IntProperty(name="GPU Index", default=0, min=0, soft_max=8,
                                     description="Which CUDA device to use (0: the first)"),
-        "sign_rule": EnumProperty(name="Sign Rule", items=SIGN_RULE_ITEMS, default='REFERENCE',
+        "sign_rule": EnumProperty(name="Sign Rule", items=SIGN_RULE_ITEMS, default='GEOMETRIC',
                                   description="How the torus of a point is placed (changes the "
                                               "tori, so it is part of the cache key)"),
         "evaluation": EnumProperty(name="Evaluation", items=EVALUATION_ITEMS,
@@ -216,6 +216,8 @@ def get_field(cloud, opts, directory, native_progress=None):
     if field is None and use_cache and path and os.path.isfile(path):
         try:
             field = ddg.pat_load_tori(path, cloud.positions, cloud.normals, **kwargs)
+            if field.sign_rule not in (None, kwargs["sign_rule"]):
+                raise ValueError("the file was fitted with the {} sign rule".format(field.sign_rule))
             cache = "sidecar"
         except ValueError as ex:
             warnings.append("ignored the sidecar file {} ({})".format(os.path.basename(path), ex))

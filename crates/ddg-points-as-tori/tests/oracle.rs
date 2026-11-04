@@ -14,7 +14,7 @@ use ddg_points_as_tori::fit::{fit_torus, fundamental_forms, mean_gauss};
 use ddg_points_as_tori::network::scale_outputs_f64;
 use ddg_points_as_tori::sdf::{Singular, torus_sdf_laplacian};
 use ddg_points_as_tori::spatial::{KdTree, KdTreeOptions, fitting_neighborhoods};
-use ddg_points_as_tori::{EvalOptions, FitOptions, Neighborhood, NormalPolicy, PatError, PointCloud, Tori, Torus, TorusField};
+use ddg_points_as_tori::{EvalOptions, FitOptions, SignRule, Neighborhood, NormalPolicy, PatError, PointCloud, Tori, Torus, TorusField};
 use std::path::PathBuf;
 
 const TOL: f64 = 1e-12;
@@ -169,7 +169,7 @@ fn features(c: &Case) -> Outcome {
 
 fn fit_opts(c: &Case) -> FitOptions {
     let (e, f) = c.fitopts.unwrap_or((1e-10, 1e-10));
-    FitOptions { eig_eps: e, curvature_floor: f, ..Default::default() }
+    FitOptions { eig_eps: e, curvature_floor: f, sign_rule: SignRule::Reference, ..Default::default() }
 }
 
 fn fit(c: &Case) -> Outcome {
@@ -236,7 +236,7 @@ fn case_tori(c: &Case) -> Result<Vec<Torus>, String> {
         return Ok(c.tori.clone());
     }
     let cloud = build_cloud(c).map_err(|e| kind(&e).to_string())?;
-    let opts = FitOptions::default();
+    let opts = FitOptions { sign_rule: SignRule::Reference, ..Default::default() };
     Ok(c.coefs.iter().map(|&(i, a)| fit_torus(cloud.positions()[i], cloud.normals()[i], a, &opts).0).collect())
 }
 

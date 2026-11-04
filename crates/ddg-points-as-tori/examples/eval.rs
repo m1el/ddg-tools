@@ -646,9 +646,8 @@ fn case(a: &[String]) -> R<()> {
         let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
         let m = Model::from_safetensors(&bytes).map_err(err)?;
         let mut opts = BuildOptions::default().with_threads(th);
-        if geo {
-            opts.fit.sign_rule = SignRule::Geometric;
-        }
+        // explicit: the weights are labelled by the rule they were trained with
+        opts.fit.sign_rule = if geo { SignRule::Geometric } else { SignRule::Reference };
         let (field, _) = PointsAsTori::build(&cloud, &m, &opts).map_err(err)?;
         let (phi, s) = pat_eval(&field, &xs)?;
         methods.push((label.to_string(), phi, s));

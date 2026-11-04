@@ -327,8 +327,8 @@ pub fn parse_build(kw: &mut Kw, paper_default: bool) -> R<BuildSpec> {
         _ => FeatureOrder::DifferenceFirst,
     };
     let sign_rule = match kw.choice("sign_rule", &["reference", "geometric"])?.as_deref() {
-        Some("geometric") => SignRule::Geometric,
-        _ => SignRule::Reference,
+        Some("reference") => SignRule::Reference,
+        _ => SignRule::default(),
     };
     let eigen_rule = match kw.choice("eigen_rule", &["reference", "robust"])?.as_deref() {
         Some("robust") => EigenRule::Robust,

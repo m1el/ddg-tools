@@ -150,3 +150,14 @@ pub fn ellipsoid_cloud(n: usize, seed: u64, axes: [f64; 3]) -> PointCloud {
 pub fn bits(v: &[f64]) -> Vec<u64> {
     v.iter().map(|x| x.to_bits()).collect()
 }
+
+/// `FitOptions` pinned to the authors' sign rule (`SignRule::Reference`), for parity, golden and
+/// oracle tests. The crate default is `SignRule::Geometric`.
+pub fn ref_fit() -> ddg_points_as_tori::FitOptions {
+    ddg_points_as_tori::FitOptions { sign_rule: ddg_points_as_tori::SignRule::Reference, ..Default::default() }
+}
+
+/// `BuildOptions` pinned to the authors' sign rule (`SignRule::Reference`).
+pub fn ref_build() -> ddg_points_as_tori::BuildOptions {
+    ddg_points_as_tori::BuildOptions { fit: ref_fit(), ..Default::default() }
+}

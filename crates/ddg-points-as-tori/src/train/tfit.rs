@@ -86,7 +86,8 @@ pub struct TorusTensor {
 /// Options of [`fit_tensor`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TensorFitOptions {
-    /// Sign and center rule.
+    /// Sign and center rule. Training defaults to [`SignRule::Reference`] (the released weights were
+    /// trained with it), independent of the inference default [`SignRule::default`] (`Geometric`).
     pub sign_rule: SignRule,
     /// Eigenvector rule.
     pub eigen_rule: EigenRule,
@@ -97,6 +98,8 @@ pub struct TensorFitOptions {
 }
 
 impl Default for TensorFitOptions {
+    /// Explicitly `SignRule::Reference` and `EigenRule::Reference` (as the authors trained), not
+    /// `SignRule::default()`.
     fn default() -> Self {
         TensorFitOptions { sign_rule: SignRule::Reference, eigen_rule: EigenRule::Reference, eig_eps: 1e-10, curvature_floor: 1e-10 }
     }

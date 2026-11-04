@@ -14,7 +14,7 @@ use ddg_points_as_tori::network::cuda::forward_features_cuda;
 use ddg_points_as_tori::network::{PredictOptions, forward_features};
 use ddg_points_as_tori::spatial::{KdTree, KdTreeOptions, fitting_neighborhoods, knn_batch};
 use ddg_points_as_tori::{
-    BuildOptions, Device, EvalOptions, EvalOut, EvalPrecision, EvalReport, FitOptions, FitReport, GradientMode, LambdaRule, Model,
+    Device, EvalOptions, EvalOut, EvalPrecision, EvalReport, FitOptions, FitReport, GradientMode, LambdaRule, Model,
     Neighborhood, PatError, PointCloud, PointsAsTori, SignRule, Tori, TorusField,
 };
 
@@ -175,8 +175,8 @@ fn fit_bitwise_equal_to_cpu() {
     }
     let mut bad = co.clone();
     bad[7][2] = f32::NAN;
-    assert!(gfit(&g, &cloud, &bad, &sigma, 0, &FitOptions::default()).is_err());
-    assert!(gfit(&g, &cloud, &co[..10], &sigma, 0, &FitOptions::default()).is_err());
+    assert!(gfit(&g, &cloud, &bad, &sigma, 0, &common::ref_fit()).is_err());
+    assert!(gfit(&g, &cloud, &co[..10], &sigma, 0, &common::ref_fit()).is_err());
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn hash64(e: &Eval) -> u64 {
 
 fn net_tori(cloud: &PointCloud) -> Tori {
     let model = Model::reference().unwrap();
-    let (field, _) = PointsAsTori::build(cloud, &model, &BuildOptions::default().with_threads(Some(16))).unwrap();
+    let (field, _) = PointsAsTori::build(cloud, &model, &common::ref_build().with_threads(Some(16))).unwrap();
     field.tori().clone()
 }
 
@@ -477,7 +477,7 @@ fn pipeline_gpu_vs_cpu() {
     let Some(ord) = gpu() else { return };
     let model = Model::reference().unwrap();
     let cloud = ellipsoid_cloud(5000, 31, [0.6, 0.45, 0.3]);
-    let cpu = BuildOptions::default().with_threads(Some(16));
+    let cpu = common::ref_build().with_threads(Some(16));
     assert_eq!(cpu.predict.gpu_matmul, GpuMatmul::Tf32, "the GPU default is TF32 (user decision 2026-11-04)");
     let (fc, rc) = PointsAsTori::build(&cloud, &model, &cpu).unwrap();
     assert_eq!(rc.predict.device, Device::Cpu);
@@ -751,7 +751,7 @@ fn timing_precompute() {
         eprintln!("stages n {n}: kd-tree (CPU) {t_tree:.3} s, 64-NN CPU 64 threads {t_knn_cpu:.3} s, GPU {t_knn_gpu:.3} s (incl. upload/download)");
         drop((nb_cpu, nb_gpu));
         for mode in [GpuMatmul::Split3, GpuMatmul::Tf32] {
-            let mut o = BuildOptions::default();
+            let mut o = common::ref_build();
             o.predict.device = Device::Cuda { ordinal: ord };
             o.predict.gpu_matmul = mode;
             // warm-up: the first forward pass JIT-compiles CubeCL's fused kernels (once per process)
@@ -767,16 +767,16 @@ fn timing_precompute() {
                 let co = field.tori().coefficients.clone();
                 let sg = field.tori().sigma.clone();
                 let t = std::time::Instant::now();
-                let _ = fit_tori_with(&cloud, &co, &sg, 0, &FitOptions::default()).unwrap();
+                let _ = fit_tori_with(&cloud, &co, &sg, 0, &common::ref_fit()).unwrap();
                 let t_fit_cpu = t.elapsed().as_secs_f64();
                 let t = std::time::Instant::now();
-                let _ = gfit(&g, &cloud, &co, &sg, 0, &FitOptions::default()).unwrap();
+                let _ = gfit(&g, &cloud, &co, &sg, 0, &common::ref_fit()).unwrap();
                 eprintln!("stages n {n}: fit CPU 64 threads {t_fit_cpu:.3} s, GPU {:.3} s (incl. transfers)", t.elapsed().as_secs_f64());
             }
         }
         if cpu_rows && n <= 1_000_000 {
             machine("before");
-            let (_, r) = PointsAsTori::build(&cloud, &model, &BuildOptions::default()).unwrap();
+            let (_, r) = PointsAsTori::build(&cloud, &model, &common::ref_build()).unwrap();
             machine("after");
             build_row("CPU 64 threads", n, &r);
         }
@@ -790,7 +790,7 @@ fn timing_evaluation() {
     let model = Model::reference().unwrap();
     let n = std::env::var("PAT_EVAL_N").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000usize);
     let Some(cloud) = spot_cloud(n, 2) else { return };
-    let mut o = BuildOptions::default();
+    let mut o = common::ref_build();
     o.predict.device = Device::Cuda { ordinal: ord };
     let (field, _) = PointsAsTori::build(&cloud, &model, &o).unwrap();
     let tori = field.tori().clone();
@@ -881,7 +881,7 @@ fn timing_repeated_builds() {
     let n: usize = std::env::var("PAT_N").ok().and_then(|s| s.parse().ok()).unwrap_or(50_000);
     let c = spot_cloud(n, 1).unwrap();
     for mode in [GpuMatmul::Tf32, GpuMatmul::Split3] {
-        let mut o = BuildOptions::default();
+        let mut o = common::ref_build();
         o.predict.device = Device::Cuda { ordinal: ord };
         o.predict.gpu_matmul = mode;
         for rep in 0..5 {

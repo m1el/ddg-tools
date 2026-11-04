@@ -14,7 +14,7 @@ use ddg_points_as_tori::features::{FeatureOrder, FeatureScratch, neighborhood_fe
 use ddg_points_as_tori::network::{PredictOptions, forward_features, predict_coefficients, scale_outputs};
 use ddg_points_as_tori::spatial::{KdTree, KdTreeOptions, Neighborhoods, fitting_neighborhoods};
 use ddg_points_as_tori::{
-    BuildOptions, EvalOptions, EvalOut, FitOptions, Model, Neighborhood, PointsAsTori, Tori, TorusField, fit_tori,
+    EvalOptions, EvalOut, FitOptions, Model, Neighborhood, PointsAsTori, Tori, TorusField, fit_tori,
 };
 
 fn grid_subset(g: &Golden) -> (Vec<[f64; 3]>, Vec<usize>) {
@@ -139,7 +139,7 @@ fn fit_matches_reference() {
     for name in INPUTS {
         let g = Golden::open(&root, name);
         let co = g.coeffs();
-        let (tori, rep) = fit_tori(&g.cloud, &co, &FitOptions::default()).unwrap();
+        let (tori, rep) = fit_tori(&g.cloud, &co, &common::ref_fit()).unwrap();
         let refs = g.tori();
         let mut worst = [0f64; 4];
         for (a, b) in tori.tori.iter().zip(&refs) {
@@ -206,7 +206,7 @@ fn end_to_end_matches_reference() {
     for order in [FeatureOrder::Reference, FeatureOrder::DifferenceFirst] {
         for name in INPUTS {
             let g = Golden::open(&root, name);
-            let mut opts = BuildOptions::default();
+            let mut opts = common::ref_build();
             opts.predict.feature_order = order;
             let (field, _rep) = PointsAsTori::build(&g.cloud, &model, &opts).unwrap();
             let (grid, ids) = grid_subset(&g);

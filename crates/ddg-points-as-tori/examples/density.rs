@@ -7,7 +7,7 @@
 //!
 //! The mesh is centered (vertex mean) and scaled to `[-1, 1]³`, checked closed and outward, and
 //! sampled uniformly by area at each count. For each count: the default PAT field (32-NN,
-//! `PerQuery` C = 64, `SignRule::Reference`), its error on the `grid³` grid over `[-1, 1]³`
+//! `PerQuery` C = 64, the default `SignRule::Geometric`), its error on the `grid³` grid over `[-1, 1]³`
 //! against the exact mesh SDF (overall, narrow band `|φ_true| < 0.05`, interior `φ_true < −0.05`,
 //! exterior `φ_true > 0.05`), the torus size statistics in units of the point's `σ_i` (the paper's
 //! hypothesis for Fig. 29: dense neighborhoods give compact tori), optionally the zero level set by

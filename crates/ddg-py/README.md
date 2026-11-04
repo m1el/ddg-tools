@@ -965,7 +965,7 @@ h = pat.boolean(f, other, "union"); h = f.offset(0.05)  # CsgField: same evaluat
 * **Options** (keywords of the constructor; `pat_defaults()` lists them and the stub test checks
   them): `device` (`"cpu"`, `"cuda"`, `"auto"`), `cuda_ordinal`, `threads`, `gpu_matmul`
   (`"tf32"` default, `"split3"` agrees with the CPU to ~1e-6), `feature_order`, `sign_rule`
-  (`"reference"`, `"geometric"`), `eigen_rule` (`"reference"`, `"robust"`), `k`, `weights`
+  (`"geometric"` default, the osculating torus in every case; `"reference"` reproduces the authors' program), `eigen_rule` (`"reference"`, `"robust"`), `k`, `weights`
   (a safetensors file), `normal_policy` (`"require_unit"`, `"normalize"`), and the evaluation
   rule: `neighborhood` (`"knn"` with `knn_k`, `"all"`, `"radius"` with `radius`), `lambda_rule`
   (`"per_query"` with `lambda_c`, `"constant"` with `lambda_value`, `"paper"`), `paper=True` (the

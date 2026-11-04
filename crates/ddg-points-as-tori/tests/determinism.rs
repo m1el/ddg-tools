@@ -4,10 +4,10 @@
 mod common;
 
 use common::{bits, ellipsoid_cloud, lcg};
-use ddg_points_as_tori::{BuildOptions, EvalOut, FeatureOrder, Model, Neighborhood, PointsAsTori, TorusField};
+use ddg_points_as_tori::{EvalOut, FeatureOrder, Model, Neighborhood, PointsAsTori, TorusField};
 
 fn run(cloud: &ddg_points_as_tori::PointCloud, model: &Model, threads: usize, order: FeatureOrder, nbh: Neighborhood) -> Vec<u64> {
-    let mut opts = BuildOptions::default().with_threads(Some(threads));
+    let mut opts = common::ref_build().with_threads(Some(threads));
     opts.predict.feature_order = order;
     opts.eval.neighborhood = nbh;
     let (field, rep) = PointsAsTori::build(cloud, model, &opts).unwrap();

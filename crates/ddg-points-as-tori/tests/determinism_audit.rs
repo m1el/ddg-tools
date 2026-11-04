@@ -27,7 +27,7 @@ use ddg_points_as_tori::mc::{McOptions, Resolution, marching_cubes};
 use ddg_points_as_tori::pool::make_pool;
 use ddg_points_as_tori::truth::{MeshTruth, SignMode, TruthOptions};
 use ddg_points_as_tori::analytic::Instance;
-use ddg_points_as_tori::{BuildOptions, EvalOut, Model, PointCloud, PointsAsTori, TorusField};
+use ddg_points_as_tori::{EvalOut, Model, PointCloud, PointsAsTori, TorusField};
 use std::f64::consts::PI;
 
 const THREADS: [usize; 3] = [3, 8, 32];
@@ -80,7 +80,7 @@ fn uv_sphere(nu: usize, nv: usize, r: f64) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
 }
 
 fn build(cloud: &PointCloud, model: &Model, t: usize) -> TorusField {
-    let mut b = BuildOptions::default().with_threads(Some(t));
+    let mut b = common::ref_build().with_threads(Some(t));
     b.eval = TorusField::paper_options(cloud, Some(t)).unwrap().0;
     PointsAsTori::build(cloud, model, &b).unwrap().0
 }
@@ -138,7 +138,7 @@ fn morphology_and_orientation() {
     audit("morphology (close)", |t| {
         let opts = MorphOptions {
             sample: SampleOptions { count: Some(600), mc: McOptions { resolution: Resolution::Longest(24), threads: Some(t), ..Default::default() }, threads: Some(t), seed: 2, ..Default::default() },
-            build: BuildOptions::default().with_threads(Some(t)),
+            build: common::ref_build().with_threads(Some(t)),
             paper_eval: true,
         };
         let (f, _, rep) = morphology(&field, &model, Morph::Close(0.03), &opts).unwrap();
@@ -148,7 +148,7 @@ fn morphology_and_orientation() {
     let mut s = 4;
     let normals: Vec<[f64; 3]> = cloud.normals().iter().map(|n| if lcg(&mut s) < 0.3 { [-n[0], -n[1], -n[2]] } else { *n }).collect();
     audit("orient_normals", |t| {
-        let o = OrientOptions { max_iterations: 3, threads: Some(t), build: BuildOptions::default().with_threads(Some(t)), ..Default::default() };
+        let o = OrientOptions { max_iterations: 3, threads: Some(t), build: common::ref_build().with_threads(Some(t)), ..Default::default() };
         let (n, rep) = orient_normals(cloud.positions(), &normals, &model, &o).unwrap();
         format!("{:?}{:?}{:?}{:?}", n, rep.flips_per_iteration, rep.negative_per_iteration, rep.undecided)
     });

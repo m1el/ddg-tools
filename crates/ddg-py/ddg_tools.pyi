@@ -2126,7 +2126,7 @@ class PointsAsTori:
         threads: int | None = None,
         gpu_matmul: Literal["tf32", "split3"] = "tf32",
         feature_order: Literal["difference_first", "reference"] = "difference_first",
-        sign_rule: Literal["reference", "geometric"] = "reference",
+        sign_rule: Literal["reference", "geometric"] = "geometric",
         eigen_rule: Literal["reference", "robust"] = "reference",
         k: int | None = None,
         paper: bool = False,

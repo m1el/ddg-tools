@@ -211,8 +211,8 @@ class RoundTrips(unittest.TestCase):
             FIELD.save_tori(path)
             g = ddg_tools.pat_load_tori(path, *SPHERE)
             self.assertIsNone(g.build_report)
-            self.assertEqual(FIELD.sign_rule, "reference")
-            self.assertEqual(g.sign_rule, "reference")  # the file records it
+            self.assertEqual(FIELD.sign_rule, "geometric")  # the default since 2026-11-04
+            self.assertEqual(g.sign_rule, "geometric")  # the file records it
             self.assertEqual(g.signed_distance(Q).tobytes(), FIELD.signed_distance(Q).tobytes())
             self.assertEqual(g.gradient(Q).tobytes(), FIELD.gradient(Q).tobytes())
             self.assertEqual(g.tori["coefficients"].tobytes(), FIELD.tori["coefficients"].tobytes())
@@ -273,6 +273,12 @@ class CrateItems(unittest.TestCase):
             with open(old, "wb") as fh:
                 fh.write(data)
             self.assertIsNone(ddg_tools.pat_load_tori(old, *SPHERE).sign_rule)
+            data[12] = 1  # a file marked Reference is read as Reference, not as the new default
+            with open(old, "wb") as fh:
+                fh.write(data)
+            self.assertEqual(ddg_tools.pat_load_tori(old, *SPHERE).sign_rule, "reference")
+            ref = ddg_tools.PointsAsTori(*SPHERE, sign_rule="reference")
+            self.assertEqual(ref.sign_rule, "reference")
             data[12] = 9
             with open(old, "wb") as fh:
                 fh.write(data)
@@ -711,7 +717,7 @@ class Defaults(unittest.TestCase):
         self.assertEqual((d["neighborhood"], d["knn_k"]), ("knn", 32))
         self.assertEqual((d["lambda_rule"], d["lambda_c"]), ("per_query", 64.0))
         self.assertEqual(d["gpu_matmul"], "tf32")
-        self.assertEqual((d["sign_rule"], d["eigen_rule"]), ("reference", "reference"))
+        self.assertEqual((d["sign_rule"], d["eigen_rule"]), ("geometric", "reference"))
         self.assertEqual(d["gradient"], "frozen")
         self.assertEqual(d["precision"], "f64")
         self.assertEqual(d["device"], "cpu")
@@ -746,7 +752,7 @@ class Golden(unittest.TestCase):
 
     def check(self, name, tol_sdf, tol_grad):
         p, n, q, run = self.case(name)
-        f = ddg_tools.PointsAsTori(p, n, feature_order="reference", normal_policy="normalize")
+        f = ddg_tools.PointsAsTori(p, n, feature_order="reference", sign_rule="reference", normal_policy="normalize")
         sdf, _ = read_npy(os.path.join(run, "query_sdf_accel.npy"))
         grad, _ = read_npy(os.path.join(run, "query_grad_accel.npy"))
         d, g = f.distance_and_gradient(q)
@@ -774,7 +780,7 @@ class Golden(unittest.TestCase):
         # the saddle tori of the bunny make it the worst case; same tolerance as the Rust parity test
         p, n, q, run = self.case("holey-bunny")
         sdf, _ = read_npy(os.path.join(run, "query_sdf_accel.npy"))
-        f = ddg_tools.PointsAsTori(p, n, feature_order="reference", normal_policy="normalize")
+        f = ddg_tools.PointsAsTori(p, n, feature_order="reference", sign_rule="reference", normal_policy="normalize")
         d = f.signed_distance(q)
         diffs = sorted(abs(x - y) for x, y in zip(d, sdf))
         self.assertLess(diffs[len(diffs) // 2], 1e-6)

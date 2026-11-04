@@ -2,6 +2,7 @@
 //!
 //! The ignored tests need the training data and write to `runs_tmp/pat-wp7/` (see NOTES-WP7.md).
 #![cfg(feature = "train")]
+mod common;
 
 use burn::tensor::DType;
 use ddg_points_as_tori::fit::{EigenRule, FitOptions, SignRule, fit_torus};
@@ -279,15 +280,15 @@ fn robust_eigen_rule() {
     let a = random_coefficients(&mut r, 50);
     for i in 0..50 {
         let ai = [a[6 * i], a[6 * i + 1], a[6 * i + 2], a[6 * i + 3], a[6 * i + 4], a[6 * i + 5]];
-        let (t0, _) = fit_torus(s.positions[i], s.normals[i], ai, &FitOptions::default());
-        let (t1, d1) = fit_torus(s.positions[i], s.normals[i], ai, &FitOptions { eigen_rule: EigenRule::Robust, ..Default::default() });
+        let (t0, _) = fit_torus(s.positions[i], s.normals[i], ai, &common::ref_fit());
+        let (t1, d1) = fit_torus(s.positions[i], s.normals[i], ai, &FitOptions { sign_rule: SignRule::Reference, eigen_rule: EigenRule::Robust, ..Default::default() });
         assert!((t0.major - t1.major).abs() < 1e-10 * (1.0 + t0.major.abs()) && (t0.minor - t1.minor).abs() < 1e-10 * (1.0 + t0.minor.abs()));
         assert!(!d1.clamps.eigen_switched);
     }
     // v2 = 0 exactly (a11 = 0, a01 = a10 = 0): the reference collapses to a sphere, robust does not
     let ai = [0.0, 0.0, 0.0, 0.0, -0.2, -0.5];
-    let (_, dr) = fit_torus([0.0; 3], [0.0, 0.0, 1.0], ai, &FitOptions::default());
-    let (_, db) = fit_torus([0.0; 3], [0.0, 0.0, 1.0], ai, &FitOptions { eigen_rule: EigenRule::Robust, ..Default::default() });
+    let (_, dr) = fit_torus([0.0; 3], [0.0, 0.0, 1.0], ai, &common::ref_fit());
+    let (_, db) = fit_torus([0.0; 3], [0.0, 0.0, 1.0], ai, &FitOptions { sign_rule: SignRule::Reference, eigen_rule: EigenRule::Robust, ..Default::default() });
     assert!((dr.kappa_min - dr.kappa_max).abs() < 1e-9, "reference: {} {}", dr.kappa_min, dr.kappa_max);
     assert!((db.kappa_min + 0.4).abs() < 1e-12 && (db.kappa_max + 1.0).abs() < 1e-12, "robust: {} {}", db.kappa_min, db.kappa_max);
     assert!(db.clamps.eigen_switched);
@@ -303,7 +304,7 @@ fn robust_eigen_rule() {
     let mut worst_rob = 0.0f64;
     for (i, e) in es.iter().enumerate() {
         let a6 = [0.0, 0.0, 0.0, *e, -0.2, -0.5];
-        let (t64, _) = fit_torus(cloud_p[i], cloud_n[i], a6, &FitOptions { eigen_rule: EigenRule::Robust, ..Default::default() });
+        let (t64, _) = fit_torus(cloud_p[i], cloud_n[i], a6, &FitOptions { sign_rule: SignRule::Reference, eigen_rule: EigenRule::Robust, ..Default::default() });
         let err = |t: &Torus| ((t.major - t64.major).abs() + (t.minor - t64.minor).abs()) / (1.0 + t64.minor.abs());
         eprintln!("a11 = {e:.0e}: f32 reference rule error {:.2e}, robust {:.2e}", err(&t_ref[i]), err(&t_rob[i]));
         worst_rob = worst_rob.max(err(&t_rob[i]));
@@ -383,7 +384,7 @@ fn tensor_blend_matches_host_blend() {
     let q: Vec<[f64; 3]> = (0..200).map(|_| [u(&mut r) - 0.5, 0.8 * u(&mut r) - 0.4, 0.6 * u(&mut r) - 0.3]).collect();
     let truth: Vec<f64> = q.iter().map(|&x| mesh.signed_distance(x, GwnPrecision::F64)).collect();
     let plan = build_plan(&q, &truth, &s.positions, &o, None).unwrap();
-    let tori: Vec<Torus> = (0..150).map(|i| fit_torus(s.positions[i], s.normals[i], std::array::from_fn(|c| a[6 * i + c]), &FitOptions::default()).0).collect();
+    let tori: Vec<Torus> = (0..150).map(|i| fit_torus(s.positions[i], s.normals[i], std::array::from_fn(|c| a[6 * i + c]), &common::ref_fit()).0).collect();
     let host = host_blend(&tori, &plan);
     let cloud = CloudFit { p: &s.positions, n: &s.normals };
     let (v, _) = loss_and_grad(&ctx, &cloud, &a, &plan, &o, false).unwrap();
@@ -563,7 +564,7 @@ fn initial_output_is_the_tangent_sphere() {
     // a = (0,0,0,0,−½/σ,−½/σ): the sphere of radius σ tangent at p, center p − σ n
     let i = 3;
     let sg = f.sigma[i];
-    let (t, _) = fit_torus(s.positions[i], s.normals[i], [0.0, 0.0, 0.0, 0.0, -0.5 / sg, -0.5 / sg], &FitOptions::default());
+    let (t, _) = fit_torus(s.positions[i], s.normals[i], [0.0, 0.0, 0.0, 0.0, -0.5 / sg, -0.5 / sg], &common::ref_fit());
     assert!(t.major.abs() < 1e-12 && (t.minor - sg).abs() < 1e-12, "{t:?} σ {sg}");
     for k in 0..3 {
         assert!((t.center[k] - (s.positions[i][k] - sg * s.normals[i][k])).abs() < 1e-12);
@@ -691,8 +692,8 @@ fn reference_loss_export() {
             let nb = ddg_points_as_tori::spatial::Neighborhoods { k: s.k, indices: s.neighbors[..s.n * s.k].iter().map(|&j| j as u32).collect() };
             let po = ddg_points_as_tori::PredictOptions { feature_order: FeatureOrder::Reference, ..Default::default() };
             let (co, _, _) = ddg_points_as_tori::predict_coefficients(&model, &cloud, &nb, &po).unwrap();
-            let (_, fr) = ddg_points_as_tori::fit_tori(&cloud, &co, &FitOptions::default()).unwrap();
-            let (_, fr32) = ddg_points_as_tori::fit_tori(&cloud, &co, &FitOptions { eigen_rule: EigenRule::Robust, ..Default::default() }).unwrap();
+            let (_, fr) = ddg_points_as_tori::fit_tori(&cloud, &co, &common::ref_fit()).unwrap();
+            let (_, fr32) = ddg_points_as_tori::fit_tori(&cloud, &co, &FitOptions { sign_rule: SignRule::Reference, eigen_rule: EigenRule::Robust, ..Default::default() }).unwrap();
             eprintln!("shape {si}: {} saddle tori, {} where the robust rule changes the f64 fit", fr.saddle, fr32.eigen_switched);
             for (name, o) in variants {
                 let pr = if name == "diff_first" { &prep_df } else { &prep };

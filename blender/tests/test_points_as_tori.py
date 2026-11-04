@@ -391,9 +391,9 @@ def changing_the_cloud_invalidates_the_cache():
     run()
     assert last_stages()[0]["cache"] == "miss", "a flipped normal"
     activate(obj)
-    run(sign_rule='GEOMETRIC')
+    run(sign_rule='REFERENCE')
     assert last_stages()[0]["cache"] == "miss", "the sign rule is part of the key"
-    run(sign_rule='GEOMETRIC', evaluation='PAPER')
+    run(sign_rule='REFERENCE', evaluation='PAPER')
     assert last_stages()[0]["cache"] == "memory", "the evaluation rule is not"
     run(use_cache=False)
     assert last_stages()[0]["cache"] == "miss"
@@ -509,7 +509,7 @@ def wrong_object_type_is_refused():
 @test
 def paper_evaluation_and_geometric_sign_rule():
     cloud()
-    out = run(evaluation='PAPER', sign_rule='GEOMETRIC')
+    out = run(evaluation='PAPER', sign_rule='GEOMETRIC')  # the default rule, stated
     assert max(abs(x - 0.5) for x in radii(world_points(out))) < 0.05
 
 
@@ -602,7 +602,7 @@ def cancel_stops_the_native_build_and_caches_nothing():
     thread.join(120)
     assert job.done and isinstance(job.error, o.Cancelled), job.error
     assert job.native_progress.cancelled
-    assert io().memory_get((clouds[0].digest, "reference")) is None, "a cancelled build was cached"
+    assert io().memory_get((clouds[0].digest, "geometric")) is None, "a cancelled build was cached"
 
 
 # The last test: it saves the .blend, so the later tests would see a file path.
@@ -618,7 +618,7 @@ def sidecar_file_next_to_the_blend():
         run()
         assert last_stages()[0]["cache"] == "miss"
         files = os.listdir(os.path.join(tmp, "scene.pat"))
-        assert len(files) == 1 and files[0].endswith("-reference.tori"), files
+        assert len(files) == 1 and files[0].endswith("-geometric.tori"), files
         io().clear_cache(None)  # forget the memory only
         run()
         assert last_stages()[0]["cache"] == "sidecar", last_stages()[0]
@@ -628,6 +628,14 @@ def sidecar_file_next_to_the_blend():
         assert not os.path.exists(os.path.join(tmp, "scene.pat"))
         run()
         assert last_stages()[0]["cache"] == "miss"
+        # a file written with the Reference rule is never served to the Geometric default
+        run(sign_rule='REFERENCE')
+        assert last_stages()[0]["cache"] == "miss"
+        assert sorted(f.rsplit("-", 1)[1] for f in os.listdir(os.path.join(tmp, "scene.pat"))) == ["geometric.tori", "reference.tori"]
+        io().clear_cache(None)
+        run(sign_rule='REFERENCE')
+        assert last_stages()[0]["cache"] == "sidecar"
+        os.remove([os.path.join(tmp, "scene.pat", f) for f in os.listdir(os.path.join(tmp, "scene.pat")) if f.endswith("-reference.tori")][0])
         # a corrupt sidecar file is ignored with a warning, and rebuilt
         side = os.path.join(tmp, "scene.pat")
         f = os.path.join(side, os.listdir(side)[0])

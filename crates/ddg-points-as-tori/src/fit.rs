@@ -87,7 +87,7 @@ pub struct FitDiagnostics {
 
 /// How the torus's sign and center follow from the curvatures.
 ///
-/// **Reference** (default; the paper's Eq. 22 and center formula, the JAX training rule and the
+/// **Reference** (the paper's Eq. 22 and center formula, the JAX training rule and the
 /// C++ inference code): `s` by Eq. 22, `c = o − (s/|κmin|) n*`, `R = 1/|κmin| − sgn(κ₊κ₋) r`, with
 /// `|κ|` floored but `s` and `sgn` taken from the unfloored values. Two defects, measured in
 /// WP1 (NOTES-WP1.md):
@@ -98,17 +98,23 @@ pub struct FitDiagnostics {
 /// - at an **exactly zero** curvature `s = −1` and `sgn = 0`: a plane gives a horn torus whose
 ///   core circle passes through `o`; a cylinder bending away from `n` is put on the wrong side.
 ///
-/// **Geometric** (ours): `|κ|` below the floor becomes `±floor` with its sign (`+floor` at 0);
+/// **Geometric** (ours; the default since 2026-11-04, SPEC.md D9): `|κ|` below the floor becomes `±floor` with its sign (`+floor` at 0);
 /// `s = +1` iff `κmax < 0` (the tube center `o + n*/κmax` is on the inner side); the center is the
 /// center of the parallel circle, `c = o + n*/κmin` (signed). Identical to `Reference` except at
 /// saddles and exact zeros; the torus then osculates at `o` in every case (outward normal, both
 /// principal curvatures).
+///
+/// `Reference` stays available for parity with the authors' program (the oracle/golden tests and the
+/// "black box" comparisons pin it explicitly). Training keeps its own explicit default
+/// (`TensorFitOptions`, the `train` example's `--sign`): the released weights were trained with
+/// `Reference`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SignRule {
-    /// The reference's rule, as the network was trained (SPEC.md D9).
-    #[default]
+    /// The reference's rule, as the released network was trained (SPEC.md D9). Use it for parity
+    /// with the authors' program.
     Reference,
-    /// The osculating torus in every case.
+    /// The osculating torus in every case (default).
+    #[default]
     Geometric,
 }
 
@@ -166,7 +172,7 @@ pub struct FitOptions {
 
 impl Default for FitOptions {
     fn default() -> Self {
-        FitOptions { eig_eps: 1e-10, curvature_floor: 1e-10, sign_rule: SignRule::Reference, eigen_rule: EigenRule::Reference, threads: None }
+        FitOptions { eig_eps: 1e-10, curvature_floor: 1e-10, sign_rule: SignRule::Geometric, eigen_rule: EigenRule::Reference, threads: None }
     }
 }
 

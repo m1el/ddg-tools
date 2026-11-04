@@ -59,7 +59,7 @@ fn sphere_gives_the_tangent_sphere() {
         let rho = 0.05 + lcg(&mut s);
         let a00 = 0.01 * (lcg(&mut s) - 0.5);
         let a = monge(n, unit(cross(n, [0.3, 0.2, 0.1])), -1.0 / rho, -1.0 / rho, a00);
-        let (t, d) = fit_torus(p, n, a, &FitOptions::default());
+        let (t, d) = fit_torus(p, n, a, &common::ref_fit());
         let want_c = [p[0] + (a00 - rho) * n[0], p[1] + (a00 - rho) * n[1], p[2] + (a00 - rho) * n[2]];
         assert!(t.major.abs() < 1e-9, "R = {}", t.major);
         assert!((t.minor - rho).abs() < 1e-9 * rho.max(1.0), "r = {} vs {rho}", t.minor);
@@ -94,7 +94,7 @@ fn torus_patch_gives_the_torus_back() {
             let a = monge(n, tangent, k_par, -1.0 / r0, 0.0);
             let geo = FitOptions { sign_rule: SignRule::Geometric, ..Default::default() };
             let (t, d) = fit_torus(p, n, a, &geo);
-            let (tr, _) = fit_torus(p, n, a, &FitOptions::default());
+            let (tr, _) = fit_torus(p, n, a, &common::ref_fit());
             if outer {
                 assert_eq!(t, tr, "the rules agree away from saddles");
             } else {
@@ -128,7 +128,7 @@ fn plane_gives_a_half_space_and_counts_clamps() {
     let co = vec![[0.0f32; 6], [0.0, 0.0, 0.0, 0.0, -0.5, -0.5]];
     let (p, n) = (cloud.positions()[0], cloud.normals()[0]);
     // the JAX rule: R = r = 1e10, s = −1, c = p + 1e10 n*: the core circle passes through p
-    let (tori, rep) = fit_tori(&cloud, &co, &FitOptions::default()).unwrap();
+    let (tori, rep) = fit_tori(&cloud, &co, &common::ref_fit()).unwrap();
     assert_eq!((rep.clamped_curvature, rep.zero_curvature), (1, 1), "{rep:?}");
     let t = tori.tori[0];
     assert!((t.major - 1e10).abs() < 1.0 && (t.minor + 1e10).abs() < 1.0, "{t:?}");
@@ -165,7 +165,7 @@ fn cylinder_gives_a_tube() {
         if d.kappa_min * d.kappa_max > 0.0 {
             // tiny but non-zero, not a saddle: both rules agree exactly (with κmin > 0 from
             // round-off the reference puts the torus on the wrong side, see SignRule)
-            assert_eq!(fit_torus(p, n, a, &FitOptions::default()).0, t);
+            assert_eq!(fit_torus(p, n, a, &common::ref_fit()).0, t);
         }
         assert!((t.minor.abs() - rho).abs() < 1e-6 * rho);
         // near p the SDF is the distance to the cylinder of radius ρ about the line p − ρ n + s·generator
@@ -183,10 +183,10 @@ fn cylinder_gives_a_tube() {
 #[test]
 fn bad_inputs_are_errors() {
     let cloud = ellipsoid_cloud(10, 1, [1.0, 1.0, 1.0]);
-    assert!(matches!(fit_tori(&cloud, &[[0.0; 6]; 9], &FitOptions::default()), Err(PatError::SizeMismatch { .. })));
+    assert!(matches!(fit_tori(&cloud, &[[0.0; 6]; 9], &common::ref_fit()), Err(PatError::SizeMismatch { .. })));
     let mut co = vec![[0.0f32, 0.0, 0.0, 0.0, -0.5, -0.5]; 10];
     co[7][3] = f32::NAN;
-    assert!(matches!(fit_tori(&cloud, &co, &FitOptions::default()), Err(PatError::NonFinite { index: 7, .. })));
+    assert!(matches!(fit_tori(&cloud, &co, &common::ref_fit()), Err(PatError::NonFinite { index: 7, .. })));
     let bad = FitOptions { eig_eps: 0.0, ..Default::default() };
     assert!(matches!(fit_tori(&cloud, &co, &bad), Err(PatError::InvalidOption { .. })));
     // cloud validation
@@ -251,7 +251,7 @@ fn features_and_coefficients_are_translation_and_scale_covariant() {
 fn tori_round_trip() {
     let cloud = ellipsoid_cloud(50, 5, [1.0, 0.7, 0.4]);
     let co = vec![[0.01f32, 0.1, -0.2, 0.3, -0.5, -0.4]; 50];
-    let (tori, _) = fit_tori(&cloud, &co, &FitOptions::default()).unwrap();
+    let (tori, _) = fit_tori(&cloud, &co, &common::ref_fit()).unwrap();
     let b = tori.to_bytes(cloud.hash());
     let (back, h) = ddg_points_as_tori::Tori::from_bytes(&b, Some(cloud.hash())).unwrap();
     assert_eq!(h, cloud.hash());

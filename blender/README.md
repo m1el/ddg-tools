@@ -912,8 +912,8 @@ usable, else the CPU; *CUDA* fails with the library's message in a CPU-only whee
 greyed out without CUDA (build with `DDG_WHEEL_CUDA=1`). The status line gives the device of the
 tori (build) and of the evaluation, the triangles, the cache hit or miss and the times. The
 library's `reconstruct` does not report the device of the evaluation, so for the mesh stage the
-panel states the device the setting resolves to. *Advanced*: sign rule (Reference, the default as
-trained; Geometric differs only at saddle points), evaluation rule (Per Query, the library's
+panel states the device the setting resolves to. *Advanced*: sign rule (Geometric, the default: the osculating
+torus also at saddle points; Reference reproduces the authors' program and differs only at saddle points), evaluation rule (Per Query, the library's
 default; Paper: the paper's Sec. 4.2 constant lambda over a radius neighborhood), threads.
 
 **Cancel.** Esc / Cancel returns at once. The tori build and the marching-cubes / Boolean

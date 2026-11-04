@@ -154,7 +154,7 @@ def step_properties():
              "evaluation", "threads", "normal_attribute", "use_cache")
     check(all(hasattr(s, n) for n in names), "the scene settings have every option")
     check((s.mode, s.resolution, s.device, s.sign_rule, s.evaluation) ==
-          ('SURFACE', 128, 'AUTO', 'REFERENCE', 'PER_QUERY'), "defaults")
+          ('SURFACE', 128, 'AUTO', 'GEOMETRIC', 'PER_QUERY'), "defaults")
     props = bpy.ops.object.ddg_points_as_tori.get_rna_type().properties
     check(all(n in props for n in names), "the operator has every option")
     check(hasattr(bpy.types, "VIEW3D_PT_ddg_points_as_tori"), "the sidebar panel is registered")
