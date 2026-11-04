@@ -304,13 +304,10 @@ fn brute_force(s: &Surface, sources: &[ExactSource], depth: usize) -> Vec<f64> {
         }
     }
     let mut done = vec![false; n];
-    loop {
-        let Some(u) = (0..n)
-            .filter(|&v| !done[v] && d[v].is_finite())
-            .min_by(|&a, &b| d[a].total_cmp(&d[b]))
-        else {
-            break;
-        };
+    while let Some(u) = (0..n)
+        .filter(|&v| !done[v] && d[v].is_finite())
+        .min_by(|&a, &b| d[a].total_cmp(&d[b]))
+    {
         done[u] = true;
         for f in 0..s.c.n_faces() {
             for k in 0..3 {
