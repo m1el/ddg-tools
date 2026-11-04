@@ -1223,3 +1223,15 @@ proposals accepted).**
 3. `Csg::Leaf(Arc<dyn ImplicitField>)`, so baselines can be CSG leaves.
 4. The grid is stored densely (256³ = 136 MB; limit 2^29 points). A sparse/banded store is an open
    item if the Blender operator needs 512³+.
+
+**Resolutions after the analytic shapes and generators (WP8, 2026-11-04; `NOTES-WP8.md`).**
+1. **Saddle-rich set** for the `SignRule` decision: tori (thin/fat), ellipse-, lens-, arc-, moon-
+   and heart-profile rings, and a washer, with exact truth. Saddle fractions range from 0.07 to
+   0.69; sphere and cylinder are controls. 13 of the 70 App. E instances (revolutions of pie, arc,
+   vesica, ellipse and moon profiles) have saddle regions (0.04–0.32). WP14 uses both sets.
+2. `generate::simplify` (quadric collapse to ≤ 2048 faces) is added in place of pyfqmr.
+3. Perlin noise uses a seeded permutation (ours). The authors' blobs are not regenerated bit for
+   bit; their distribution is.
+4. Vesicas with `d < 0` are a union of two discs, as in the reference, and kept as such.
+5. The npz writer has no ZIP64: files stay below 4 GiB (≈ 500 shapes, as the authors' files).
+6. Blob fields are not SDFs: MC on them uses `Band::Dense`.
