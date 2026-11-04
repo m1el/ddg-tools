@@ -169,6 +169,21 @@ impl KdTree {
         self.pts.is_empty()
     }
 
+    /// The tree as flat arrays for the GPU back end (WP4, `crate::gpu`): per node `lo`, `hi`
+    /// (3 each), `start`, `end`, `right` (`u32::MAX` for a leaf; pre-order, the left child
+    /// follows its parent), then the points in tree order and tree order → input index.
+    #[cfg(feature = "cuda")]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn flat(&self) -> (Vec<f64>, Vec<f64>, Vec<u32>, Vec<u32>, Vec<u32>, Vec<f64>, &[u32]) {
+        let lo = self.nodes.iter().flat_map(|n| n.lo).collect();
+        let hi = self.nodes.iter().flat_map(|n| n.hi).collect();
+        let start = self.nodes.iter().map(|n| n.start).collect();
+        let end = self.nodes.iter().map(|n| n.end).collect();
+        let right = self.nodes.iter().map(|n| n.right).collect();
+        let pts = self.pts.iter().flatten().copied().collect();
+        (lo, hi, start, end, right, pts, &self.idx)
+    }
+
     /// The `k` nearest points of `q`, ordered by `(d², index)`, written to `out` (cleared first).
     /// `k ≥ n` returns all points. Exact.
     pub fn knn(&self, q: [f64; 3], k: usize, out: &mut Vec<Neighbor>) {

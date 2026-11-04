@@ -13,8 +13,9 @@ rust-version = "1.95"
 default = ["bundled-weights"]
 # Embed `weights/pat-reference.safetensors` (the authors' MIT weights, converted) with `include_bytes!`.
 bundled-weights = []
-# GPU inference and our NVRTC kernels (WP4 adds its dependencies).
-cuda = []
+# GPU inference (burn-cuda, CubeCL kernels compiled by NVRTC at run time) and our NVRTC kernels
+# (cudarc). Nothing CUDA is needed at build time; running needs a driver and libnvrtc 12.
+cuda = ["burn/cuda", "dep:cudarc", "dep:burn-cubecl"]
 # Training (SPEC.md §10): burn autodiff + optimizers, the compressed-npz reader, the seeded query
 # RNG and the curriculum file parser.
 train = ["burn/autodiff", "burn/optim", "dep:zip", "dep:rand_chacha", "dep:toml"]
@@ -23,6 +24,13 @@ train = ["burn/autodiff", "burn/optim", "dep:zip", "dep:rand_chacha", "dep:toml"
 burn = { version = "=0.22.1", default-features = false, features = ["std", "flex", "simd"] }
 gemm = { version = "0.19", default-features = false, features = ["std"] }
 rayon = "1.10"
+# TriMesh validation of the marching-cubes output (WP6)
+ddg-core = { path = "../ddg-core" }
+# The same cudarc as ddg-repulsive-surfaces (and burn-cuda's CubeCL): driver and NVRTC opened at run time.
+cudarc = { version = "0.19.10", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-12040"] }
+# burn-cuda with kernel fusion (feature `cuda` only; NOTES-GPU.md: 2.7x faster, deterministic). Turned on here
+# rather than through `burn/fusion`, which drags `burn-remote` into the resolution.
+burn-cubecl = { version = "=0.22.1", optional = true, default-features = false, features = ["std", "fusion"] }
 safetensors = { version = "0.6", default-features = false, features = ["std"] }
 # Training only (feature `train`): pure-Rust deflate for the training npz files, ChaCha8 (D22), TOML.
 zip = { version = "0.6", optional = true, default-features = false, features = ["deflate"] }

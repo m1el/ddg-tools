@@ -237,13 +237,27 @@ pub enum Device {
     /// The CPU.
     #[default]
     Cpu,
-    /// A CUDA device (feature `cuda`, WP4).
+    /// A CUDA device (feature `cuda`; an error when it cannot be used).
     Cuda {
         /// Device ordinal.
         ordinal: usize,
     },
     /// CUDA when available, else the CPU.
     Auto,
+}
+
+/// How the network's matmuls run on a CUDA device (feature `cuda`, NOTES-GPU.md).
+///
+/// CubeCL's f32 matmul on `sm_80+` is a TF32 tensor-core kernel (10 explicit mantissa bits per
+/// operand), which moves the raw outputs by ~1.5e-4 relative against the CPU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GpuMatmul {
+    /// f32 accuracy (default): every matmul as three TF32 products of exactly split operands
+    /// (`a_h b_h + a_h b_l + a_l b_h`); raw outputs within ~4e-7 of the CPU.
+    #[default]
+    Split3,
+    /// One TF32 product per matmul: ~2.8× faster, raw outputs within ~2e-4 of the CPU.
+    Tf32,
 }
 
 /// Options of [`predict_coefficients`].
@@ -255,12 +269,15 @@ pub struct PredictOptions {
     pub threads: Option<usize>,
     /// Feature arithmetic (D3).
     pub feature_order: FeatureOrder,
+    /// Matmul precision on a CUDA device (ignored on the CPU).
+    pub gpu_matmul: GpuMatmul,
 }
 
 /// What prediction did.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PredictReport {
-    /// The device used.
+    /// The device that ran the forward pass (`Cpu` or `Cuda { ordinal }`; features are always
+    /// computed on the CPU).
     pub device: Device,
     /// Tokens per neighborhood.
     pub tokens: usize,
@@ -303,6 +320,10 @@ pub fn forward_features(model: &Model, features: &[f32], tokens: usize, opts: &P
         return Err(PatError::SizeMismatch { what: format!("{} feature values for {tokens} tokens", features.len()) });
     }
     check_device(opts.device)?;
+    #[cfg(feature = "cuda")]
+    if let Some(ordinal) = crate::gpu::resolve_ordinal(opts.device)? {
+        return cuda::CudaRunner::new(model, ordinal, opts.gpu_matmul)?.run(features, tokens);
+    }
     let b = features.len() / (6 * tokens);
     let pool = crate::pool::make_pool(opts.threads)?;
     let runner = Runner::new(model);
@@ -320,7 +341,10 @@ pub fn forward_features(model: &Model, features: &[f32], tokens: usize, opts: &P
 fn check_device(d: Device) -> Result<(), PatError> {
     match d {
         Device::Cpu | Device::Auto => Ok(()),
-        Device::Cuda { .. } => Err(PatError::Gpu { reason: "the cuda back end is not built yet (WP4)".into() }),
+        #[cfg(feature = "cuda")]
+        Device::Cuda { .. } => Ok(()),
+        #[cfg(not(feature = "cuda"))]
+        Device::Cuda { .. } => Err(PatError::Gpu { reason: "ddg-points-as-tori was built without the `cuda` feature".into() }),
     }
 }
 
@@ -375,6 +399,10 @@ pub fn predict_coefficients(
         if let Some(&j) = row.iter().find(|&&j| j as usize >= n) {
             return Err(PatError::SizeMismatch { what: format!("neighborhood {i} has index {j} ≥ {n}") });
         }
+    }
+    #[cfg(feature = "cuda")]
+    if let Some(ordinal) = crate::gpu::resolve_ordinal(opts.device)? {
+        return cuda::predict_coefficients_cuda(model, cloud, nbhds, opts, ordinal);
     }
     let pool = crate::pool::make_pool(opts.threads)?;
     let runner = Runner::new(model);

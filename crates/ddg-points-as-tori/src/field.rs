@@ -33,7 +33,9 @@ impl Default for Neighborhood {
     }
 }
 
-/// Evaluation precision. The CPU is f64 Eq. 23 always; `F32Stable` is a GPU option (WP4).
+/// Evaluation precision. The CPU is f64 Eq. 23 always; `F32Stable` is a GPU option (feature
+/// `cuda`): batch evaluation in f32 with the stable form of SPEC.md §7.3 (single-point queries stay
+/// on the CPU in f64).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EvalPrecision {
     /// f64.
@@ -58,7 +60,9 @@ pub struct EvalOptions {
     pub isovalue: f64,
     /// Precision.
     pub precision: EvalPrecision,
-    /// Device (the CPU here; WP4 adds CUDA).
+    /// Device of batch evaluation ([`TorusField::evaluate`]); single-point queries run on the CPU.
+    /// `Cuda` is an error when the device or the neighborhood cannot run there; `Auto` falls back
+    /// to the CPU.
     pub device: Device,
     /// Threads for batch evaluation (`None`: all cores).
     pub threads: Option<usize>,
@@ -90,6 +94,8 @@ pub struct EvalReport {
     pub radius_fallbacks: u64,
     /// Neighbor terms summed.
     pub terms: u64,
+    /// The device that ran the evaluation.
+    pub device: Device,
     /// Wall time.
     pub seconds: f64,
 }
@@ -104,6 +110,8 @@ pub struct TorusField {
     lambda_global: f64,
     mean_distance: f64,
     pool: rayon::ThreadPool,
+    #[cfg(feature = "cuda")]
+    gpu: Option<crate::gpu::GpuField>,
 }
 
 fn degenerate(index: usize) -> PatError {
@@ -178,8 +186,12 @@ impl TorusField {
         if !options.isovalue.is_finite() {
             return Err(PatError::InvalidOption { what: format!("isovalue = {}", options.isovalue) });
         }
-        if options.precision != EvalPrecision::F64 || !matches!(options.device, Device::Cpu | Device::Auto) {
-            return Err(PatError::Gpu { reason: "GPU evaluation (and F32Stable) is not built yet (WP4)".into() });
+        #[cfg(not(feature = "cuda"))]
+        if options.precision != EvalPrecision::F64 || matches!(options.device, Device::Cuda { .. }) {
+            return Err(PatError::Gpu { reason: "GPU evaluation and F32Stable need the `cuda` feature".into() });
+        }
+        if options.precision == EvalPrecision::F32Stable && options.device == Device::Cpu {
+            return Err(PatError::InvalidOption { what: "EvalPrecision::F32Stable runs on the GPU only (device Cpu)".into() });
         }
         let pool = crate::pool::make_pool(options.threads)?;
         let positions = cloud.positions().to_vec();
@@ -192,7 +204,28 @@ impl TorusField {
                 return Err(PatError::InvalidOption { what: format!("PaperHeuristic gives λ = {lambda_global} (D = {mean_distance})") });
             }
         }
-        Ok(TorusField { positions, tori, tree, options, lambda_global, mean_distance, pool })
+        #[cfg(feature = "cuda")]
+        let gpu = open_gpu(&options, &tree, &positions, &tori.tori)?;
+        Ok(TorusField {
+            positions,
+            tori,
+            tree,
+            options,
+            lambda_global,
+            mean_distance,
+            pool,
+            #[cfg(feature = "cuda")]
+            gpu,
+        })
+    }
+
+    /// The device of batch evaluation.
+    pub fn device(&self) -> Device {
+        #[cfg(feature = "cuda")]
+        if let Some(g) = &self.gpu {
+            return g.device();
+        }
+        Device::Cpu
     }
 
     /// The options of the paper's Sec. 4.2 for `cloud`: `λ = 10³/D` constant, radius
@@ -347,6 +380,20 @@ impl TorusField {
                 what: "the Laplacian pass returns the frozen gradient; request the exact gradient separately".into(),
             });
         }
+        #[cfg(feature = "cuda")]
+        if let Some(g) = &self.gpu {
+            let mut out = out;
+            let w = crate::gpu::Want::of(out.gradient.is_some(), out.laplacian.is_some(), self.options.gradient);
+            let o = &self.options;
+            return match g.evaluate(xs, o.neighborhood, o.lambda, self.lambda_global, o.isovalue, w, &mut out)? {
+                Ok(mut rep) => {
+                    rep.device = g.device();
+                    rep.seconds = t0.elapsed().as_secs_f64();
+                    Ok(rep)
+                }
+                Err(i) => Err(degenerate(i)),
+            };
+        }
         let vals: Vec<Result<(BlendValue, bool, usize), Degenerate>> = self.pool.install(|| {
             xs.par_chunks(EVAL_CHUNK)
                 .flat_map_iter(|c| {
@@ -383,6 +430,32 @@ impl TorusField {
     }
 }
 
+/// The GPU field `options` ask for (feature `cuda`): `None` for the CPU.
+#[cfg(feature = "cuda")]
+fn open_gpu(options: &EvalOptions, tree: &KdTree, positions: &[[f64; 3]], tori: &[crate::Torus]) -> Result<Option<crate::gpu::GpuField>, PatError> {
+    use crate::gpu::{GpuContext, GpuField};
+    let f32s = options.precision == EvalPrecision::F32Stable;
+    let supported = GpuField::supports(options.neighborhood, positions.len());
+    let ctx = match options.device {
+        Device::Cpu => return Ok(None),
+        Device::Cuda { ordinal } => {
+            if !supported {
+                return Err(PatError::Gpu {
+                    reason: format!("{:?} does not run on the GPU (kNN and fallback k ≤ {})", options.neighborhood, crate::gpu::KMAX),
+                });
+            }
+            GpuContext::new(ordinal)?
+        }
+        Device::Auto => match GpuContext::new(0) {
+            Ok(c) if supported => c,
+            Ok(_) | Err(_) if !f32s => return Ok(None),
+            Ok(_) => return Err(PatError::Gpu { reason: format!("F32Stable: {:?} does not run on the GPU", options.neighborhood) }),
+            Err(e) => return Err(e),
+        },
+    };
+    GpuField::new(ctx, tree, positions, tori, options.area_weights.as_deref(), f32s).map(Some)
+}
+
 /// Options of [`PointsAsTori::build`].
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BuildOptions {
@@ -415,6 +488,10 @@ pub struct BuildReport {
     pub tokens: usize,
     /// Seconds for the kd-tree and the fitting neighborhoods.
     pub knn_seconds: f64,
+    /// The device of the fitting neighborhoods (the kd-tree is built on the CPU).
+    pub knn_device: Device,
+    /// The device of the fit.
+    pub fit_device: Device,
     /// Prediction.
     pub predict: PredictReport,
     /// Fitting.
@@ -437,17 +514,41 @@ impl PointsAsTori {
         }
         let pool = crate::pool::make_pool(opts.predict.threads)?;
         let tk = std::time::Instant::now();
-        let nb = pool.install(|| -> Result<_, PatError> {
-            let tree = KdTree::new(cloud.positions(), KdTreeOptions::default())?;
-            Ok(fitting_neighborhoods(&tree, cloud.positions(), k))
-        })?;
-        drop(pool);
+        // the GPU of the precompute (kNN, network, fit), if the predict device asks for one
+        #[cfg(feature = "cuda")]
+        let gpu = crate::gpu::resolve(opts.predict.device)?;
+        let tree = pool.install(|| KdTree::new(cloud.positions(), KdTreeOptions::default()))?;
+        #[cfg(feature = "cuda")]
+        let (nb, knn_device) = match &gpu {
+            Some(g) if crate::gpu::USE_GPU_KNN && k <= crate::gpu::KMAX => {
+                (crate::gpu::fitting_neighborhoods(g, &tree, cloud.positions(), k)?, g.device())
+            }
+            _ => (pool.install(|| fitting_neighborhoods(&tree, cloud.positions(), k)), Device::Cpu),
+        };
+        #[cfg(not(feature = "cuda"))]
+        let (nb, knn_device) = (pool.install(|| fitting_neighborhoods(&tree, cloud.positions(), k)), Device::Cpu);
+        drop((pool, tree));
         let knn_seconds = tk.elapsed().as_secs_f64();
         let (coeffs, sigma, predict) = predict_coefficients(model, cloud, &nb, &opts.predict)?;
         let tokens_lt_k = if nb.k < model.config().k { cloud.len() } else { 0 };
-        let (tori, fit) = fit_tori_with(cloud, &coeffs, &sigma, tokens_lt_k, &opts.fit)?;
+        #[cfg(feature = "cuda")]
+        let ((tori, fit), fit_device) = match &gpu {
+            Some(g) if crate::gpu::USE_GPU_FIT => (crate::gpu::fit_tori(g, cloud, &coeffs, &sigma, tokens_lt_k, &opts.fit)?, g.device()),
+            _ => (fit_tori_with(cloud, &coeffs, &sigma, tokens_lt_k, &opts.fit)?, Device::Cpu),
+        };
+        #[cfg(not(feature = "cuda"))]
+        let ((tori, fit), fit_device) = (fit_tori_with(cloud, &coeffs, &sigma, tokens_lt_k, &opts.fit)?, Device::Cpu);
         let field = TorusField::new(cloud, tori, opts.eval.clone())?;
-        let report = BuildReport { n: cloud.len(), tokens: nb.k, knn_seconds, predict, fit, seconds: t0.elapsed().as_secs_f64() };
+        let report = BuildReport {
+            n: cloud.len(),
+            tokens: nb.k,
+            knn_seconds,
+            knn_device,
+            fit_device,
+            predict,
+            fit,
+            seconds: t0.elapsed().as_secs_f64(),
+        };
         Ok((field, report))
     }
 }
