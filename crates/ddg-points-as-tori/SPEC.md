@@ -1129,3 +1129,29 @@ format in `lean/oracle/README.md` "Points as Tori").** These override §7.4 wher
    (relative ≤ 6e-15; axes 4e-10 from their angle round trip) and on the SDF at 1000 queries
    (≤ 1.3e-14). The CPU/GPU differences on near-flat tori are within the authors' program
    (CPU vs GPU), not between the formulas.
+
+**Resolutions after the core (WP1, 2026-11-04; details in `NOTES-WP1.md` "SPEC change
+proposals"; all accepted by the orchestrator).** These override §5, §7 and §15.1 where they differ.
+1. **Saddle tori (new finding).** For κmin·κmax < 0, the paper's center (Eq. 22 sign with
+   `c = Q* − sign/|κmin| n*`) gives the mirror image of the osculating torus: ∂g/∂n = −1 at the
+   point. On the golden tori that is every saddle (holey-bunny 33/12,917, femur 4, snail 1).
+   Switching those changes the 64³ SDF by up to 0.36. `FitOptions::sign_rule`:
+   `SignRule::Reference` (default for parity: as trained, as the oracle) and
+   `SignRule::Geometric` (center `o + n*/κmin`, signed; it differs only at saddles and exact
+   zeros). WP14 picks the default by the §16.2 accuracy run. WP7/WP10 train with either rule
+   (option), and the retrained comparison includes a `Geometric`-trained run. To be proved in
+   Lean (WP2): the contact condition (∂g/∂n = +1 at the point) under `Geometric`, and its failure
+   at saddles under `Reference`.
+2. A plane gives a half-space (§15.1) only under `Geometric`. Under `Reference` an exact zero
+   curvature gives a horn torus whose core passes through the point; this is counted
+   (`zero_curvature`).
+3. `CHUNK = 1` (4,000–4,650 neighborhoods/s at 32–64 threads; bitwise independent of chunk size
+   and thread count). No `gemm` kernel: the §18.3 threshold is met.
+4. Single-point evaluation returns `Result` (`DegenerateQuery`, non-finite query).
+5. `PaperHeuristic` sets λ only; the radius is `Neighborhood::Radius { r, fallback_k }`,
+   built by `TorusField::paper_options`. D = mean over points of the mean distance to the
+   `k_mean` nearest, self included.
+6. `All` and kNN with k ≥ n sum in index order (as the reference). The oracle sums in
+   `(ρ², index)` order; WP15 compares at 1e-12.
+7. Features normalize normals (`n / max(‖n‖, 1e-10)`) in both orders. Report fields as in
+   NOTES-WP1 item 9.
