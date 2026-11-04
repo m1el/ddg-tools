@@ -124,6 +124,8 @@ struct Kernels {
     radius_counts: CudaFunction,
     eval_radius: CudaFunction,
     eval_radius_f32: CudaFunction,
+    trace_knn: [CudaFunction; 3],
+    trace_all: CudaFunction,
     fit_tori: CudaFunction,
     exp_values: CudaFunction,
     pat_exp_values: CudaFunction,
@@ -202,6 +204,8 @@ impl GpuContext {
             radius_counts: f("radius_counts")?,
             eval_radius: f("eval_radius")?,
             eval_radius_f32: f("eval_radius_f32")?,
+            trace_knn: three("trace_knn")?,
+            trace_all: f("trace_all")?,
             fit_tori: f("fit_tori")?,
             exp_values: f("exp_values")?,
             pat_exp_values: f("pat_exp_values")?,
@@ -598,6 +602,71 @@ impl GpuField {
 
     pub(crate) fn device(&self) -> Device {
         self.g.device()
+    }
+
+    /// Sphere-trace a batch of rays on the device (WP11, `render::gpu`): `jobs` has 8 doubles per
+    /// ray (origin, direction, `t0`, `t1`). Returns, per ray, `[t, gx, gy, gz]` of the hit and
+    /// `[status, steps]` (the codes of `render::status`). `nb` must be `Knn` (`k ≤ KMAX` or
+    /// `k ≥ n`) or `All`; the gradient mode picks the blend's `want`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn trace(
+        &self,
+        jobs: &[f64],
+        nb: Neighborhood,
+        rule: LambdaRule,
+        lambda_global: f64,
+        isovalue: f64,
+        mode: GradientMode,
+        p: &crate::render::TraceParams,
+    ) -> Result<(Vec<f64>, Vec<u32>), PatError> {
+        let g = &*self.g;
+        let n = self.n as usize;
+        let all = match nb {
+            Neighborhood::All => true,
+            Neighborhood::Knn { k } if k >= n => true,
+            Neighborhood::Knn { k } if k <= KMAX => false,
+            other => return Err(PatError::Gpu { reason: format!("{other:?} does not run in the GPU tracer (kNN with k ≤ {KMAX}, or all points)") }),
+        };
+        let (ri, c, lc) = match rule {
+            LambdaRule::PerQuery { c } => (0i32, c, 0.0),
+            LambdaRule::Constant { lambda } => (1, 0.0, lambda),
+            LambdaRule::PaperHeuristic { c, .. } => (2, c, lambda_global),
+        };
+        let wi = Want::of(true, false, mode) as i32;
+        let nrays = jobs.len() / 8;
+        let null = 0u64;
+        let ki = match nb {
+            Neighborhood::Knn { k } => k as i32,
+            _ => 0,
+        };
+        let max_steps = p.max_steps as i32;
+        let mut out_all = Vec::with_capacity(4 * nrays);
+        let mut st_all = Vec::with_capacity(2 * nrays);
+        for (gi, js) in jobs.chunks(8 * QUERY_GROUP).enumerate() {
+            let _ = gi;
+            let m = js.len() / 8;
+            let nr = m as u64;
+            let dj = g.up(js, 0.0)?;
+            let mut out = g.zeros::<f64>(4 * m)?;
+            let mut st = g.zeros::<u32>(2 * m)?;
+            let f = if all { &g.k.trace_all } else { &g.k.trace_knn[kslot(match nb { Neighborhood::Knn { k } => k, _ => 0 })] };
+            let mut b = g.stream.launch_builder(f);
+            if !all {
+                b.arg(&ki);
+            }
+            b.arg(&nr).arg(&dj).arg(&self.n).arg(&ri).arg(&c).arg(&lc).arg(&isovalue).arg(&wi);
+            b.arg(&self.pos).arg(&self.center).arg(&self.axis).arg(&self.major).arg(&self.minor);
+            match &self.area {
+                Some(a) => b.arg(a),
+                None => b.arg(&null),
+            };
+            tree_args!(b, self.tree);
+            b.arg(&p.level).arg(&p.safety).arg(&p.g_min).arg(&p.eps).arg(&max_steps).arg(&mut out).arg(&mut st);
+            unsafe { b.launch(launch_cfg(nr)?) }.map_err(gpu_err("trace"))?;
+            out_all.extend(g.down(&out, 4 * m)?);
+            st_all.extend(g.down(&st, 2 * m)?);
+        }
+        Ok((out_all, st_all))
     }
 
     /// Whether this neighborhood runs on the GPU (`Knn` with `k ≤ KMAX` or `k ≥ n`, `All`,

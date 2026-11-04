@@ -283,6 +283,16 @@ impl TorusField {
         })
     }
 
+    /// Sphere-trace a batch of rays on the field's GPU (`render::gpu`; 8 doubles per ray in
+    /// `jobs`). `Err(Gpu)` when the field is on the CPU.
+    #[cfg(feature = "cuda")]
+    pub(crate) fn gpu_trace(&self, jobs: &[f64], p: &crate::render::TraceParams) -> Result<(Vec<f64>, Vec<u32>), PatError> {
+        match &self.gpu {
+            Some(g) => g.trace(jobs, self.options.neighborhood, self.options.lambda, self.lambda_global, self.options.isovalue, self.options.gradient, p),
+            None => Err(PatError::Gpu { reason: "the field is evaluated on the CPU (EvalOptions::device)".into() }),
+        }
+    }
+
     /// The device of batch evaluation.
     pub fn device(&self) -> Device {
         #[cfg(feature = "cuda")]

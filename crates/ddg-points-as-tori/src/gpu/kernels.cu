@@ -923,3 +923,77 @@ extern "C" __global__ void pat_exp_values(u64 n, const double* x, double* y) {
     u64 i = (u64)blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) y[i] = pat_exp(x[i]);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Sphere tracing (WP11, src/render): the traversal of `render::trace_ray`, operation for
+// operation, with the f64 blend above as the field. [formula: pat-render-step]
+//   t <- t + safety * |phi - level| / max(|grad|, gmin),  hit when |phi - level| < eps.
+// One ray per thread. jobs: 8 doubles per ray (ro, rd, t0, t1); out: 4 doubles per ray (t of the
+// hit, gradient there); st: 2 u32 per ray (status, steps) with the status codes of
+// `render::status` (0 miss, 1 hit, 2 step limit, 3 non-finite, 4 degenerate query).
+// ---------------------------------------------------------------------------------------------
+
+#define TRACE_ARGS                                                                                           \
+    u64 nr, const double *jobs, u32 n, int rule, double c, double lambda_const, double isovalue, int want,   \
+        const double *pos, const double *center, const double *axisv, const double *major,                   \
+        const double *minor, const double *area, TREE_ARGS, double level, double safety, double gmin,        \
+        double eps, int max_steps, double *out, u32 *st
+
+template <int KMAX, bool ALL>
+__device__ void trace_impl(int k, TRACE_ARGS) {
+    u64 q = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (q >= nr) return;
+    TREE_MAKE;
+    TorusArrays T = {center, axisv, major, minor};
+    BlendParams P = {rule, c, lambda_const, isovalue, want};
+    const double* J = &jobs[8 * q];
+    double s = J[6], s1 = J[7];
+    double od[ALL ? 1 : KMAX];
+    u32 oi[ALL ? 1 : KMAX];
+    BlendOut o;
+    u32 status = 0, steps = 0;
+    double hit_t = 0.0, g[3] = {0.0, 0.0, 0.0};
+    bool done = false;
+    while (steps < (u32)max_steps && s < s1) {
+        double x[3] = {J[0] + s * J[3], J[1] + s * J[4], J[2] + s * J[5]};
+        steps += 1;
+        if (ALL) {
+            blend(P, pos, T, area, x, NB_ALL, 0, n, &o);
+        } else {
+            int cnt = knn<(ALL ? 1 : KMAX)>(t, n, x, k, od, oi);
+            blend(P, pos, T, area, x, NB_LIST, oi, (u32)cnt, &o);
+        }
+        if (o.degenerate) { status = 4; done = true; break; }
+        double f = o.distance - level;
+        double gl = sqrt((o.grad[0] * o.grad[0] + o.grad[1] * o.grad[1]) + o.grad[2] * o.grad[2]);
+        if (!(isfinite(f) && isfinite(gl))) { status = 3; done = true; break; }
+        double af = fabs(f);
+        if (af < eps) {
+            status = 1; done = true; hit_t = s;
+            g[0] = o.grad[0]; g[1] = o.grad[1]; g[2] = o.grad[2];
+            break;
+        }
+        double denom = gl > gmin ? gl : gmin;
+        s += af / denom * safety;
+    }
+    if (!done) status = (s >= s1) ? 0 : 2;
+    out[4 * q] = hit_t; out[4 * q + 1] = g[0]; out[4 * q + 2] = g[1]; out[4 * q + 3] = g[2];
+    st[2 * q] = status; st[2 * q + 1] = steps;
+}
+
+#define TRACE_ENTRY(K)                                                                                       \
+    extern "C" __global__ void trace_knn_##K(int k, TRACE_ARGS) {                                            \
+        trace_impl<K, false>(k, nr, jobs, n, rule, c, lambda_const, isovalue, want, pos, center, axisv,       \
+                             major, minor, area, lo, hi, start, end, right, pts, tidx, level, safety, gmin,   \
+                             eps, max_steps, out, st);                                                       \
+    }
+
+TRACE_ENTRY(32)
+TRACE_ENTRY(64)
+TRACE_ENTRY(128)
+
+extern "C" __global__ void trace_all(TRACE_ARGS) {
+    trace_impl<1, true>(0, nr, jobs, n, rule, c, lambda_const, isovalue, want, pos, center, axisv, major,
+                        minor, area, lo, hi, start, end, right, pts, tidx, level, safety, gmin, eps, max_steps,
+                        out, st);
+}
