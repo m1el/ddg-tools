@@ -26,7 +26,23 @@ Build: `cd lean/proofs && lake build DdgProofs.PointsAsTori.<M> > runs_tmp/pat-w
    `κmin = 0` (cylinder, plane) gives `R = 1/ε`, `d = (0, 0)` at `o`: the torus does not pass
    through `o` (`g(o) = −sign·r`). Contact needs `κ₊κ₋ ≠ 0`.
 
-## Progress
+4. **Weight range (pat-blend-weight-range).** SPEC §7.4 "the max weight is `e^{λσ} ≥ 1` for the
+   nearest point" holds only when `ρ_min ≤ σ`; proved instead: weights in `[e^{−C}, e^{C}]`,
+   `W ≥ |𝒩| e^{−C}`.
 
-- [ ] Basic  - [ ] Features  - [ ] Fitting  - [ ] Torus  - [ ] Blend
-- [ ] Baselines  - [ ] Loss  - [ ] Apps  - [ ] Pat2d  - [ ] CITED  - [ ] import line
+## New ids (not yet in SPEC §13)
+
+- `pat-fit-contact` — `PAT.fit_contact` (Torus.lean): Geometric rule `c = o + n*/κmin`:
+  `g(o) = 0`, `∇g(o) = n*` (∂g/∂n* = +1); Reference rule: `g(o) = 0`, `∇g(o) = σ n*`,
+  `σ = sgn(κminκmax)` (−1 exactly at saddles). Also tagged `pat-torus-contact`.
+- `pat-shc-gradient`, `pat-sspd-gradient`, `pat-extrusion`, `pat-extrusion-gradient`,
+  `pat2d-circle-sdf`, `pat2d-blend` are in §13 text but not as separate table rows for all — they
+  exist as Lean theorems with these exact ids.
+
+## Status (all done, builds, check-formulas OK)
+
+Modules: Basic, Features, Fitting, Torus, Blend, Apps, Baselines, Loss, Pat2d; root
+`DdgProofs/PointsAsTori.lean`; import line in `DdgProofs.lean`; CITED section "Points as Tori".
+Axiom audit of the main theorems: propext, Classical.choice, Quot.sound only.
+Not proved (cited instead or left): FWN order-2 (third derivative) term and error bound;
+the WLS normal equations of the 2D circle fit; 2D blend gradient (algebra identical to 3D).

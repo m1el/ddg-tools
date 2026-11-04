@@ -2368,8 +2368,10 @@ network and everything learned; neighbor search; the clamps of D9 beyond the sta
    for `κmin κmax > 0`; for saddles they are `(−κmax, −κmin)`, and the SDF gradient at `o` is
    `−n*` (`PAT.torus_contact_curvatures`, `PAT.torus_contact_normal`). The center
    `c = o + n*/κmin` (with the same radii and Eq. 22 for the SDF sign) osculates in all cases with
-   `∇g(o) = +n*`. The reference code (`torus_distance.cpp:781-807`) is the paper's, and the
-   pretrained network was trained with it, so inference keeps the paper's rule.
+   `∇g(o) = +n*`; both rules together are `PAT.fit_contact` (`pat-fit-contact`: `Geometric` gives
+   `∂g/∂n*(o) = +1`, `Reference` gives `σ = −1` exactly at saddles). The reference code
+   (`torus_distance.cpp:781-807`) is the paper's, and the pretrained network was trained with it
+   (SPEC §18, resolution 1: `SignRule::Reference` default, `SignRule::Geometric` option).
 2. *Degenerate eigenvector pair.* `(v1 ± √Δ, v2)` vanishes for one sign whenever `v2 = 0`,
    `v1 ≠ 0`, e.g. `a10 = a01 = a11 = 0`, `a20 ≠ a02` (`PAT.principal_pair_degenerate`); the
    reference's `1e-10` clamp then returns the other eigenvector twice.

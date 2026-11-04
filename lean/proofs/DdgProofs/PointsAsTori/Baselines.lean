@@ -158,7 +158,7 @@ def greenGrad (y : V3) : V3 := (-(4 * π * vnorm y ^ 3)⁻¹) • y
 `∇²G(y) h = (3(y·h) y/|y|² − h)/(4π|y|³)` (the order-1 coefficient), whose trace is `0`
 (`G` is harmonic); and the GWN term is the dipole `⟨n, p − x⟩/(4π|p − x|³) = n·∇G(x − p)`.
 
-[formula: pat-fwn-expansion] [formula: pat-winding-dipole] -/
+[formula: pat-fwn-expansion] -/
 theorem fwn_expansion {y : V3} (hy : y ≠ 0) :
     HasFDerivAt green (dualOf (greenGrad y)) y ∧
     HasDiv greenGrad 0 y ∧

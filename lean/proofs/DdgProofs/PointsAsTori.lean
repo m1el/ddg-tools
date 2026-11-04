@@ -5,6 +5,8 @@ import DdgProofs.PointsAsTori.Torus
 import DdgProofs.PointsAsTori.Blend
 import DdgProofs.PointsAsTori.Apps
 import DdgProofs.PointsAsTori.Baselines
+import DdgProofs.PointsAsTori.Loss
+import DdgProofs.PointsAsTori.Pat2d
 
 /-!
 # Points as Tori (Feng, Gkioulekas, Crane, ACM TOG 45(4), Article 53, 2026)

@@ -540,6 +540,67 @@ theorem torus_contact_curvatures {kmin kmax : ℝ} (h0 : kmin ≠ 0) (h1 : kmax 
     refine ⟨fun _ => ⟨by ring, by ring⟩, fun h => absurd h (not_lt.mpr hp.le), ⟨by ring, by ring⟩,
       by ring, by ring⟩
 
+/-- `sgn(x)² = 1` for `x ≠ 0`. -/
+theorem sign_sq_of_ne {x : ℝ} (h : x ≠ 0) : Real.sign x ^ 2 = 1 := by
+  rcases lt_or_gt_of_ne h with h | h
+  · rw [Real.sign_of_neg h]; norm_num
+  · rw [Real.sign_of_pos h]; norm_num
+
+theorem torusSign_sq (kmin kmax : ℝ) : torusSign kmin kmax ^ 2 = 1 := by
+  unfold torusSign; split_ifs <;> norm_num
+
+/-- **Contact of the fitted torus under both sign rules** (SPEC §18, resolution 1;
+`FitOptions::sign_rule`). Let `κmin, κmax ≠ 0`, `n*` a unit normal at `o = Q*(0,0)` orthogonal to
+the axis `u`, `r = 1/|κmax|`, `σ = sgn(κmin κmax)`, `R = 1/|κmin| − σ r`, the stored minor radius
+`sign(T)·r` (Eq. 22) and `g` the torus SDF (Eq. 23–24).
+
+* `SignRule::Geometric`, center `c = o + n*/κmin`: `g(o) = 0` and `∇g(o) = n*`, so
+  `∂g/∂n*(o) = +1` (the contact condition).
+* `SignRule::Reference`, center `c = o − (sign(T)/|κmin|) n*` (the paper): `g(o) = 0` and
+  `∇g(o) = σ n*`, so `∂g/∂n*(o) = −1` exactly at saddles (`κmin κmax < 0`) and `+1` otherwise.
+
+[formula: pat-fit-contact] [formula: pat-torus-contact] -/
+theorem fit_contact {u ns o : V3} (hu : u ⬝ᵥ u = 1) (hn : ns ⬝ᵥ ns = 1) (hun : ns ⬝ᵥ u = 0)
+    {kmin kmax : ℝ} (h0 : kmin ≠ 0) (h1 : kmax ≠ 0) :
+    let r := 1 / |kmax|
+    let σ := Real.sign (kmin * kmax)
+    let R := 1 / |kmin| - σ * r
+    let τ := torusSign kmin kmax
+    (torusSDF (o + (1 / kmin) • ns) u R (τ * r) o = 0 ∧
+      HasFDerivAt (torusSDF (o + (1 / kmin) • ns) u R (τ * r)) (dualOf ns) o ∧
+      dualOf ns ns = 1) ∧
+    (torusSDF (o - (τ / |kmin|) • ns) u R (τ * r) o = 0 ∧
+      HasFDerivAt (torusSDF (o - (τ / |kmin|) • ns) u R (τ * r)) (dualOf (σ • ns)) o ∧
+      dualOf (σ • ns) ns = σ ∧ (kmin * kmax < 0 → σ = -1) ∧ (0 < kmin * kmax → σ = 1)) := by
+  intro r σ R τ
+  have hρ : 0 < 1 / |kmin| := by have := abs_pos.mpr h0; positivity
+  have hr : 0 < r := by have := abs_pos.mpr h1; simp only [r]; positivity
+  have hσ : σ ^ 2 = 1 := sign_sq_of_ne (mul_ne_zero h0 h1)
+  have hτ : τ ^ 2 = 1 := torusSign_sq kmin kmax
+  have hη : (-Real.sign kmin) ^ 2 = 1 := by rw [neg_sq]; exact sign_sq_of_ne h0
+  obtain ⟨-, -, -, hgeo, href⟩ := torus_contact_curvatures h0 h1
+  -- geometric center: `o = c + (η ρ) n*` with `η = −sgn κmin`
+  have hoG : o = (o + (1 / kmin) • ns) + (-Real.sign kmin * (1 / |kmin|)) • ns := by
+    have : -Real.sign kmin * (1 / |kmin|) = -(1 / kmin) := by
+      rcases lt_or_gt_of_ne h0 with h | h
+      · rw [Real.sign_of_neg h, abs_of_neg h]; field_simp
+      · rw [Real.sign_of_pos h, abs_of_pos h]; field_simp
+    rw [this, neg_smul]; abel
+  have hoR : o = (o - (τ / |kmin|) • ns) + (τ * (1 / |kmin|)) • ns := by
+    rw [show τ * (1 / |kmin|) = τ / |kmin| by ring]; abel
+  have vG := torus_contact_value (c := o + (1 / kmin) • ns) hu hn hun hρ hσ hτ hη (r := r)
+  have nG := torus_contact_normal (c := o + (1 / kmin) • ns) hu hn hun hρ hr hσ hτ hη
+  have vR := torus_contact_value (c := o - (τ / |kmin|) • ns) hu hn hun hρ hσ hτ hτ (r := r)
+  have nR := torus_contact_normal (c := o - (τ / |kmin|) • ns) hu hn hun hρ hr hσ hτ hτ
+  rw [← hoG] at vG nG
+  rw [← hoR] at vR nR
+  have e1 : τ * σ * -Real.sign kmin = 1 := hgeo
+  have e2 : τ * σ * τ = σ := href
+  rw [e1, one_smul] at nG
+  rw [e2] at nR
+  refine ⟨⟨vG, nG, by rw [dualOf_apply, hn]⟩, ⟨vR, nR, by rw [dualOf_apply, smul_dotProduct, hn,
+    smul_eq_mul, mul_one], fun h => Real.sign_of_neg h, fun h => Real.sign_of_pos h⟩⟩
+
 /-! ## The Laplacian (ours, D24) -/
 
 /-- The trace of a linear map of `ℝ³` (the divergence of a field with that derivative). -/
