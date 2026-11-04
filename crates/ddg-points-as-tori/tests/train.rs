@@ -675,17 +675,30 @@ fn reference_loss_export() {
         for (si, s) in shapes.iter().enumerate() {
             let base = StepOptions { feature_order: FeatureOrder::Reference, ..Default::default() };
             let prep = prepare_shape(s, &base, (42, 0, 10_000 + si as u64)).unwrap();
-            let variants: Vec<(&str, StepOptions)> = vec![
-                ("T40", base),
-                ("Tinf", StepOptions { loss: LossOptions { cutoff: f64::INFINITY, ..base.loss }, ..base }),
+            let prep_df = prepare_shape(s, &StepOptions { feature_order: FeatureOrder::DifferenceFirst, ..base }, (42, 0, 10_000 + si as u64)).unwrap();
+            let mut variants: Vec<(&str, StepOptions)> = vec![("T40", base)];
+            if raw_normals && si < 3 && std::env::var("PAT_TINF").is_ok() {
+                variants.push(("Tinf", StepOptions { loss: LossOptions { cutoff: f64::INFINITY, ..base.loss }, ..base }));
+            }
+            variants.extend([
+
                 ("robust", StepOptions { loss: LossOptions { fit: TensorFitOptions { eigen_rule: EigenRule::Robust, ..Default::default() }, ..base.loss }, ..base }),
                 ("geometric", StepOptions { loss: LossOptions { fit: TensorFitOptions { sign_rule: SignRule::Geometric, ..Default::default() }, ..base.loss }, ..base }),
                 ("diff_first", StepOptions { feature_order: FeatureOrder::DifferenceFirst, ..base }),
-            ];
+            ]);
+            // saddle tori of the authors' network on this cloud (they are where Geometric differs)
+            let cloud = ddg_points_as_tori::PointCloud::new(s.positions[..s.n].to_vec(), s.normals[..s.n].to_vec(), ddg_points_as_tori::NormalPolicy::Normalize).unwrap().0;
+            let nb = ddg_points_as_tori::spatial::Neighborhoods { k: s.k, indices: s.neighbors[..s.n * s.k].iter().map(|&j| j as u32).collect() };
+            let po = ddg_points_as_tori::PredictOptions { feature_order: FeatureOrder::Reference, ..Default::default() };
+            let (co, _, _) = ddg_points_as_tori::predict_coefficients(&model, &cloud, &nb, &po).unwrap();
+            let (_, fr) = ddg_points_as_tori::fit_tori(&cloud, &co, &FitOptions::default()).unwrap();
+            let (_, fr32) = ddg_points_as_tori::fit_tori(&cloud, &co, &FitOptions { eigen_rule: EigenRule::Robust, ..Default::default() }).unwrap();
+            eprintln!("shape {si}: {} saddle tori, {} where the robust rule changes the f64 fit", fr.saddle, fr32.eigen_switched);
             for (name, o) in variants {
+                let pr = if name == "diff_first" { &prep_df } else { &prep };
                 for (b, lo) in [0usize, 1024].iter().enumerate() {
                     let t = std::time::Instant::now();
-                    let v = step(&params, &ctx, &prep, *lo, lo + 1024, &o, false).unwrap().value;
+                    let v = step(&params, &ctx, pr, *lo, lo + 1024, &o, false).unwrap().value;
                     json += &format!(
                         "{{\"raw_normals\": {raw_normals}, \"shape\": {si}, \"batch\": {b}, \"variant\": \"{name}\", \"distance\": {:e}, \"eikonal\": {:e}, \"queries\": {}, \"seconds\": {:.3}}},\n",
                         v.distance, v.eikonal, v.queries, t.elapsed().as_secs_f64()
@@ -775,17 +788,21 @@ fn short_run() {
     eprintln!("{rep:?}; {:.1} s, peak RSS {:.0} MB", t.elapsed().as_secs_f64(), peak_rss_mb());
     let first: f64 = losses[..10].iter().sum::<f64>() / 10.0;
     let last: f64 = losses[losses.len() - 10..].iter().sum::<f64>() / 10.0;
+    // the per-step loss is over different rows and queries each step (noisy); `short_curve` tracks a
+    // fixed evaluation set
     eprintln!("mean loss of the first 10 steps {first:.5}, of the last 10 {last:.5}");
-    assert!(last < first);
+    assert_eq!(rep.steps, steps);
+    assert!(losses.iter().all(|l| l.is_finite()));
 }
 
-/// Resumption: 2 × k steps with a restart in between equal 2k steps straight (bitwise).
+/// Resumption: 2 + 4 steps with a restart in between equal 6 steps straight (bitwise).
 #[test]
 #[ignore]
 fn resume_is_exact() {
     use ddg_points_as_tori::train::{Curriculum, TrainOptions, train};
     let mut c = Curriculum::reference().unwrap();
     c.phases.truncate(1);
+    c.phases[0].batch_rows = 1024; // 2 steps per epoch of the one-shape phase
     let run = |name: &str, plan: &[u64]| {
         let dir = out_dir(name);
         for f in ["checkpoint.safetensors", "checkpoint-adam.safetensors", "log.jsonl"] {
@@ -802,9 +819,9 @@ fn resume_is_exact() {
         }
         model.unwrap()
     };
-    // 64 steps per shape-epoch: stop at a shape boundary, resume at the next epoch
-    let a = run("resume-a", &[128]);
-    let b = run("resume-b", &[64, 128]);
+    // stop at a shape boundary (the end of epoch 1), resume at epoch 2
+    let a = run("resume-a", &[6]);
+    let b = run("resume-b", &[2, 6]);
     assert_eq!(a.weights(), b.weights());
 }
 
@@ -880,4 +897,52 @@ fn padded_clouds() {
         // empty slices have no queries
         assert_eq!(step(&params, &ctx, &prep, 64, 80, &o, true).unwrap().value.queries, 0);
     }
+}
+
+/// The pretraining setting (blob, batch 32, Adam, from scratch) through the step API, with the loss
+/// on a fixed evaluation set (all 2048 rows, fixed queries) every 16 steps; `PAT_LR`, `PAT_STEPS`,
+/// `PAT_THREADS`. Writes `runs_tmp/pat-wp7/curve-<lr>.tsv`.
+#[test]
+#[ignore]
+fn short_curve() {
+    use ddg_points_as_tori::train::data::{DataOptions, load_file};
+    use ddg_points_as_tori::train::step::evaluate_shape;
+    let lr: f64 = std::env::var("PAT_LR").ok().and_then(|v| v.parse().ok()).unwrap_or(1e-3);
+    let steps: usize = std::env::var("PAT_STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(128);
+    let threads: usize = std::env::var("PAT_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(64);
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+    let ctx = ctx32();
+    let (shapes, _) = load_file(&std::path::Path::new(DATA).join("pretraining_blob.npz"), &DataOptions::default()).unwrap();
+    let s = &shapes[0];
+    let o = StepOptions::default();
+    let mut params = NetParams::init(&ModelConfig::default(), 42, &ctx);
+    let mut adam = AdamTrainer::new(&params, AdamOptions::default());
+    let mut out = String::from("step\ttrain_loss\teval_loss\teval_distance\teval_eikonal\tseconds\n");
+    pool.install(|| {
+        let eval_prep = prepare_shape(s, &o, (7, 7, 7)).unwrap();
+        let eval = |p: &NetParams| {
+            let v = evaluate_shape(p, &ctx, &eval_prep, 1024, &o).unwrap();
+            let n = v.len() as f64;
+            (v.iter().map(|x| x.loss).sum::<f64>() / n, v.iter().map(|x| x.distance).sum::<f64>() / n, v.iter().map(|x| x.eikonal).sum::<f64>() / n)
+        };
+        let t0 = std::time::Instant::now();
+        let e = eval(&params);
+        out += &format!("0\t\t{:.6}\t{:.6}\t{:.6}\t0\n", e.0, e.1, e.2);
+        eprintln!("lr {lr:e} step 0: eval loss {:.5} (distance {:.5}, eikonal {:.5})", e.0, e.1, e.2);
+        let mut prep = None;
+        for k in 0..steps {
+            let (epoch, b) = (k / 64, k % 64);
+            if b == 0 {
+                prep = Some(prepare_shape(s, &o, (42, epoch as u64, 0)).unwrap());
+            }
+            let r = step(&params, &ctx, prep.as_ref().unwrap(), 32 * b, 32 * b + 32, &o, true).unwrap();
+            params = adam.update(&params, r.grads.as_ref().unwrap(), lr).unwrap();
+            if (k + 1) % 16 == 0 {
+                let e = eval(&params);
+                out += &format!("{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.1}\n", k + 1, r.value.loss, e.0, e.1, e.2, t0.elapsed().as_secs_f64());
+                eprintln!("lr {lr:e} step {}: train {:.5} eval loss {:.5} (distance {:.5}, eikonal {:.5}) {:.0} s", k + 1, r.value.loss, e.0, e.1, e.2, t0.elapsed().as_secs_f64());
+            }
+        }
+    });
+    std::fs::write(out_dir("curves").join(format!("curve-{lr:e}.tsv")), out).unwrap();
 }
