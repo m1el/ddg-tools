@@ -1368,7 +1368,11 @@ accepted).**
 1. **User decision 2026-11-04: `SignRule::Geometric` becomes the default** (never worse; 27–48 % better on
    clouds with predicted saddle tori; bitwise identical elsewhere). `Reference` stays for parity with the
    authors' program. **A second retraining run with `--sign geometric`** follows the current (Reference) run
-   on the GPU, and both are compared with the released weights.
+   on the GPU, and both are compared with the released weights. **User decision 2026-11-04: probe first,
+   then decide**: the Geometric run first covers pretrain + phase0 only (100,096 steps, ≈ 14 h; `--phases
+   pretrain,phase0`, `runs_tmp/pat-train-geo/run.sh`, chained to start when the Reference run ends). If the
+   probe's model predicts saddle/anisotropic tori where the Reference model does not (`eval curv`), it
+   continues to the full curriculum (rerun without `--phases`, resumes at phase1); otherwise it stops there.
 2. **User decision 2026-11-04: 32-NN `PerQuery` stays the default; `All` is the documented accuracy
    option** (better on every measure, O(n) per query). The paper's λ = 10³/D with radius 2C/λ and the tapered
    kNN are not adopted.
