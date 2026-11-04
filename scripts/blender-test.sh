@@ -20,6 +20,9 @@
 # 3d2. blender/tests/test_repulsive_surface.py runs the same way (Repulsive Surfaces: N steps with and
 #    without remeshing, pins, obstacles, empties, live flow, bad input; log
 #    runs_tmp/blender-test-repulsive-surface.log), in parallel with 3b.
+# 3d3. blender/tests/test_points_as_tori.py runs the same way (Points as Tori: surface, offset, Boolean,
+#    orient normals, the tori cache and its sidecar file, input and errors, undo; log
+#    runs_tmp/blender-test-points-as-tori.log), in parallel with 3b.
 # 3e. blender/tests/test_intrinsic.py runs the same way (Show Intrinsic Refinement and the drawing of
 #    intrinsic edges; log runs_tmp/blender-test-intrinsic.log), in parallel with 3b.
 # 3f. blender/tests/test_geodesic.py runs the same way (Geodesic Path in every mode, Straighten Seams,
@@ -34,6 +37,8 @@
 # 4b. blender/tests/ui_repulsive.py (same display, Blender with --enable-event-simulate): the live
 #    modal operator with the real timer and key events.
 # 4c. blender/tests/ui_repulsive_surface.py: the same for the live Repulsive Surfaces operator.
+# 4d. blender/tests/ui_points_as_tori.py: the panel and the modal Points as Tori operator (progress,
+#    Cancel button, Esc, undo).
 # 5. With --bench, blender/tests/bench_overhead.py measures the cost of the Blender side on
 #    meshes of about 300k triangles.
 #
@@ -122,6 +127,11 @@ rsf_log="$root/runs_tmp/blender-test-repulsive-surface.log"
     --python "$root/blender/tests/test_repulsive_surface.py" -- --module "$module" \
     "${only[@]}" > "$rsf_log" 2>&1 &
 rsf_pid=$!
+pat_log="$root/runs_tmp/blender-test-points-as-tori.log"
+"$BLENDER" -b --factory-startup --python-exit-code 1 \
+    --python "$root/blender/tests/test_points_as_tori.py" -- --module "$module" \
+    "${only[@]}" > "$pat_log" 2>&1 &
+pat_pid=$!
 int_log="$root/runs_tmp/blender-test-intrinsic.log"
 "$BLENDER" -b --factory-startup --python-exit-code 1 \
     --python "$root/blender/tests/test_intrinsic.py" -- --module "$module" \
@@ -198,6 +208,14 @@ if [ "$rsf_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$rsf_log"; then
     echo "Blender repulsive surface tests FAILED (exit status $rsf_status); see $rsf_log" >&2
     cut_failed=1
 fi
+pat_status=0
+wait "$pat_pid" || pat_status=$?
+echo "points as tori tests: $(grep -E '^RESULT' "$pat_log")"
+grep -E '^(FAIL|  failed|INFO)' "$pat_log" || true
+if [ "$pat_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$pat_log"; then
+    echo "Blender points as tori tests FAILED (exit status $pat_status); see $pat_log" >&2
+    cut_failed=1
+fi
 [ "$cut_failed" = 0 ] || exit 1
 
 if [ "$ui" = 1 ] && [ "${#only[@]}" -eq 0 ]; then
@@ -234,6 +252,17 @@ if [ "$ui" = 1 ] && [ "${#only[@]}" -eq 0 ]; then
             exit 1
         fi
         echo "UI test of the live repulsive surface flow: $(grep -c '^UI: ok' "$log") checks passed"
+        log="$root/runs_tmp/blender-test-ui-points-as-tori.log"
+        status=0
+        timeout 300 xvfb-run -a -s "-screen 0 1280x800x24" "$BLENDER" --factory-startup \
+            --enable-event-simulate --python "$root/blender/tests/ui_points_as_tori.py" \
+            -- --module "$module" > "$log" 2>&1 || status=$?
+        grep -E '^(UI: FAILED|UI RESULT|UI POINTS AS TORI TEST PASSED|  failed)' "$log" || true
+        if [ "$status" != 0 ] || ! grep -q '^UI POINTS AS TORI TEST PASSED$' "$log" || grep -q 'Traceback' "$log"; then
+            echo "UI test of Points as Tori FAILED (exit status $status); see $log" >&2
+            exit 1
+        fi
+        echo "UI test of Points as Tori: $(grep -c '^UI: ok' "$log") checks passed"
     else
         echo "UI smoke test SKIPPED: xvfb-run is not installed"
     fi

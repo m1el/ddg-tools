@@ -4,8 +4,8 @@
 The work is done by ``ddg_tools.points_as_tori`` (Rust, crates/ddg-points-as-tori and
 crates/ddg-py), after
 
-    Feng, Gkioulekas, Crane, Signed Distance to Point Clouds by Blending Tori (Points as Tori),
-    ACM Transactions on Graphics 45(4), SIGGRAPH 2026.
+    Nicole Feng, Ioannis Gkioulekas, Keenan Crane, Points as Tori: Fast Pointwise Signed Distance
+    for Point Clouds, ACM Transactions on Graphics 45(4), Article 53, 2026.
 
 ``object.ddg_points_as_tori`` works on the active mesh object, a point cloud (its vertices, with
 normals; see ``points_as_tori_io.py`` for where the normals come from and for the cache), in four
@@ -568,7 +568,7 @@ class OBJECT_OT_ddg_points_as_tori(bpy.types.Operator):
     bl_label = "Points as Tori"
     bl_description = (
         "Signed distance to the active point cloud (a mesh object: its vertices and normals) by "
-        "blending fitted tori; method: Feng, Gkioulekas, Crane, Points as Tori (SIGGRAPH 2026). "
+        "blending fitted tori; method: Feng, Gkioulekas, Crane, Points as Tori (ACM TOG 2026). "
         "Modes: mesh of a level set (Surface), of an offset, a Boolean with a second cloud, or "
         "orient the normals. The tori are cached per cloud. Esc cancels"
     )

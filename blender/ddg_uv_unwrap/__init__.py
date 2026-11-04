@@ -18,8 +18,8 @@ Geodesic Path, Straighten Seams: Sharp, Crane, You Can Find Geodesic Paths in Tr
 Just Flipping Edges (2020). Intrinsic Simplify: Liu, Gillespie, Chislett, Sharp, Jacobson, Crane,
 Surface Simplification using Intrinsic Error Metrics (2023); the authors' MIT reference code
 (Copyright (c) 2023 Hsueh-Ti Derek Liu) is credited in the crate ddg-intrinsic-simplification.
-Points as Tori: Feng, Gkioulekas, Crane, Signed Distance to Point Clouds by Blending Tori (ACM TOG 45(4),
-SIGGRAPH 2026): surface, offset, Boolean and normal orientation of oriented point clouds.
+Points as Tori: Feng, Gkioulekas, Crane, Points as Tori: Fast Pointwise Signed Distance for Point
+Clouds (ACM TOG 45(4), 2026): surface, offset, Boolean and normal orientation of oriented point clouds.
 """
 
 import bpy

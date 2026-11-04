@@ -3,8 +3,8 @@
 
 Used by the Points as Tori operator (``points_as_tori_operator.py``). The method is
 
-    Feng, Gkioulekas, Crane, Signed Distance to Point Clouds by Blending Tori (Points as Tori),
-    ACM Transactions on Graphics 45(4), SIGGRAPH 2026,
+    Nicole Feng, Ioannis Gkioulekas, Keenan Crane, Points as Tori: Fast Pointwise Signed Distance
+    for Point Clouds, ACM Transactions on Graphics 45(4), Article 53, 2026,
 
 implemented in ``ddg_tools.points_as_tori`` (crates/ddg-points-as-tori, crates/ddg-py). Like the
 rest of the add-on this module uses only ``bpy``, ``mathutils`` and the standard library.

@@ -859,6 +859,73 @@ default extension is unchanged; one extension carrying both wheels is not attemp
   modal operator with the real timer and events (Cancel, Esc, Accept, Enter, right click), undo
   and redo of the remeshed result, the N-steps operator with Adjust Last Operation.
 
+## Points as Tori: surface, offset, Boolean and normals of a point cloud
+
+One operator after Feng, Gkioulekas, Crane, *Points as Tori: Fast Pointwise Signed Distance for Point
+Clouds* (ACM TOG 45(4), 2026; crates `ddg-points-as-tori`, `ddg-py`, Python
+module `ddg_tools.points_as_tori`; contract `crates/ddg-points-as-tori/SPEC.md` section 12.2).
+It works on the active mesh object as a **point cloud**: the vertices count, edges and faces are
+ignored. Sidebar: **DDG > Points as Tori** (mode, level or offset, resolution, margin, Boolean
+partner and operation, device box, Advanced; the status line of the last run); menu: **Object**.
+Code: `points_as_tori_operator.py` (options, `Job`, operator, panel), `points_as_tori_io.py`
+(reading, cache, write-back).
+
+| operator | id | |
+|---|---|---|
+| Points as Tori | `object.ddg_points_as_tori` | modal (worker thread, 0.1 s timer, progress bar, **Esc** / **Cancel** button abandon the job); `execute` (Adjust Last Operation, scripts, `-b`) runs it in the calling thread. Options: `scene.ddg_points_as_tori` |
+| Clear Tori Cache | `object.ddg_points_as_tori_clear_cache` | forget the tori in memory, delete the sidecar files |
+
+**Modes.** *Surface*: marching cubes on `phi = Level` (negative inside; default 0). *Offset*: the
+same at `phi = Offset` (the surface moved by that distance, outwards when positive). *Boolean*:
+union, intersection or difference of the active cloud and a second point cloud (the **Partner**
+named in the panel, or else the other selected mesh object; optional smooth blend radius), at
+`Level`. *Orient Normals*: the iteration of the paper's Fig. 27 (up to 10 iterations); the flipped
+normals are written back into the object, one undo step, and the report lists the flips per
+iteration and the total. The first three create a **new mesh object** (`<cloud> Surface`,
+`<cloud> Offset`, `<cloud> Union <partner>`, ...), linked into the cloud's collections, with the
+cloud's transform, its triangles in the cloud's frame; the cloud stays active, so Adjust Last
+Operation or another run starts from it again. The grid has **Resolution** cells along the longest
+side of the box (default 128); the box is the clouds' bounding box plus **Margin** (a fraction of
+the diagonal, default 0.1) plus an outward level or offset. A resolution whose dense grid would
+exceed the library's limit (2^29 values) is refused with a message before any work.
+
+**Input.** World space: positions go through the object's matrix, normals through the inverse
+transpose and are normalized. The normals are read, in this order, from the point attribute
+`normal` (Vector; what Blender 4.x / 5.x's PLY importer makes of `nx, ny, nz`; or the name set in
+Advanced > Normals), three Float point attributes `nx, ny, nz`, the custom normals, or the vertex
+normals of a mesh with faces. No normals gives
+`object 'X' has 12,345 vertices but no normals; ...` and creates nothing; a zero or non-finite
+normal gives the count. Orient Normals writes to the place the normals came from (a vertex-normal
+cloud gets a new `normal` attribute, which is read first from then on). Modifiers are not applied.
+
+**Cache.** The tori are built once per cloud, keyed by a BLAKE2 hash of the world-space positions
+and normals and the sign rule (which changes the fit; the evaluation rule, device and threads do
+not). A hit is served from memory (the last 4 clouds) or from the sidecar file
+`<name>.pat/<hash>-<sign rule>.tori` next to the saved .blend (`save_tori` / `pat_load_tori`,
+which checks the hash again); an unsaved file keeps memory only. Changing a position or a normal
+changes the hash: that is the whole invalidation. A corrupt sidecar file is ignored with a warning
+and rebuilt. *Use Cache* off always rebuilds. Moving or scaling the object counts as a change (the
+tori live in world space).
+
+**Device.** *Auto* (default) uses an NVIDIA GPU when the extension has CUDA support and one is
+usable, else the CPU; *CUDA* fails with the library's message in a CPU-only wheel; the box is
+greyed out without CUDA (build with `DDG_WHEEL_CUDA=1`). The status line gives the device of the
+tori (build) and of the evaluation, the triangles, the cache hit or miss and the times. The
+library's `reconstruct` does not report the device of the evaluation, so for the mesh stage the
+panel states the device the setting resolves to. *Advanced*: sign rule (Reference, the default as
+trained; Geometric differs only at saddle points), evaluation rule (Per Query, the library's
+default; Paper: the paper's Sec. 4.2 constant lambda over a radius neighborhood), threads.
+
+**Cancel.** The native calls cannot be interrupted: Esc / Cancel returns at once and drops the
+result; a build or marching-cubes call already running finishes in the background (and still fills
+the cache).
+
+Tests: `tests/test_points_as_tori.py` (headless: every mode, transforms, Boolean of two spheres,
+orientation of a cloud with 30 % flipped normals, memory and sidecar cache hits and invalidation,
+PLY and attribute input, errors, undo, the job on a worker thread) and `tests/ui_points_as_tori.py`
+(windowed: properties, the panel in every mode, the modal run with the real timer, Cancel and Esc,
+undo and redo, rerun with a cache hit, the error for a mesh without normals).
+
 ## Show Intrinsic Refinement
 
 **Show Intrinsic Refinement**, `bpy.ops.mesh.ddg_show_intrinsic_refinement`
@@ -1025,6 +1092,7 @@ Tests: `blender/tests/test_geodesic.py` (run by `scripts/blender-test.sh`; log
 | `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
 | `ddg_uv_unwrap/repulsive_operator.py`, `repulsive_io.py` | Repulsive Curves: live and N-steps operators, sidebar panel; reading and writing meshes and curves |
 | `ddg_uv_unwrap/repulsive_surface_operator.py`, `repulsive_surface_io.py` | Repulsive Surfaces: live and N-steps operators, sidebar panel; reading the triangulated mesh, write-back, obstacles |
+| `ddg_uv_unwrap/points_as_tori_operator.py`, `points_as_tori_io.py` | Points as Tori: the operator (Surface, Offset, Boolean, Orient Normals), the tori cache, the sidebar panel; reading point clouds, write-back |
 | `ddg_uv_unwrap/intrinsic_operator.py`, `intrinsic_draw.py` | Show Intrinsic Refinement; the reusable drawing of intrinsic edges |
 | `ddg_uv_unwrap/simplify_operator.py` | Intrinsic Simplify (the coarse-mesh view: color attribute, face ids, vertex group) and its panel |
 | `ddg_uv_unwrap/geodesic_operator.py` | Geodesic Path (Path, Smooth, Loop, Bezier), Straighten Seams, the panel |
@@ -1057,6 +1125,11 @@ The add-on is a front end for these papers:
 - Chris Yu, Henrik Schumacher, Keenan Crane. *Repulsive Curves.*
   ACM Transactions on Graphics 40(2), 2021.
   (the repulsive-curves operators)
+
+- Nicole Feng, Ioannis Gkioulekas, Keenan Crane. *Points as Tori: Fast Pointwise Signed Distance
+  for Point Clouds.*
+  ACM Transactions on Graphics 45(4), Article 53, 2026.
+  (the Points as Tori operator)
 
 - Chris Yu, Caleb Brakensiek, Henrik Schumacher, Keenan Crane. *Repulsive Surfaces.*
   ACM Transactions on Graphics 40(6), 2021.
