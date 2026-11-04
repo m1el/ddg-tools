@@ -62,6 +62,6 @@ Work directory (gitignored): `runs_tmp/pat-wp14/` (`cases/<dataset>/<case>/` wit
   `eval gpu <case-dir>... --threads 8` (writes `<case>/gpu.json`). For WP16.
 - Retrained rows: `RETRAINED="--retrained retrained=data/points-as-tori/retrained-<name>.safetensors" scripts/pat_eval.sh case report`
   (append `:geometric` to the path for weights trained with `SignRule::Geometric`).
-- Fig. 29 stops at 7.3M points (29M needs ~4 h of CPU network time on a shared machine).
+- Fig. 29 stops at 7.3M points (29M needs ~6 h of CPU network time at the 24-thread cap). The effect is reproduced at 7.3M (interior MAE 0.042, 3,341 spurious components; predicted |r| saturates at ≈ 20σ).
 - `DATASETS.md` (repo root, not WP14's file) should credit the Thingi10K models named in EVALUATION.md;
   EVALUATION.md has the credit table.

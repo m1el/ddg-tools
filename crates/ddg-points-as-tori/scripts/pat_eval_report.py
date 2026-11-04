@@ -370,7 +370,7 @@ def figures(cases, out, data, cont):
         d = json.load(open(p))
         sl = np.load(os.path.join(os.path.dirname(p), 'slices.npy'))
         k = sl.shape[0]
-        fig, axs = plt.subplots(1, k, figsize=(2.6 * k, 2.8))
+        fig, axs = plt.subplots(1, k, figsize=(2.6 * k, 3.2))
         ax1 = np.linspace(-1, 1, sl.shape[1])
         for i in range(k):
             ax = axs[i]

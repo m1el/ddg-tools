@@ -11,11 +11,16 @@ were active, and from the middle of the run our own jobs were capped at 24–32 
 Timings therefore carry that load. Accuracy numbers do not depend on it, because every pipeline is
 deterministic.
 
-**Status.** Complete: the 315-shape accuracy run (all methods), the sign-rule study, the §16.3
-sweep, the black-box comparison (`COMPARISON.md`), the continuity study (32 clouds) and Fig. 7.
-Complete as well: orientation (41 clouds). Partial: Fig. 29 (110k and 880k points; 7.3M is
-running). These sections say what they cover and
-will be extended. Everything is reproducible with `scripts/pat_eval.sh`.
+**Status.** Complete:
+- the 315-shape accuracy run (all methods);
+- the sign-rule study and the §16.3 sweep;
+- the black-box comparison (`COMPARISON.md`);
+- the continuity study (32 clouds);
+- orientation (41 clouds);
+- Fig. 7, and Fig. 29 at 110k, 880k and 7.3M points (29M not run).
+
+Not done: the GPU TF32 study (GPU busy) and the retrained rows (no weights yet). Everything is
+reproducible with `scripts/pat_eval.sh`.
 
 ## Recommendations for the user
 
@@ -51,6 +56,16 @@ These are recommendations only; no crate default was changed.
    (22 vs 11). GWN-sign + distance is nearest-point distance, so its zero set is a union of small
    spheres, useless for contouring. The grid mean alone favors it because most grid points are far
    from the surface.
+
+5. **Two limits to state in the documentation (not defaults).**
+   - *Dense clouds break the interior.* Above about 1M points the interior gets spurious surfaces
+     (GOYLE at 7.3M: 3,341 zero-level components, interior MAE 0.042). The predicted torus radius
+     saturates near 20σ, so the tori shrink with density.
+   - *Orientation (Fig. 27) fails on CAD shapes.* It works on smooth shapes, but 4 of 10 ABC and
+     6 of 10 Thingi10K clouds end with more than 30 % wrong normals.
+
+   Both come from the released network's near-spherical, density-blind tori. Both are worth
+   re-measuring with WP10's retrained weights.
 
 ## Protocol
 
@@ -444,21 +459,39 @@ paper says, and faster here: spot is smooth.
 
 ![spot slices](../../showcase/points-as-tori/eval/density-fig7-spot.png)
 
-**Fig. 29 analogue** (partial). The densest usable mesh is Thingi10K 59340, "GOYLE" by fong182
+**Fig. 29 analogue.** The densest usable mesh is Thingi10K 59340, "GOYLE" by fong182
 (CC BY-SA; 786,432 faces, closed, one component, 0 self-intersections). David is not available.
-128³ grid; marching cubes at 256³:
+Same protocol, 128³ grid; marching cubes at 256³ (OBJ files in
+`runs_tmp/pat-wp14/density-fig29-thingi59340/`):
 
-| points | grid MAE | band | interior | exterior | interior / exterior |
-|---|---|---|---|---|---|
-| 110,000 | 0.00092 | 0.00033 | 0.00355 | 0.00021 | 17× |
-| 880,000 | 0.00051 | 0.00008 | 0.00222 | 0.00006 | 37× |
-| 7,300,000 | *running (about 3 h at 12 threads)* | | | | |
+| points | grid MAE | band | interior (φ_true < −0.05) | exterior | eikonality | wrong sign | median σ | |r|/σ median (p10) | zero-level components (truth 1) | build (12 threads, loaded) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 110,000 | 0.00092 | 0.00033 | 0.00355 | 0.00021 | 0.038 | 0.12 % | 0.036 | 15.6 (6.0) | 47 | 123 s |
+| 880,000 | 0.00051 | 0.00008 | 0.00222 | 0.00006 | 0.022 | 0.01 % | 0.013 | 19.8 (13.0) | 112 | 1,266 s |
+| 7,300,000 | **0.00878** | 0.00005 | **0.04235** | 0.00002 | 0.125 | 0.31 % | 0.0045 | 21.4 (17.0) | **3,341** | 5,375 s |
 
-The paper's observation is reproduced in relative terms: the interior error is an order of magnitude
-above the exterior error, and the ratio grows with density. In absolute terms the interior still
-improves from 110k to 880k. Whether it gets worse at 7.3M (the paper's "paradoxically worse") is what
-the running job will show. 29M points was not attempted (about 4 h of CPU network time under the
-current cap; WP16 or GPU).
+![GOYLE slices](../../showcase/points-as-tori/eval/density-fig29-thingi59340.png)
+
+**The paper's Fig. 29 effect is reproduced, and strongly.** From 880k to 7.3M points:
+- near the surface and outside, accuracy keeps improving (band 8e-5 → 5e-5, exterior 6e-5 → 2e-5);
+- the interior error grows 19× (0.0022 → 0.042), and the grid MAE 17×;
+- the zero level set gains thousands of small interior components (3,341; Euler characteristic
+  5,854, i.e. mostly spheres). The 7.3M slice shows them as black specks inside the statue.
+
+The paper's hypothesis ("the network can sometimes simply fit compact tori") is confirmed, with a
+mechanism. The predicted minor radius saturates at about 20σ_i: the median |r|/σ is 15.6, 19.8 and
+21.4 while σ shrinks 8×. So the absolute radius shrinks with density (≈ 0.56, 0.25, 0.095), while the
+true curvature radius of the statue does not change. Each torus is a near-sphere (see "Sign rule").
+Its SDF turns positive at depth greater than about 2|r| below its point. An interior query deeper
+than about 0.2 at 7.3M points therefore gets positive values from the nearest tori: a wrong sign and
+spurious inner surfaces. On spot (smooth, larger features relative to σ) |r|/σ is still 2–14 at
+≤ 65,536 points and nothing breaks. The network sees neighborhoods normalized by σ, and it was
+trained on 2048-point clouds, where |r|/σ ≲ 20 covers almost every surface. Possible remedies, none
+of them evaluated here: subsampling for the far field, `All` with a smaller C for deep queries, or
+training on varying densities (the paper's own suggestion).
+
+29M points (the paper's last column) was not run: about 6 h of CPU network time at the 24-thread
+cap. The trend is already clear at 7.3M.
 
 ## GPU TF32 vs Split3 (WP4 resolution 1)
 
