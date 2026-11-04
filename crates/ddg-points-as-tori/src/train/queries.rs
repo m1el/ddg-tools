@@ -43,11 +43,17 @@ pub struct QueryOptions {
     pub min_side: f64,
     /// Precision of the ground truth's sign test.
     pub gwn: GwnPrecision,
+    /// Compute the winding-number sums of the sign test on CUDA device 0 (feature `cuda`, with
+    /// `GwnPrecision::F64` only; distances stay on the CPU). The sums agree with the CPU's up to
+    /// `atan2`'s last bits, so the signs are the same except at exact ties with `π` (measured: no
+    /// difference on 1.5M queries of six shapes). Meshes below [`GPU_TRUTH_MIN_FACES`] faces stay
+    /// on the CPU. Default false.
+    pub gpu_truth: bool,
 }
 
 impl Default for QueryOptions {
     fn default() -> Self {
-        QueryOptions { per_kind: 40, boxes: QueryBoxes::Code, min_extent: 0.1, min_side: 0.01, gwn: GwnPrecision::F64 }
+        QueryOptions { per_kind: 40, boxes: QueryBoxes::Code, min_extent: 0.1, min_side: 0.01, gwn: GwnPrecision::F64, gpu_truth: false }
     }
 }
 
@@ -214,6 +220,10 @@ fn sample_row(f: &Faces, all: &[u32], all_cum: &[f64], positions: &[[f64; 3]], c
     found
 }
 
+/// Meshes with fewer faces keep the winding numbers on the CPU under [`QueryOptions::gpu_truth`]
+/// (measured: 564 faces 0.018 s CPU vs 0.095 s GPU per shape; 2048 faces 0.49 s vs 0.19 s).
+pub const GPU_TRUTH_MIN_FACES: usize = 512;
+
 /// Sample queries and ground truth for `rows` of a shape. `columns(i)` lists the positions the box
 /// of row `i` is taken over. Runs on the current rayon pool; the result does not depend on it.
 #[allow(clippy::too_many_arguments)]
@@ -244,16 +254,39 @@ pub fn sample_rows(
         })
         .collect();
     let m = opts.per_row();
-    let per: Vec<(Vec<[f64; 3]>, Vec<f64>, bool)> = rows
+    if opts.gpu_truth && opts.gwn != GwnPrecision::F64 {
+        return Err(PatError::InvalidOption { what: "QueryOptions::gpu_truth needs GwnPrecision::F64".into() });
+    }
+    // small meshes are faster on the CPU (the same values either way)
+    let gpu = opts.gpu_truth && mesh.len() >= GPU_TRUTH_MIN_FACES;
+    let mut per: Vec<(Vec<[f64; 3]>, Vec<f64>, bool)> = rows
         .par_iter()
         .map(|&row| {
             let mut r = row_rng(key.0, key.1, key.2, row as u64);
             let mut pts = Vec::with_capacity(m);
             let found = sample_row(&f, &all, &all_cum, positions, &columns(row as usize), opts, &mut r, &mut pts);
-            let truth = pts.iter().map(|&p| mesh.signed_distance(p, opts.gwn)).collect();
+            let truth = if gpu { pts.iter().map(|&p| mesh.distance(p)).collect() } else { pts.iter().map(|&p| mesh.signed_distance(p, opts.gwn)).collect() };
             (pts, truth, found)
         })
         .collect();
+    if gpu {
+        let all_pts: Vec<[f64; 3]> = per.iter().flat_map(|x| x.0.iter().copied()).collect();
+        let t0 = std::time::Instant::now();
+        let tri = mesh.triangles();
+        let sums = gpu_solid_angle_sums(&all_pts, &tri)?;
+        if std::env::var_os("PAT_PROFILE_TRUTH").is_some() {
+            eprintln!("gpu truth: {} queries x {} faces in {:.3} s", all_pts.len(), tri.len(), t0.elapsed().as_secs_f64());
+        }
+        let mut at = 0;
+        for (pts, truth, _) in per.iter_mut() {
+            for (d, s) in truth.iter_mut().zip(&sums[at..at + pts.len()]) {
+                if *s > std::f64::consts::PI {
+                    *d = -*d;
+                }
+            }
+            at += pts.len();
+        }
+    }
     let mut out = RowQueries { rows: rows.to_vec(), ..Default::default() };
     for (p, t, found) in per {
         out.points.extend(p);
@@ -261,4 +294,14 @@ pub fn sample_rows(
         out.rows_without_faces += (!found) as usize;
     }
     Ok(out)
+}
+
+#[cfg(feature = "cuda")]
+fn gpu_solid_angle_sums(q: &[[f64; 3]], tri: &[[f64; 9]]) -> Result<Vec<f64>, PatError> {
+    super::gpu::solid_angle_sums(q, tri)
+}
+
+#[cfg(not(feature = "cuda"))]
+fn gpu_solid_angle_sums(_: &[[f64; 3]], _: &[[f64; 9]]) -> Result<Vec<f64>, PatError> {
+    Err(PatError::Gpu { reason: "QueryOptions::gpu_truth needs the feature cuda".into() })
 }

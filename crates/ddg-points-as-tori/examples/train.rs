@@ -27,6 +27,7 @@
 //!   --no-resume           start fresh even if --out holds a checkpoint
 //!   --network-batch B     neighborhoods per network launch [256 on the GPU, 4 on the CPU]
 //!   --forward-batch F     neighborhoods per launch of the untaped forward pass on the GPU [= network batch]
+//!   --cpu-truth           ground-truth winding numbers on the CPU (default on a GPU run: on the GPU)
 //!   --no-graphs           launch the network batches op by op instead of replaying CUDA graphs
 //!   --pair-chunk P        padded pairs per loss chunk [524288 on the GPU, 65536 on the CPU]
 //!   --phases a,b          only these phases (names), e.g. pretrain
@@ -68,12 +69,14 @@ struct Args {
     network_batch: Option<usize>,
     forward_batch: Option<usize>,
     graphs: bool,
+    cpu_truth: bool,
     pair_chunk: Option<usize>,
     phases: Option<Vec<String>>,
     file: String,
     shape: usize,
     steps: usize,
     reps: usize,
+    shapes: usize,
     from: Option<PathBuf>,
     to: Option<PathBuf>,
 }
@@ -105,12 +108,14 @@ fn parse() -> Result<Args, PatError> {
         network_batch: None,
         forward_batch: None,
         graphs: true,
+        cpu_truth: false,
         pair_chunk: None,
         phases: None,
         file: "nice/blobs_train_mode0_0.npz".into(),
         shape: 0,
         steps: 8,
         reps: 2,
+        shapes: 1,
         from: None,
         to: None,
     };
@@ -158,12 +163,14 @@ fn parse() -> Result<Args, PatError> {
             "--no-resume" => a.resume = false,
             "--network-batch" => a.network_batch = Some(num(val(&mut i)?, "--network-batch")?.max(1) as usize),
             "--no-graphs" => a.graphs = false,
+            "--cpu-truth" => a.cpu_truth = true,
             "--forward-batch" => a.forward_batch = Some(num(val(&mut i)?, "--forward-batch")?.max(1) as usize),
             "--pair-chunk" => a.pair_chunk = Some(num(val(&mut i)?, "--pair-chunk")?.max(1) as usize),
             "--phases" => a.phases = Some(val(&mut i)?.split(',').map(str::to_string).collect()),
             "--file" => a.file = val(&mut i)?,
             "--shape" => a.shape = num(val(&mut i)?, "--shape")? as usize,
             "--steps" => a.steps = num(val(&mut i)?, "--steps")? as usize,
+            "--shapes" => a.shapes = num(val(&mut i)?, "--shapes")?.max(1) as usize,
             "--reps" => a.reps = num(val(&mut i)?, "--reps")?.max(1) as usize,
             "--from" => a.from = Some(val(&mut i)?.into()),
             "--to" => a.to = Some(val(&mut i)?.into()),
@@ -200,6 +207,7 @@ fn step_options(a: &Args, gpu: bool) -> StepOptions {
     o.network_chunk = a.network_batch.unwrap_or(if gpu { 256 } else { 4 });
     o.forward_chunk = a.forward_batch.unwrap_or(0);
     o.gpu_graphs = a.graphs;
+    o.queries.gpu_truth = gpu && !a.cpu_truth;
     o.loss.pair_chunk = a.pair_chunk.unwrap_or(if gpu { 1 << 19 } else { 1 << 16 });
     o
 }
@@ -319,18 +327,42 @@ fn bench(a: &Args) -> Result<(), PatError> {
     let t = std::time::Instant::now();
     let prep = pool.install(|| prepare_shape(shape, &o, (a.seed, 0, a.shape as u64)))?;
     let t_prep = t.elapsed().as_secs_f64();
+    if o.queries.gpu_truth {
+        // the GPU ground truth against the CPU's on the same queries
+        let mut oc = o;
+        oc.queries.gpu_truth = false;
+        let tc = std::time::Instant::now();
+        let pc = pool.install(|| prepare_shape(shape, &oc, (a.seed, 0, a.shape as u64)))?;
+        let t_cpu = tc.elapsed().as_secs_f64();
+        let (g, c) = (&prep.queries.truth, &pc.queries.truth);
+        let signs = g.iter().zip(c).filter(|(x, y)| x.is_sign_negative() != y.is_sign_negative()).count();
+        let bits = g.iter().zip(c).filter(|(x, y)| x.to_bits() != y.to_bits()).count();
+        eprintln!(
+            "ground truth: {} queries, GPU {t_prep:.3} s vs CPU {t_cpu:.3} s (queries + truth), sign differences {signs}, bit differences {bits}",
+            g.len()
+        );
+    }
     let batch = if a.file.contains("pretraining") { 32 } else { 1024 };
     let t = std::time::Instant::now();
-    let plans: Vec<_> = (0..shape.rows.min(shape.n.max(1)))
-        .step_by(batch)
-        .map(|lo| pool.install(|| plan_slice(&prep, lo, lo + batch, &o, gpu)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let plans: Vec<_> = plans.into_iter().flatten().collect();
+    // --shapes N: N query sets (epochs) of the shape, so that the steps see different plan shapes
+    let mut preps = vec![prep];
+    for e in 1..a.shapes.max(1) {
+        preps.push(pool.install(|| prepare_shape(shape, &o, (a.seed, e as u64, a.shape as u64)))?);
+    }
+    let mut plans = Vec::new();
+    for (pi, pr) in preps.iter().enumerate() {
+        for lo in (0..shape.rows.min(shape.n.max(1))).step_by(batch) {
+            if let Some(sp) = pool.install(|| plan_slice(pr, lo, lo + batch, &o, gpu))? {
+                plans.push((pi, sp));
+            }
+        }
+    }
+    let prep = &preps[0];
     let t_plan = t.elapsed().as_secs_f64() / plans.len().max(1) as f64;
     {
         // the parts of the plan: blend constants (kd-tree) and the GPU pair layout
         let t = std::time::Instant::now();
-        let sp = pool.install(|| plan_slice(&prep, 0, batch, &o, false))?;
+        let sp = pool.install(|| plan_slice(prep, 0, batch, &o, false))?;
         let t_bp = t.elapsed().as_secs_f64();
         #[cfg(feature = "cuda")]
         if let Some(sp) = &sp {
@@ -353,7 +385,7 @@ fn bench(a: &Args) -> Result<(), PatError> {
         shape.rows,
         shape.n,
         plans.len(),
-        plans.first().map(|p| p.plan.pairs()).unwrap_or(0),
+        plans.first().map(|p| p.1.plan.pairs()).unwrap_or(0),
         a.device,
         o.network_chunk,
         o.loss.pair_chunk
@@ -367,10 +399,10 @@ fn bench(a: &Args) -> Result<(), PatError> {
             let mut line = Vec::new();
             let t_all = std::time::Instant::now();
             for s in 0..a.steps {
-                let sp = &plans[s % plans.len()];
+                let (pi, sp) = &plans[s % plans.len()];
+                let pr = &preps[*pi];
                 let t = std::time::Instant::now();
-                let out =
-                    if gpu { step_planned(&params, &ctx, &prep, sp, &o, true)? } else { pool.install(|| step_planned(&params, &ctx, &prep, sp, &o, true))? };
+                let out = if gpu { step_planned(&params, &ctx, pr, sp, &o, true)? } else { pool.install(|| step_planned(&params, &ctx, pr, sp, &o, true))? };
                 let g = out.grads.ok_or_else(|| bad("no gradient".into()))?;
                 let gh = grads_hash(&g);
                 let tu = std::time::Instant::now();

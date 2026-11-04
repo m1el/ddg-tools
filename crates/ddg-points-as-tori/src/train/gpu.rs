@@ -62,8 +62,10 @@ fn gpu_err(what: &str) -> impl FnOnce(Box<dyn std::any::Any + Send>) -> PatError
 /// One dense chunk of the GPU loss: `qn` queries × `kk` pairs.
 #[derive(Debug, Clone, Default)]
 pub struct DenseChunk {
-    /// Queries.
+    /// Queries (padded to [`ladder`]; the padding has `ŵ = c = 0` and is masked out of the loss).
     pub qn: usize,
+    /// Real queries (the first `qr` rows).
+    pub qr: usize,
     /// Pairs per query (padded).
     pub kk: usize,
     /// First padded pair of the chunk in the global padded order.
@@ -110,6 +112,23 @@ pub struct PairLayout {
     pub order: Vec<u32>,
 }
 
+/// The smallest size of a fixed ladder (1…8, then multiples of 8 growing by ~1.25×) that holds `x`:
+/// chunk shapes are rounded up to it so that the loss's shapes repeat from step to step (burn-fusion
+/// re-explores every new shape: 0.29 s per step in phase 0 against 0.065 s with repeated shapes).
+pub fn ladder(x: usize) -> usize {
+    if x <= 8 {
+        return x.max(1);
+    }
+    let mut v = 8.0f64;
+    loop {
+        v *= 1.25;
+        let r = (v / 8.0).ceil() as usize * 8;
+        if r >= x {
+            return r;
+        }
+    }
+}
+
 /// Build the [`PairLayout`] of `plan` over `n` tori (host, f32 values of the plan's constants; runs
 /// on the current rayon pool). Query chunks are those of [`super::loss::chunks`] with
 /// [`LossOptions::pair_chunk`] padded pairs at most; torus chunks likewise.
@@ -118,21 +137,23 @@ pub fn pair_layout(plan: &BlendPlan, n: usize, o: &LossOptions) -> PairLayout {
     let budget = o.pair_chunk.max(1);
     let groups = super::loss::chunks(plan, budget);
     let cnt_q = |j: u32| (plan.offset[j as usize + 1] - plan.offset[j as usize]) as usize;
-    let kks: Vec<usize> = groups.iter().map(|qs| qs.iter().map(|&j| cnt_q(j)).max().unwrap_or(1).max(1)).collect();
+    let kks: Vec<usize> = groups.iter().map(|qs| ladder(qs.iter().map(|&j| cnt_q(j)).max().unwrap_or(1).max(1))).collect();
     let mut bases = Vec::with_capacity(groups.len());
     let mut base = 0usize;
     for (qs, &kk) in groups.iter().zip(&kks) {
         bases.push(base);
-        base += qs.len() * kk;
+        base += ladder(qs.len()) * kk;
     }
     let m_pad = base;
     let chunks: Vec<DenseChunk> = groups
         .par_iter()
         .zip(kks.par_iter().zip(bases.par_iter()))
         .map(|(qs, (&kk, &base))| {
-            let qn = qs.len();
+            let qr = qs.len();
+            let qn = ladder(qr);
             let mut d = DenseChunk {
                 qn,
+                qr,
                 kk,
                 base,
                 q: Vec::with_capacity(3 * qn),
@@ -159,6 +180,12 @@ pub fn pair_layout(plan: &BlendPlan, n: usize, o: &LossOptions) -> PairLayout {
                     }
                 }
             }
+            // padded queries: torus 0, no weight, truth 0 (masked out of the loss)
+            d.q.resize(3 * qn, 0.0);
+            d.truth.resize(qn, 0.0);
+            d.idx.resize(qn * kk, 0);
+            d.w.resize(qn * kk, 0.0);
+            d.c.resize(3 * qn * kk, 0.0);
             d
         })
         .collect();
@@ -193,27 +220,36 @@ pub fn pair_layout(plan: &BlendPlan, n: usize, o: &LossOptions) -> PairLayout {
     let mut inv = vec![0i32; n];
     let mut tgroups: Vec<Vec<usize>> = Vec::new();
     let mut cur: Vec<usize> = Vec::new();
-    for (row, &t) in torder.iter().enumerate() {
+    for &t in &torder {
         if !cur.is_empty() && (cur.len() + 1) * cnt(t) > budget {
             tgroups.push(std::mem::take(&mut cur));
         }
         cur.push(t);
-        inv[t] = row as i32;
     }
     if !cur.is_empty() {
         tgroups.push(cur);
     }
+    // rows of the concatenated (padded) torus chunks
+    let mut row0 = 0usize;
+    for ts in &tgroups {
+        for (r, &t) in ts.iter().enumerate() {
+            inv[t] = (row0 + r) as i32;
+        }
+        row0 += ladder(ts.len());
+    }
     let tchunks: Vec<TorusChunk> = tgroups
         .par_iter()
         .map(|ts| {
-            let kk = ts.iter().map(|&t| cnt(t)).max().unwrap_or(1);
-            let mut pos = Vec::with_capacity(ts.len() * kk);
+            let kk = ladder(ts.iter().map(|&t| cnt(t)).max().unwrap_or(1));
+            let tn = ladder(ts.len());
+            let mut pos = Vec::with_capacity(tn * kk);
             for &t in ts {
                 let l = &flat[count[t]..count[t + 1]];
                 pos.extend_from_slice(l);
                 pos.extend(std::iter::repeat_n(m_pad as i32, kk - l.len()));
             }
-            TorusChunk { tn: ts.len(), kk, pos }
+            pos.resize(tn * kk, m_pad as i32);
+            TorusChunk { tn, kk, pos }
         })
         .collect();
     PairLayout { chunks, m_pad, n, tchunks, inv, order }
@@ -305,8 +341,10 @@ pub fn loss_and_grad(
             let gn = gphi.square().sum_dim(1).clamp_min(1e-30).sqrt();
             let eik = (gn.neg() + 1.0).abs();
             if want_grad {
-                // the value of this sum is never read; only its gradient (ones) is used
-                let s = (err.clone() + eik.clone()).sum_dim(0);
+                // the value of this sum is never read; only its gradient is used; padded queries
+                // (rows qr..qn) are masked out
+                let valid = f2(ctx, &(0..d.qn).map(|r| if r < d.qr { 1.0 } else { 0.0 }).collect::<Vec<f32>>(), [d.qn, 1]);
+                let s = ((err.clone() + eik.clone()) * valid).sum_dim(0);
                 obj = Some(match obj {
                     None => s,
                     Some(x) => x + s,
@@ -338,12 +376,16 @@ pub fn loss_and_grad(
     }));
     let (ev, grad) = run.map_err(gpu_err("the loss"))?;
     let (mut sd, mut se) = (0.0, 0.0);
-    for t in ev.chunks_exact(2) {
-        if !t[0].is_finite() || !t[1].is_finite() {
-            val.nonfinite += 1;
+    let mut row = 0usize;
+    for d in &lay.chunks {
+        for t in ev[2 * row..2 * (row + d.qr)].chunks_exact(2) {
+            if !t[0].is_finite() || !t[1].is_finite() {
+                val.nonfinite += 1;
+            }
+            sd += t[0];
+            se += t[1];
         }
-        sd += t[0];
-        se += t[1];
+        row += d.qn;
     }
     val.distance = sd * inv;
     val.eikonal = se * inv;
@@ -515,6 +557,109 @@ fn row_inputs(ctx: &Ctx, f: &super::net::RowFeatures, lo: usize, hi: usize) -> (
     let x = ctx.t3(f.feats[lo * k * 6..hi * k * 6].to_vec(), [b, k, 6]);
     let mask = f.pad.as_ref().map(|p| Tensor::<2, burn::tensor::Bool>::from_data(TensorData::new(p[lo * k..hi * k].to_vec(), [b, k]), &ctx.dev));
     (x, mask)
+}
+
+// ------------------------------------------------------------------------------------------------
+// Ground truth: the winding-number sums on the GPU
+// ------------------------------------------------------------------------------------------------
+
+/// The solid-angle sum of `super::truth::MeshTruth::solid_angle_sum` (f64), one thread per query
+/// over the faces in their order, with the CPU's operation order (`sub`, `dot` left to right,
+/// `cross`, Van Oosterom–Strackee) and no FMA contraction: only `atan2` may differ from the
+/// platform libm, by ulps.
+const GWN_SRC: &str = r#"
+#define TILE 128
+extern "C" __global__ void gwn_sum(const double* __restrict__ q, int nq, const double* __restrict__ tri, int nf, double* __restrict__ out) {
+    __shared__ double s[TILE * 9];
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    double qx = 0.0, qy = 0.0, qz = 0.0;
+    if (i < nq) { qx = q[3 * i]; qy = q[3 * i + 1]; qz = q[3 * i + 2]; }
+    double acc = 0.0;
+    for (int base = 0; base < nf; base += TILE) {
+        int m = nf - base < TILE ? nf - base : TILE;
+        for (int t = threadIdx.x; t < m * 9; t += blockDim.x) s[t] = tri[base * 9 + t];
+        __syncthreads();
+        if (i < nq) {
+            for (int k = 0; k < m; k++) {
+                const double* T = s + 9 * k;
+                double ax = T[0] - qx, ay = T[1] - qy, az = T[2] - qz;
+                double bx = T[3] - qx, by = T[4] - qy, bz = T[5] - qz;
+                double cx = T[6] - qx, cy = T[7] - qy, cz = T[8] - qz;
+                double la = sqrt(ax * ax + ay * ay + az * az);
+                double lb = sqrt(bx * bx + by * by + bz * bz);
+                double lc = sqrt(cx * cx + cy * cy + cz * cz);
+                double c0 = by * cz - bz * cy, c1 = bz * cx - bx * cz, c2 = bx * cy - by * cx;
+                double num = ax * c0 + ay * c1 + az * c2;
+                double ab = ax * bx + ay * by + az * bz;
+                double bc = bx * cx + by * cy + bz * cz;
+                double ca = cx * ax + cy * ay + cz * az;
+                double den = la * lb * lc + ab * lc + bc * la + ca * lb;
+                acc += 2.0 * atan2(num, den);
+            }
+        }
+        __syncthreads();
+    }
+    if (i < nq) out[i] = acc;
+}
+"#;
+
+struct GwnGpu {
+    _ctx: std::sync::Arc<cudarc::driver::CudaContext>,
+    stream: std::sync::Arc<cudarc::driver::CudaStream>,
+    f: cudarc::driver::CudaFunction,
+}
+
+static GWN: std::sync::Mutex<Option<GwnGpu>> = std::sync::Mutex::new(None);
+
+fn gwn_open(ordinal: usize) -> Result<GwnGpu, PatError> {
+    use cudarc::nvrtc::{CompileOptions, compile_ptx_with_opts};
+    let info = crate::gpu::probe(ordinal)?;
+    let e = |w: &'static str| move |err: cudarc::driver::DriverError| PatError::Gpu { reason: format!("{w}: {err:?}") };
+    let ctx = cudarc::driver::CudaContext::new(ordinal).map_err(e("context"))?;
+    let (major, minor) = info.compute_capability;
+    let opts = CompileOptions {
+        fmad: Some(false),
+        prec_div: Some(true),
+        prec_sqrt: Some(true),
+        ftz: Some(false),
+        options: vec![format!("--gpu-architecture=sm_{major}{minor}")],
+        name: Some("ddg_points_as_tori_gwn.cu".into()),
+        ..Default::default()
+    };
+    let ptx = std::panic::catch_unwind(|| compile_ptx_with_opts(GWN_SRC, opts))
+        .map_err(|_| PatError::Gpu { reason: "NVRTC (libnvrtc.so.12) could not be loaded".into() })?
+        .map_err(|err| PatError::Gpu { reason: format!("NVRTC: {err:?}") })?;
+    let module = ctx.load_module(ptx).map_err(e("module"))?;
+    let f = module.load_function("gwn_sum").map_err(e("function"))?;
+    // its own stream: no implicit synchronization with burn's streams
+    let stream = ctx.new_stream().map_err(e("stream"))?;
+    Ok(GwnGpu { _ctx: ctx, stream, f })
+}
+
+/// Solid-angle sums at `q` over the triangles `tri` (9 coordinates each, in the mesh's face order)
+/// on CUDA device 0 (the context is opened on first use and shared by the calling threads).
+pub fn solid_angle_sums(q: &[[f64; 3]], tri: &[[f64; 9]]) -> Result<Vec<f64>, PatError> {
+    use cudarc::driver::{LaunchConfig, PushKernelArg};
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut guard = GWN.lock().map_err(|_| PatError::Backend { reason: "poisoned GPU ground-truth lock".into() })?;
+    if guard.is_none() {
+        *guard = Some(gwn_open(0)?);
+    }
+    let g = guard.as_ref().ok_or_else(|| PatError::Backend { reason: "GPU ground truth".into() })?;
+    let e = |w: &'static str| move |err: cudarc::driver::DriverError| PatError::Gpu { reason: format!("ground truth {w}: {err:?}") };
+    let qf: Vec<f64> = q.iter().flatten().copied().collect();
+    let tf: Vec<f64> = if tri.is_empty() { vec![0.0; 9] } else { tri.iter().flatten().copied().collect() };
+    let dq = g.stream.clone_htod(&qf).map_err(e("upload"))?;
+    let dt = g.stream.clone_htod(&tf).map_err(e("upload"))?;
+    let mut dout = g.stream.alloc_zeros::<f64>(q.len()).map_err(e("alloc"))?;
+    let (nq, nf) = (q.len() as i32, tri.len() as i32);
+    let block = 128u32;
+    let cfg = LaunchConfig { grid_dim: ((q.len() as u32).div_ceil(block), 1, 1), block_dim: (block, 1, 1), shared_mem_bytes: 0 };
+    // Safety: the buffers have the sizes the kernel reads and writes (3·nq, 9·nf, nq).
+    unsafe { g.stream.launch_builder(&g.f).arg(&dq).arg(&nq).arg(&dt).arg(&nf).arg(&mut dout).launch(cfg) }.map_err(e("launch"))?;
+    g.stream.clone_dtoh(&dout).map_err(e("download"))
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -819,7 +964,7 @@ mod tests {
             // every real pair appears once, at its torus, and the padded ones carry zero weight
             let mut seen = vec![Vec::new(); p.len()];
             for d in &l.chunks {
-                assert!(d.qn * d.kk <= budget.max(d.kk));
+                assert!(d.qr * d.kk <= 2 * budget.max(d.kk) && d.qn == ladder(d.qr));
                 for (k, (&t, &w)) in d.idx.iter().zip(&d.w).enumerate() {
                     if w != 0.0 {
                         seen[t as usize].push((d.base + k) as i32);
@@ -835,7 +980,7 @@ mod tests {
                 }
                 r0 += tc.tn;
             }
-            assert_eq!(r0, p.len());
+            assert!(r0 >= p.len());
             for t in 0..p.len() {
                 back[t] = rows[l.inv[t] as usize].clone();
             }

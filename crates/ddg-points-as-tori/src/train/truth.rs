@@ -169,6 +169,17 @@ impl MeshTruth {
         t
     }
 
+    /// The faces' vertex coordinates (`v0, v1, v2`), in face order (the GPU ground truth).
+    pub(crate) fn triangles(&self) -> Vec<[f64; 9]> {
+        self.faces
+            .iter()
+            .map(|f| {
+                let [a, b, c] = f.map(|j| self.vertices[j as usize]);
+                [a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]]
+            })
+            .collect()
+    }
+
     /// Number of faces.
     pub fn len(&self) -> usize {
         self.faces.len()
