@@ -1110,3 +1110,22 @@ Compare at the tolerances of §15.1-4.
 **Orchestrator defaults (the user did not pick these; they may override):**
 5. **D27.** SHM and NN-VIPSS are not planned (not in the user's baseline list).
 6. Retrained weights stay in `data/` until they match or beat the authors' on §16.2.
+
+**Resolutions after the Lean oracle (WP3, 2026-11-04; details in `NOTES-WP3.md`,
+format in `lean/oracle/README.md` "Points as Tori").** These override §7.4 where they differ.
+1. Exponent shift: with the constant-λ rules (`PaperHeuristic` λ = 10³/D, fixed λ), the shift
+   is `min ρ` over the neighborhood (λσ_x ≈ 1300 overflows `exp` in the 32-NN fallback). The
+   `PerQuery` rule keeps σ_x = ½ max ρ and λ = C/σ_x.
+2. A neighborhood with σ_x = 0 under `PerQuery` (a radius set containing only the query), and an
+   SHC sum of exactly 0, return `DegenerateQuery` naming the query. Never NaN or inf.
+3. The Laplacian at axis/core singular points of a torus is 0 and is counted. `pat-blend-laplacian`
+   is the divergence of App. D, written out in the oracle README and checked by finite differences.
+4. Fit counters: one per clamp (disc, eigenvector, denominators `ev·I·ev`, |κ| floor, and the
+   remaining clamp as listed in NOTES-WP3). "Umbilic" means the disc clamp is active.
+5. `sgn(0)` follows the C++ `sgn+` convention (it matters only at exact umbilics; JAX gives 0).
+6. `radius auto` means R_eval = 2C/λ. The definition of D for the paper rule is the exact mean
+   64-NN distance (the reference's C++ helper has a data race; `runs_tmp/pat-ref/README.md`).
+7. The oracle agrees with the authors' program on all 34,222 tori of the golden set
+   (relative ≤ 6e-15; axes 4e-10 from their angle round trip) and on the SDF at 1000 queries
+   (≤ 1.3e-14). The CPU/GPU differences on near-flat tori are within the authors' program
+   (CPU vs GPU), not between the formulas.
