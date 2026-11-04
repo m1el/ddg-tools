@@ -222,3 +222,40 @@ fn end_to_end_matches_reference() {
         }
     }
 }
+
+/// Report only: what [`SignRule::Geometric`] changes against the reference's rule (saddles and
+/// exact zeros), on the golden coefficients; error against the exact SDF of the two synthetic
+/// clouds.
+#[test]
+fn geometric_sign_rule_effect() {
+    use ddg_points_as_tori::SignRule;
+    let Some(root) = golden_root() else { return };
+    for name in INPUTS {
+        let g = Golden::open(&root, name);
+        let co = g.coeffs();
+        let (grid, _) = grid_subset(&g);
+        let mut res = Vec::new();
+        let mut saddles = 0;
+        for rule in [SignRule::Reference, SignRule::Geometric] {
+            let (tori, rep) = fit_tori(&g.cloud, &co, &FitOptions { sign_rule: rule, ..Default::default() }).unwrap();
+            saddles = rep.saddle;
+            let field = TorusField::new(&g.cloud, tori, EvalOptions::default()).unwrap();
+            res.push(eval(&field, &grid).0);
+        }
+        let (mx, med, p999) = diff_stats(&res[0], &res[1]);
+        let exact: Option<Box<dyn Fn([f64; 3]) -> f64>> = match name {
+            "synth_sphere" => Some(Box::new(|x: [f64; 3]| (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt() - 0.5)),
+            "synth_torus" => Some(Box::new(|x: [f64; 3]| ((x[0].hypot(x[1]) - 0.35).hypot(x[2])) - 0.15)),
+            _ => None,
+        };
+        let err = exact.map(|f| {
+            let truth: Vec<f64> = grid.iter().map(|&x| f(x)).collect();
+            let mean = |v: &[f64]| v.iter().zip(&truth).map(|(a, b)| (a - b).abs()).sum::<f64>() / v.len() as f64;
+            format!(", mean |φ − exact| reference {:.3e}, geometric {:.3e}", mean(&res[0]), mean(&res[1]))
+        });
+        eprintln!(
+            "sign rule {name:>12}: saddles {saddles:>3}, grid |φ_ref − φ_geo| max {mx:.1e} median {med:.1e} p99.9 {p999:.1e}{}",
+            err.unwrap_or_default()
+        );
+    }
+}

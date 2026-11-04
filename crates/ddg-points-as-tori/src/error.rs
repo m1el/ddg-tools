@@ -81,6 +81,13 @@ pub enum PatError {
         /// What is wrong.
         reason: String,
     },
+    /// A query's neighbor set degenerates (PerQuery λ with `σ_x = 0`: every member at the query).
+    DegenerateQuery {
+        /// Index of the query.
+        index: usize,
+        /// Why.
+        reason: String,
+    },
     /// The network framework failed.
     Backend {
         /// What failed.
@@ -131,6 +138,7 @@ impl fmt::Display for PatError {
             PatError::SizeMismatch { what } => write!(f, "size mismatch: {what}"),
             PatError::ThreadPool { reason } => write!(f, "thread pool: {reason}"),
             PatError::Format { reason } => write!(f, "format: {reason}"),
+            PatError::DegenerateQuery { index, reason } => write!(f, "query {index}: {reason}"),
             PatError::Backend { reason } => write!(f, "network backend: {reason}"),
         }
     }

@@ -39,7 +39,7 @@
 //! let (cloud, _) = PointCloud::new(positions, normals, NormalPolicy::default())?;
 //! let model = Model::reference()?;
 //! let (field, report) = PointsAsTori::build(&cloud, &model, &BuildOptions::default())?;
-//! let (phi, grad) = field.distance_gradient([0.1, 0.2, 0.3]);
+//! let (phi, grad) = field.distance_gradient([0.1, 0.2, 0.3])?;
 //! # let _ = (phi, grad, report); Ok(()) }
 //! ```
 
@@ -88,6 +88,6 @@ pub use cloud::{CloudReport, NormalPolicy, PointCloud};
 pub use error::PatError;
 pub use features::FeatureOrder;
 pub use field::{BuildOptions, BuildReport, EvalOptions, EvalOut, EvalPrecision, EvalReport, Neighborhood, PointsAsTori, TorusField};
-pub use fit::{FitDiagnostics, FitOptions, FitReport, Torus, Tori, fit_diagnostics, fit_tori};
+pub use fit::{FitDiagnostics, FitOptions, FitReport, Torus, SignRule, Tori, fit_diagnostics, fit_tori};
 pub use network::{Device, Model, ModelConfig, PredictOptions, PredictReport, predict_coefficients};
 pub use spatial::Neighborhoods;

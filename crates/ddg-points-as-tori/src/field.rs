@@ -1,6 +1,6 @@
 //! The evaluable field and the `PointsAsTori` facade (SPEC.md §7.4–§7.5).
 
-use crate::blend::{BlendFlags, BlendInputs, BlendWant, GradientMode, LambdaRule, blend};
+use crate::blend::{BlendFlags, BlendInputs, BlendValue, BlendWant, Degenerate, GradientMode, LambdaRule, blend};
 use crate::fit::{FitOptions, FitReport, Tori, fit_tori_with};
 use crate::network::{Device, Model, PredictOptions, PredictReport, predict_coefficients};
 use crate::spatial::{KdTree, KdTreeOptions, Neighbor, fitting_neighborhoods};
@@ -104,6 +104,13 @@ pub struct TorusField {
     lambda_global: f64,
     mean_distance: f64,
     pool: rayon::ThreadPool,
+}
+
+fn degenerate(index: usize) -> PatError {
+    PatError::DegenerateQuery {
+        index,
+        reason: "every neighbor is at the query, so σ_x = 0 and the PerQuery λ = C/σ_x is undefined".into(),
+    }
 }
 
 /// Queries per parallel task (a constant; every query is independent anyway).
@@ -265,34 +272,49 @@ impl TorusField {
         fell_back
     }
 
-    fn eval_one(&self, x: [f64; 3], want: BlendWant, buf: &mut Vec<Neighbor>, idx: &mut Vec<u32>) -> (crate::blend::BlendValue, bool, usize) {
+    fn eval_one(
+        &self,
+        x: [f64; 3],
+        want: BlendWant,
+        buf: &mut Vec<Neighbor>,
+        idx: &mut Vec<u32>,
+    ) -> Result<(BlendValue, bool, usize), Degenerate> {
         let fb = self.neighbors(x, buf, idx);
-        (blend(&self.inputs(), x, idx, want), fb, idx.len())
+        Ok((blend(&self.inputs(), x, idx, want)?, fb, idx.len()))
     }
 
-    /// `φ(x) − isovalue` (NaN for a non-finite `x`).
-    pub fn distance(&self, x: [f64; 3]) -> f64 {
+    fn single(&self, x: [f64; 3], want: BlendWant) -> Result<BlendValue, PatError> {
         if !x.iter().all(|c| c.is_finite()) {
-            return f64::NAN;
+            return Err(PatError::NonFinite { index: 0, what: "query" });
         }
-        self.eval_one(x, BlendWant::Distance, &mut Vec::new(), &mut Vec::new()).0.distance
+        self.eval_one(x, want, &mut Vec::new(), &mut Vec::new()).map(|v| v.0).map_err(|_| degenerate(0))
     }
 
-    /// `φ(x) − isovalue` and `∇φ(x)` (NaN for a non-finite `x`).
-    pub fn distance_gradient(&self, x: [f64; 3]) -> (f64, [f64; 3]) {
-        if !x.iter().all(|c| c.is_finite()) {
-            return (f64::NAN, [f64::NAN; 3]);
-        }
-        let v = self.eval_one(x, BlendWant::Gradient(self.options.gradient), &mut Vec::new(), &mut Vec::new()).0;
-        (v.distance, v.gradient)
+    /// `φ(x) − isovalue`.
+    pub fn distance(&self, x: [f64; 3]) -> Result<f64, PatError> {
+        Ok(self.single(x, BlendWant::Distance)?.distance)
     }
 
-    /// `Δφ(x)` with frozen λ (App. D divergence with our `Δg`; NaN for a non-finite `x`).
-    pub fn laplacian(&self, x: [f64; 3]) -> f64 {
+    /// `φ(x) − isovalue` and `∇φ(x)` (gradient mode of the options).
+    pub fn distance_gradient(&self, x: [f64; 3]) -> Result<(f64, [f64; 3]), PatError> {
+        let v = self.single(x, BlendWant::Gradient(self.options.gradient))?;
+        Ok((v.distance, v.gradient))
+    }
+
+    /// `Δφ(x)` with frozen λ (App. D divergence with our `Δg`).
+    pub fn laplacian(&self, x: [f64; 3]) -> Result<f64, PatError> {
+        Ok(self.single(x, BlendWant::Laplacian)?.laplacian)
+    }
+
+    /// Everything one blend computes at `x` (value, gradient or Laplacian per `want`, `σ_x`, `λ`,
+    /// the shift, counters). For tests and the oracle replay.
+    pub fn blend_at(&self, x: [f64; 3], want: BlendWant) -> Result<(BlendValue, Vec<u32>), PatError> {
         if !x.iter().all(|c| c.is_finite()) {
-            return f64::NAN;
+            return Err(PatError::NonFinite { index: 0, what: "query" });
         }
-        self.eval_one(x, BlendWant::Laplacian, &mut Vec::new(), &mut Vec::new()).0.laplacian
+        let mut idx = Vec::new();
+        let (v, _, _) = self.eval_one(x, want, &mut Vec::new(), &mut idx).map_err(|_| degenerate(0))?;
+        Ok((v, idx))
     }
 
     /// Batch evaluation on the field's pool. The requested buffers must have `xs.len()` entries.
@@ -325,7 +347,7 @@ impl TorusField {
                 what: "the Laplacian pass returns the frozen gradient; request the exact gradient separately".into(),
             });
         }
-        let vals: Vec<(crate::blend::BlendValue, bool, usize)> = self.pool.install(|| {
+        let vals: Vec<Result<(BlendValue, bool, usize), Degenerate>> = self.pool.install(|| {
             xs.par_chunks(EVAL_CHUNK)
                 .flat_map_iter(|c| {
                     let mut buf = Vec::new();
@@ -334,9 +356,12 @@ impl TorusField {
                 })
                 .collect()
         });
+        if let Some(i) = vals.iter().position(|v| v.is_err()) {
+            return Err(degenerate(i));
+        }
         let mut rep = EvalReport { queries: q, ..Default::default() };
         let EvalOut { mut distance, mut gradient, mut laplacian } = out;
-        for (i, (v, fb, terms)) in vals.iter().enumerate() {
+        for (i, (v, fb, terms)) in vals.iter().flatten().enumerate() {
             let BlendFlags { singular_axis, singular_core, at_data_point } = v.flags;
             rep.singular_axis += singular_axis as u64;
             rep.singular_core += singular_core as u64;

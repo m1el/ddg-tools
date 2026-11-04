@@ -87,6 +87,7 @@ pub fn median_f32(v: &mut [f32]) -> f32 {
 #[derive(Debug, Default, Clone)]
 pub struct FeatureScratch {
     d64: Vec<f64>,
+    f64s: Vec<f64>,
     d32: Vec<f32>,
     p32: Vec<[f32; 3]>,
 }
@@ -115,28 +116,13 @@ pub fn neighborhood_features(
     debug_assert_eq!(out.len(), 6 * k);
     match order {
         FeatureOrder::DifferenceFirst => {
-            let pi = positions[row[0] as usize];
-            let c = unit(normals[row[0] as usize]);
-            let (s, t) = local_frame(c);
-            scratch.d64.clear();
-            scratch.d64.extend(row.iter().map(|&j| {
-                let p = positions[j as usize];
-                let d = [p[0] - pi[0], p[1] - pi[1], p[2] - pi[2]];
-                dot(d, d).sqrt()
-            }));
-            let sigma = median(&mut scratch.d64);
-            for (m, &j) in row.iter().enumerate() {
-                let p = positions[j as usize];
-                let d = [(p[0] - pi[0]) / sigma, (p[1] - pi[1]) / sigma, (p[2] - pi[2]) / sigma];
-                let nj = unit(normals[j as usize]);
-                let o = &mut out[6 * m..6 * m + 6];
-                o[0] = dot(d, s) as f32;
-                o[1] = dot(d, t) as f32;
-                o[2] = dot(d, c) as f32;
-                o[3] = dot(nj, s) as f32;
-                o[4] = dot(nj, t) as f32;
-                o[5] = dot(nj, c) as f32;
+            let mut f64s = std::mem::take(&mut scratch.f64s);
+            f64s.resize(6 * k, 0.0);
+            let sigma = neighborhood_features_f64(positions, normals, row, scratch, &mut f64s);
+            for (o, f) in out.iter_mut().zip(&f64s) {
+                *o = *f as f32;
             }
+            scratch.f64s = f64s;
             sigma
         }
         FeatureOrder::Reference => {
@@ -170,8 +156,46 @@ pub fn neighborhood_features(
     }
 }
 
+/// The features of [`FeatureOrder::DifferenceFirst`] before rounding to f32 (`6·row.len()`
+/// values into `out`), and `σ_i`. The frame is `local_frame(n̂_i)`.
+///
+/// [formula: pat-features]
+/// [formula: pat-feature-invariance]
+pub fn neighborhood_features_f64(
+    positions: &[[f64; 3]],
+    normals: &[[f64; 3]],
+    row: &[u32],
+    scratch: &mut FeatureScratch,
+    out: &mut [f64],
+) -> f64 {
+    let pi = positions[row[0] as usize];
+    let c = unit(normals[row[0] as usize]);
+    let (s, t) = local_frame(c);
+    scratch.d64.clear();
+    scratch.d64.extend(row.iter().map(|&j| {
+        let p = positions[j as usize];
+        let d = [p[0] - pi[0], p[1] - pi[1], p[2] - pi[2]];
+        dot(d, d).sqrt()
+    }));
+    let sigma = median(&mut scratch.d64);
+    for (m, &j) in row.iter().enumerate() {
+        let p = positions[j as usize];
+        let d = [(p[0] - pi[0]) / sigma, (p[1] - pi[1]) / sigma, (p[2] - pi[2]) / sigma];
+        let nj = unit(normals[j as usize]);
+        let o = &mut out[6 * m..6 * m + 6];
+        o[0] = dot(d, s);
+        o[1] = dot(d, t);
+        o[2] = dot(d, c);
+        o[3] = dot(nj, s);
+        o[4] = dot(nj, t);
+        o[5] = dot(nj, c);
+    }
+    sigma
+}
+
+/// The unit normal `n / max(‖n‖, 1e-10)` whose frame the features use.
 #[inline]
-fn unit(n: [f64; 3]) -> [f64; 3] {
+pub fn unit(n: [f64; 3]) -> [f64; 3] {
     let l = dot(n, n).sqrt().max(NORMAL_EPS);
     [n[0] / l, n[1] / l, n[2] / l]
 }

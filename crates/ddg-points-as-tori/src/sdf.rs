@@ -79,8 +79,8 @@ pub fn torus_sdf_gradient(t: &Torus, x: [f64; 3]) -> (f64, [f64; 3], Singular) {
 /// meridian plane plus the axisymmetric term `(1/v) ∂‖d‖/∂v`; replaces the reference's
 /// placeholder).
 ///
-/// Singular sets: on the core `Δg = +∞·sign`; it is returned as `sign⁺(r)·f64::MAX` there. On
-/// the axis the axisymmetric term is dropped (`Δg = sign⁺(r)/‖d‖`). Both are reported.
+/// Singular sets (SPEC resolution from WP3): on the core and on the axis `Δg` is returned as 0
+/// (it is unbounded there); both are reported.
 ///
 /// [formula: pat-torus-sdf-laplacian]
 #[inline]
@@ -90,8 +90,7 @@ pub fn torus_sdf_laplacian(t: &Torus, x: [f64; 3]) -> (f64, [f64; 3], f64, Singu
     let nd = (d1 * d1 + d2 * d2).sqrt();
     let s = sign_pos(t.minor);
     let lap = match sing {
-        Singular::Core => s * f64::MAX,
-        Singular::Axis => s / nd,
+        Singular::Core | Singular::Axis => 0.0,
         Singular::None => s * (1.0 / nd + d1 / (nd * v)),
     };
     (g, gr, lap, sing)

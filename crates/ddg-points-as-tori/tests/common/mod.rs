@@ -117,3 +117,36 @@ pub fn diff_stats(a: &[f64], b: &[f64]) -> (f64, f64, f64) {
     let q = |f: f64| d[((d.len() - 1) as f64 * f).round() as usize];
     (d[d.len() - 1], q(0.5), q(0.999))
 }
+
+/// A deterministic LCG in [0, 1).
+pub fn lcg(seed: &mut u64) -> f64 {
+    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    (*seed >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// `n` points on the ellipsoid `(x/a)² + (y/b)² + (z/c)² = 1` with exact outward unit normals,
+/// pseudo-random (seeded).
+pub fn ellipsoid_cloud(n: usize, seed: u64, axes: [f64; 3]) -> PointCloud {
+    let mut s = seed;
+    let mut p = Vec::with_capacity(n);
+    let mut nr = Vec::with_capacity(n);
+    while p.len() < n {
+        let v = [2.0 * lcg(&mut s) - 1.0, 2.0 * lcg(&mut s) - 1.0, 2.0 * lcg(&mut s) - 1.0];
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        if !(0.1..=1.0).contains(&l) {
+            continue;
+        }
+        let u = [v[0] / l, v[1] / l, v[2] / l];
+        let x = [axes[0] * u[0], axes[1] * u[1], axes[2] * u[2]];
+        let g = [x[0] / (axes[0] * axes[0]), x[1] / (axes[1] * axes[1]), x[2] / (axes[2] * axes[2])];
+        let gl = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+        p.push(x);
+        nr.push([g[0] / gl, g[1] / gl, g[2] / gl]);
+    }
+    PointCloud::new(p, nr, NormalPolicy::default()).expect("valid cloud").0
+}
+
+/// Bit patterns of a slice of f64.
+pub fn bits(v: &[f64]) -> Vec<u64> {
+    v.iter().map(|x| x.to_bits()).collect()
+}

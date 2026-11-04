@@ -256,3 +256,82 @@ impl KdTree {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lcg(seed: &mut u64) -> f64 {
+        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (*seed >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    fn brute(points: &[[f64; 3]], q: [f64; 3], k: usize) -> Vec<(f64, u32)> {
+        let mut v: Vec<(f64, u32)> = points.iter().enumerate().map(|(i, p)| (dist2(p, &q), i as u32)).collect();
+        v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap().then(a.1.cmp(&b.1)));
+        v.truncate(k);
+        v
+    }
+
+    fn cloud(n: usize, seed: u64, grid: bool) -> Vec<[f64; 3]> {
+        let mut s = seed;
+        (0..n)
+            .map(|_| {
+                let p = [lcg(&mut s), lcg(&mut s), lcg(&mut s)];
+                // a coarse grid gives many exact ties and duplicates
+                if grid { p.map(|c| (c * 6.0).floor() / 6.0) } else { p }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn knn_equals_brute_force_with_ties() {
+        for (n, grid) in [(1, false), (5, false), (17, true), (300, true), (2000, false), (3000, true)] {
+            let pts = cloud(n, 7 + n as u64, grid);
+            for bucket in [1, 4, 16] {
+                let tree = KdTree::new(&pts, KdTreeOptions { bucket }).unwrap();
+                let mut out = Vec::new();
+                let mut s = 99;
+                for qi in 0..60 {
+                    let q = if qi % 2 == 0 { pts[qi % n] } else { [lcg(&mut s), lcg(&mut s), lcg(&mut s)] };
+                    for k in [1, 3, 16, 64, n + 5] {
+                        tree.knn(q, k, &mut out);
+                        let want = brute(&pts, q, k);
+                        let got: Vec<(f64, u32)> = out.iter().map(|nb| (nb.d2, nb.index)).collect();
+                        assert_eq!(got, want, "n {n} bucket {bucket} k {k} query {q:?}");
+                    }
+                    let r = 0.2;
+                    tree.radius(q, r, &mut out);
+                    let mut want = brute(&pts, q, n);
+                    want.retain(|x| x.0 <= r * r);
+                    let got: Vec<(f64, u32)> = out.iter().map(|nb| (nb.d2, nb.index)).collect();
+                    assert_eq!(got, want, "radius n {n} bucket {bucket}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn construction_is_thread_independent() {
+        let pts = cloud(50_000, 3, true);
+        let build = |t: usize| {
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(t).build().unwrap();
+            let tr = pool.install(|| KdTree::new(&pts, KdTreeOptions::default()).unwrap());
+            (tr.idx.clone(), tr.nodes.iter().map(|n| (n.start, n.end, n.right)).collect::<Vec<_>>())
+        };
+        let a = build(1);
+        for t in [3, 8, 32] {
+            assert_eq!(build(t), a, "{t} threads");
+        }
+    }
+
+    #[test]
+    fn rejects_bad_input() {
+        assert!(matches!(KdTree::new(&[], KdTreeOptions::default()), Err(PatError::TooFewPoints { .. })));
+        assert!(matches!(
+            KdTree::new(&[[0.0, f64::NAN, 0.0]], KdTreeOptions::default()),
+            Err(PatError::NonFinite { index: 0, .. })
+        ));
+        assert!(matches!(KdTree::new(&[[0.0; 3]], KdTreeOptions { bucket: 0 }), Err(PatError::InvalidOption { .. })));
+    }
+}

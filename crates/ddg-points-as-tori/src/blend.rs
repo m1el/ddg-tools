@@ -3,8 +3,13 @@
 //! 2026 Nicole Feng). f64.
 //!
 //! For a query `x` and a neighbor set `𝒩`: `ρ_i = ‖x − p_i‖`, `σ_x = ½ max_𝒩 ρ_i`, `λ` by
-//! [`LambdaRule`], `w_i = A_i exp(−λ(ρ_i − σ_x))` (`A_i = 1` without area weights) and
+//! [`LambdaRule`], `w_i = A_i exp(−λ(ρ_i − s))` (`A_i = 1` without area weights) and
 //! `φ = Σ w_i g_i / Σ w_i − isovalue`. Sums run over `𝒩` in its given order.
+//!
+//! The exponent shift `s` cancels in `φ` and its derivatives. It is `σ_x` for
+//! [`LambdaRule::PerQuery`] (the reference) and `min_𝒩 ρ` for the constant rules: with
+//! `λ = 10³/D` and a 32-NN fallback far from the cloud, `λσ_x` exceeds 709 and `exp` overflows
+//! (SPEC resolution from WP3).
 
 use crate::sdf::{Singular, torus_sdf, torus_sdf_gradient, torus_sdf_laplacian};
 use crate::Torus;
@@ -75,7 +80,9 @@ pub struct BlendValue {
     pub laplacian: f64,
     /// `λ` used.
     pub lambda: f64,
-    /// `σ_x` used.
+    /// `σ_x = ½ max ρ`.
+    pub sigma: f64,
+    /// The exponent shift `s` (`σ_x` for PerQuery, `min ρ` for the constant rules).
     pub shift: f64,
     /// Counters.
     pub flags: BlendFlags,
@@ -124,19 +131,23 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// The shift `σ_x = ½ max_𝒩 ‖x − p_i‖` and the index (into `nbrs`) of the farthest neighbor
-/// (first in order on ties).
-pub fn shift(x: [f64; 3], positions: &[[f64; 3]], nbrs: &[u32]) -> (f64, usize) {
-    let mut m = 0.0;
+/// `σ_x = ½ max_𝒩 ‖x − p_i‖`, `min_𝒩 ‖x − p_i‖`, and the position in `nbrs` of the member
+/// with the largest `(ρ², index)` (the last member of the `(ρ², index)`-sorted set; its `r̂`
+/// enters the exact gradient).
+pub fn shift(x: [f64; 3], positions: &[[f64; 3]], nbrs: &[u32]) -> (f64, f64, usize) {
+    let mut m2 = f64::NEG_INFINITY;
+    let mut min2 = f64::INFINITY;
     let mut arg = 0;
     for (t, &i) in nbrs.iter().enumerate() {
-        let d = norm(sub(x, positions[i as usize]));
-        if d > m {
-            m = d;
+        let r = sub(x, positions[i as usize]);
+        let d2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+        if d2 > m2 || (d2 == m2 && i > nbrs[arg]) {
+            m2 = d2;
             arg = t;
         }
+        min2 = min2.min(d2);
     }
-    (0.5 * m, arg)
+    (0.5 * m2.sqrt(), min2.sqrt(), arg)
 }
 
 /// `w_i = A_i exp(−λ(ρ_i − σ))`. With `λ = C/σ` and `0 ≤ ρ ≤ 2σ` the exponent lies in `[−C, C]`.
@@ -147,6 +158,10 @@ pub fn blend_weight(lambda: f64, rho: f64, shift: f64, area: f64) -> f64 {
     area * (-lambda * (rho - shift)).exp()
 }
 
+/// The neighbor set degenerates: [`LambdaRule::PerQuery`] with `σ_x = 0` (every member at `x`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Degenerate;
+
 /// One blend over `nbrs` (non-empty).
 ///
 /// [formula: pat-blend-shift]
@@ -154,12 +169,17 @@ pub fn blend_weight(lambda: f64, rho: f64, shift: f64, area: f64) -> f64 {
 /// [formula: pat-blend-gradient]
 /// [formula: pat-blend-gradient-exact]
 /// [formula: pat-blend-laplacian]
-pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) -> BlendValue {
-    let (sigma, arg) = shift(x, inp.positions, nbrs);
-    let lambda = match inp.lambda {
-        LambdaRule::PerQuery { c } => c / sigma,
-        LambdaRule::Constant { lambda } => lambda,
-        LambdaRule::PaperHeuristic { .. } => inp.lambda_global,
+pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) -> Result<BlendValue, Degenerate> {
+    let (sigma, rho_min, arg) = shift(x, inp.positions, nbrs);
+    let (lambda, shift) = match inp.lambda {
+        LambdaRule::PerQuery { c } => {
+            if sigma == 0.0 {
+                return Err(Degenerate);
+            }
+            (c / sigma, sigma)
+        }
+        LambdaRule::Constant { lambda } => (lambda, rho_min),
+        LambdaRule::PaperHeuristic { .. } => (inp.lambda_global, rho_min),
     };
     let mut flags = BlendFlags::default();
     let mut wsum = 0.0;
@@ -170,11 +190,11 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
                 let i = i as usize;
                 let rho = norm(sub(x, inp.positions[i]));
                 let a = inp.area_weights.map_or(1.0, |a| a[i]);
-                let w = blend_weight(lambda, rho, sigma, a);
+                let w = blend_weight(lambda, rho, shift, a);
                 gsum += w * torus_sdf(&inp.tori[i], x);
                 wsum += w;
             }
-            BlendValue { distance: gsum / wsum - inp.isovalue, lambda, shift: sigma, flags, ..Default::default() }
+            Ok(BlendValue { distance: gsum / wsum - inp.isovalue, lambda, sigma, shift, flags, ..Default::default() })
         }
         BlendWant::Gradient(_) | BlendWant::Laplacian => {
             let lap = matches!(want, BlendWant::Laplacian);
@@ -195,7 +215,7 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
                     [0.0; 3]
                 };
                 let a = inp.area_weights.map_or(1.0, |a| a[i]);
-                let w = blend_weight(lambda, rho, sigma, a);
+                let w = blend_weight(lambda, rho, shift, a);
                 let (g, gr, lg, sing) = if lap {
                     torus_sdf_laplacian(&inp.tori[i], x)
                 } else {
@@ -228,7 +248,7 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
             if let (BlendWant::Gradient(GradientMode::Exact), LambdaRule::PerQuery { c }) = (want, inp.lambda)
                 && sigma > 0.0
             {
-                // ∂φ/∂λ = Σ w(σ − ρ)(g − φ)/W = −(Σ w ρ g − φ Σ w ρ)/W; ∂λ/∂x = −(C/σ²)·½ r̂_far
+                // ∂φ/∂λ = Σ w(σ − ρ)(g − φ)/W = −(Σ w ρ g − φ Σ w ρ)/W; ∂λ/∂x = −(C/σ²)·½ r̂_last
                 let dphi_dlambda = -(esum - phi * ersum) / wsum;
                 let far = sub(x, inp.positions[nbrs[arg] as usize]);
                 let lf = norm(far);
@@ -246,7 +266,7 @@ pub fn blend(inp: &BlendInputs<'_>, x: [f64; 3], nbrs: &[u32], want: BlendWant) 
             } else {
                 0.0
             };
-            BlendValue { distance: phi - inp.isovalue, gradient: grad, laplacian, lambda, shift: sigma, flags }
+            Ok(BlendValue { distance: phi - inp.isovalue, gradient: grad, laplacian, lambda, sigma, shift, flags })
         }
     }
 }

@@ -285,11 +285,15 @@ pub fn scale_outputs(y: [f32; 6], sigma: f64, order: FeatureOrder) -> [f32; 6] {
             let s = sigma as f32;
             [y[0] * s, y[1], y[2], y[3] / s, y[4] / s, y[5] / s]
         }
-        FeatureOrder::DifferenceFirst => {
-            let y = y.map(|v| v as f64);
-            [(y[0] * sigma) as f32, y[1] as f32, y[2] as f32, (y[3] / sigma) as f32, (y[4] / sigma) as f32, (y[5] / sigma) as f32]
-        }
+        FeatureOrder::DifferenceFirst => scale_outputs_f64(y.map(|v| v as f64), sigma).map(|v| v as f32),
     }
+}
+
+/// [`scale_outputs`] in f64 without rounding (the default order's arithmetic before the cast).
+///
+/// [formula: pat-output-scaling]
+pub fn scale_outputs_f64(y: [f64; 6], sigma: f64) -> [f64; 6] {
+    [y[0] * sigma, y[1], y[2], y[3] / sigma, y[4] / sigma, y[5] / sigma]
 }
 
 /// Raw network outputs for precomputed features (`b·t·6` values, `b` neighborhoods of `t`

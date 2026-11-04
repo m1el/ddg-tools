@@ -48,15 +48,21 @@ pub struct Tori {
     pub sigma: Vec<f64>,
 }
 
-/// Which clamps fired for one point.
+/// Which clamps fired for one point (one flag per clamp, as the Lean oracle prints them).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ClampFlags {
-    /// The discriminant was raised to `eig_eps`.
+    /// The discriminant argument was below `eig_eps` (also the definition of "umbilic").
     pub disc: bool,
-    /// An eigenvector component or a Rayleigh denominator was raised to `eig_eps` in magnitude.
+    /// `ev₊x = v1 + disc` or `ev₋y = v2` was raised to `eig_eps` in magnitude.
     pub eigvec: bool,
-    /// `|κmin|` or `|κmax|` was raised to `curvature_floor`.
+    /// A Rayleigh denominator `ev·I·ev` was raised to `eig_eps` in magnitude.
+    pub denominator: bool,
+    /// `|κmin|` or `|κmax|` was below `curvature_floor`.
     pub curvature: bool,
+    /// `κmin κmax < 0` (a saddle; see [`SignRule`]).
+    pub saddle: bool,
+    /// A principal curvature is exactly zero (see [`SignRule`]).
+    pub zero: bool,
 }
 
 /// The intermediate quantities of one fit (orientation, diagnostics).
@@ -76,6 +82,33 @@ pub struct FitDiagnostics {
     pub clamps: ClampFlags,
 }
 
+/// How the torus's sign and center follow from the curvatures.
+///
+/// **Reference** (default; the paper's Eq. 22 and center formula, the JAX training rule and the
+/// C++ inference code): `s` by Eq. 22, `c = o − (s/|κmin|) n*`, `R = 1/|κmin| − sgn(κ₊κ₋) r`, with
+/// `|κ|` floored but `s` and `sgn` taken from the unfloored values. Two defects, measured in
+/// WP1 (NOTES-WP1.md):
+/// - at a **saddle** (`κmin κmax < 0`) the center is put on the wrong side: the torus still passes
+///   through `o`, but it is the mirror image of the osculating one, and `∂g/∂n* = −1` at `o`
+///   (inside and outside swapped locally). The golden tori of the authors' program show it (33 of
+///   12,917 tori of holey-bunny, 4 of femur, 1 of snail);
+/// - at an **exactly zero** curvature `s = −1` and `sgn = 0`: a plane gives a horn torus whose
+///   core circle passes through `o`; a cylinder bending away from `n` is put on the wrong side.
+///
+/// **Geometric** (ours): `|κ|` below the floor becomes `±floor` with its sign (`+floor` at 0);
+/// `s = +1` iff `κmax < 0` (the tube center `o + n*/κmax` is on the inner side); the center is the
+/// center of the parallel circle, `c = o + n*/κmin` (signed). Identical to `Reference` except at
+/// saddles and exact zeros; the torus then osculates at `o` in every case (outward normal, both
+/// principal curvatures).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SignRule {
+    /// The reference's rule, as the network was trained (SPEC.md D9).
+    #[default]
+    Reference,
+    /// The osculating torus in every case.
+    Geometric,
+}
+
 /// Options of [`fit_tori`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FitOptions {
@@ -84,13 +117,15 @@ pub struct FitOptions {
     pub eig_eps: f64,
     /// Floor of `|κmin|`, `|κmax|` before inversion (JAX rule, 1e-10).
     pub curvature_floor: f64,
+    /// Sign and center rule (see [`SignRule`]).
+    pub sign_rule: SignRule,
     /// Threads (`None`: all cores). An explicit pool; results do not depend on it.
     pub threads: Option<usize>,
 }
 
 impl Default for FitOptions {
     fn default() -> Self {
-        FitOptions { eig_eps: 1e-10, curvature_floor: 1e-10, threads: None }
+        FitOptions { eig_eps: 1e-10, curvature_floor: 1e-10, sign_rule: SignRule::Reference, threads: None }
     }
 }
 
@@ -99,12 +134,19 @@ impl Default for FitOptions {
 pub struct FitReport {
     /// Points whose discriminant was clamped.
     pub clamped_disc: usize,
-    /// Points with an eigenvector or denominator clamp.
+    /// Points with an eigenvector-component clamp.
     pub clamped_eigvec: usize,
+    /// Points with a Rayleigh-denominator clamp.
+    pub clamped_denominator: usize,
     /// Points with a curvature floor.
     pub clamped_curvature: usize,
-    /// Points with `κ₊ = κ₋` (umbilic; `R = 0`).
+    /// Umbilic points: the discriminant clamp is active (equal to `clamped_disc`; kept as its own
+    /// name for the oracle's flag).
     pub umbilic: usize,
+    /// Saddle points (`κmin κmax < 0`; see [`SignRule`]).
+    pub saddle: usize,
+    /// Points with an exactly zero principal curvature (see [`SignRule`]).
+    pub zero_curvature: usize,
     /// Points with a non-finite torus (an error is returned when non-empty).
     pub nonfinite: Vec<u32>,
     /// Neighborhoods with fewer than the model's `k` tokens (`n < k`).
@@ -277,20 +319,44 @@ pub fn fit_torus(p: [f64; 3], n: [f64; 3], a: [f64; 6], opts: &FitOptions) -> (T
 
     let (k_pos, cp) = rayleigh(ev_pos, i, ii, eps);
     let (k_neg, cn) = rayleigh(ev_neg, i, ii, eps);
-    clamps.eigvec |= cp || cn;
+    clamps.denominator = cp || cn;
 
     let (kappa_min, kappa_max, v_min, v_max) =
         if k_pos.abs() < k_neg.abs() { (k_pos, k_neg, v_pos, v_neg) } else { (k_neg, k_pos, v_neg, v_pos) };
 
-    let (big_r, r, cc) = torus_radii(kappa_min, kappa_max, opts.curvature_floor);
-    clamps.curvature = cc;
-    let s = torus_sign(kappa_min, kappa_max);
-    let akmin = kappa_min.abs().max(opts.curvature_floor);
-    let center = [
-        p[0] + a00 * n[0] - s / akmin * n_star[0],
-        p[1] + a00 * n[1] - s / akmin * n_star[1],
-        p[2] + a00 * n[2] - s / akmin * n_star[2],
-    ];
+    clamps.zero = kappa_min == 0.0 || kappa_max == 0.0;
+    clamps.saddle = kappa_min * kappa_max < 0.0;
+    let floor = opts.curvature_floor;
+    clamps.curvature = kappa_min.abs() < floor || kappa_max.abs() < floor;
+    let (big_r, r, s, center) = match opts.sign_rule {
+        SignRule::Reference => {
+            let (big_r, r, _) = torus_radii(kappa_min, kappa_max, floor);
+            let s = torus_sign(kappa_min, kappa_max);
+            let akmin = kappa_min.abs().max(floor);
+            let c = [
+                p[0] + a00 * n[0] - s / akmin * n_star[0],
+                p[1] + a00 * n[1] - s / akmin * n_star[1],
+                p[2] + a00 * n[2] - s / akmin * n_star[2],
+            ];
+            (big_r, r, s, c)
+        }
+        SignRule::Geometric => {
+            let f = |k: f64| if k.abs() >= floor { k } else if k < 0.0 { -floor } else { floor };
+            let (km, kx) = (f(kappa_min), f(kappa_max));
+            let (big_r, r, _) = torus_radii(km, kx, floor);
+            let s = if kx < 0.0 { 1.0 } else { -1.0 };
+            // c = o + n*/κmin, written as the reference's expression with the side −sgn(κmin) so
+            // that the two rules agree bitwise away from saddles and zeros
+            let side = if km < 0.0 { 1.0 } else { -1.0 };
+            let akmin = km.abs();
+            let c = [
+                p[0] + a00 * n[0] - side / akmin * n_star[0],
+                p[1] + a00 * n[1] - side / akmin * n_star[1],
+                p[2] + a00 * n[2] - side / akmin * n_star[2],
+            ];
+            (big_r, r, s, c)
+        }
+    };
     let u = cross(n_star, v_min);
     let lu = norm(u).max(eps);
     let axis = [u[0] / lu, u[1] / lu, u[2] / lu];
@@ -359,10 +425,11 @@ pub fn fit_tori_with(
     for (i, (t, cf)) in res.into_iter().enumerate() {
         report.clamped_disc += cf.disc as usize;
         report.clamped_eigvec += cf.eigvec as usize;
+        report.clamped_denominator += cf.denominator as usize;
+        report.umbilic += cf.disc as usize;
+        report.saddle += cf.saddle as usize;
         report.clamped_curvature += cf.curvature as usize;
-        if t.major == 0.0 {
-            report.umbilic += 1;
-        }
+        report.zero_curvature += cf.zero as usize;
         let finite = t.center.iter().chain(t.axis.iter()).all(|x| x.is_finite()) && t.major.is_finite() && t.minor.is_finite();
         if !finite {
             report.nonfinite.push(i as u32);
