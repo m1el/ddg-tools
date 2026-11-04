@@ -18,6 +18,8 @@ Geodesic Path, Straighten Seams: Sharp, Crane, You Can Find Geodesic Paths in Tr
 Just Flipping Edges (2020). Intrinsic Simplify: Liu, Gillespie, Chislett, Sharp, Jacobson, Crane,
 Surface Simplification using Intrinsic Error Metrics (2023); the authors' MIT reference code
 (Copyright (c) 2023 Hsueh-Ti Derek Liu) is credited in the crate ddg-intrinsic-simplification.
+Points as Tori: Feng, Gkioulekas, Crane, Signed Distance to Point Clouds by Blending Tori (ACM TOG 45(4),
+SIGGRAPH 2026): surface, offset, Boolean and normal orientation of oriented point clouds.
 """
 
 import bpy
@@ -32,6 +34,7 @@ from .developable_operator import (
 from .intrinsic_operator import MESH_OT_ddg_show_intrinsic_refinement
 from .operator import UV_OT_ddg_conformal_unwrap
 from . import geodesic_operator, repulsive_operator, repulsive_surface_operator, simplify_operator
+from . import points_as_tori_operator
 from .sphere_operator import OBJECT_OT_ddg_map_to_sphere
 
 _CUT_OPERATORS = (UV_OT_ddg_cut_start, UV_OT_ddg_cut_flow, UV_OT_ddg_cut_apply)
@@ -108,9 +111,11 @@ def register():
     repulsive_surface_operator.register()
     geodesic_operator.register()
     simplify_operator.register()
+    points_as_tori_operator.register()
 
 
 def unregister():
+    points_as_tori_operator.unregister()
     simplify_operator.unregister()
     geodesic_operator.unregister()
     repulsive_surface_operator.unregister()
