@@ -3,6 +3,7 @@ import DdgProofs.PointsAsTori.Features
 import DdgProofs.PointsAsTori.Fitting
 import DdgProofs.PointsAsTori.Torus
 import DdgProofs.PointsAsTori.Blend
+import DdgProofs.PointsAsTori.Apps
 
 /-!
 # Points as Tori (Feng, Gkioulekas, Crane, ACM TOG 45(4), Article 53, 2026)
