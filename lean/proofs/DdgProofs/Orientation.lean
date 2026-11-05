@@ -27,7 +27,7 @@ The existing theorems (Gauss–Bonnet, the cotan Laplacian) do not use the orien
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriMesh
 
@@ -235,4 +235,4 @@ example : exampleTriangle.Oriented ∧ ∀ h, ¬exampleTriangle.HasTwin h := by
     revert h h'
     decide
 
-end DdgProofs
+end DDG

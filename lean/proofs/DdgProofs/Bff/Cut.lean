@@ -34,7 +34,7 @@ surfaces, cited), and that the planner's cuts produce such charts (cited; checke
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -356,4 +356,4 @@ theorem card_edge_copies_le (h : IsCutOf M' M ρ) (hM : M.Valid) (e : Sym2 V) :
 
 end TriMesh
 
-end DdgProofs
+end DDG

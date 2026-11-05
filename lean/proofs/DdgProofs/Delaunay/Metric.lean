@@ -37,7 +37,7 @@ new_length`, all other entries unchanged; edge ids are kept, halfedge ids move b
   are at which vertex, also when `i, j, k, l` coincide).
 -/
 
-namespace DdgProofs.Delaunay
+namespace DDG.Delaunay
 
 open Real
 
@@ -382,4 +382,4 @@ theorem IsMetric.coneAngle_flip [Fintype F] {ℓ : Halfedge F → ℝ} (hm : G.I
 
 end Gluing
 
-end DdgProofs.Delaunay
+end DDG.Delaunay

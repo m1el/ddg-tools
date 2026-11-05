@@ -25,7 +25,7 @@ derivative of the evaluated energy on the lists; that assembly is linear and not
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -273,4 +273,4 @@ end shift
 
 end RC
 
-end DdgProofs
+end DDG

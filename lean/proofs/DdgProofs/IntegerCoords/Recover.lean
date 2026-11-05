@@ -21,14 +21,14 @@ App. A (Eq. 15–16).
 * **`ic-tangent-length`** — Eq. 5: a tangent vector with barycentric components `w`
   (`w_i + w_j + w_k = 0`) has `‖w‖² = −ℓ²_ij w_i w_j − ℓ²_jk w_j w_k − ℓ²_ki w_k w_i`
   (`tangent_length_sq`). This is the same statement as `cut-barycentric-length`
-  (`DdgProofs.Cuts.baryLength2_eq_norm_sq`), restated in the paper's form; the new edge lengths of a
+  (`DDG.Cuts.baryLength2_eq_norm_sq`), restated in the paper's form; the new edge lengths of a
   face split, `ℓ_im = ‖v − e_i‖`, are its value at `w = v − e_i` (`split_length`), which is what
-  `it-point-distances` (`DdgProofs.Intrinsic.cornerDistances_eq_baryLength`) proves for the
+  `it-point-distances` (`DDG.Intrinsic.cornerDistances_eq_baryLength`) proves for the
   intrinsic crate's `cornerDistances` on the unfolded triangle; here it is stated for any three
   points of a real inner product space.
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -118,4 +118,4 @@ end Lengths
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

@@ -22,7 +22,7 @@ Edges carry masses `ℓ_I`, midpoints `x_I` and tangents `T_I`; a node is a fini
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -245,4 +245,4 @@ end bct
 
 end RC
 
-end DdgProofs
+end DDG

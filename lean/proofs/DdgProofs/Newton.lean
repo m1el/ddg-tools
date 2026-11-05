@@ -26,7 +26,7 @@ after the substitution `u_paper = −u`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -574,4 +574,4 @@ theorem IsRegMinimizer.objective_le {γ : ι → ℝ} (hγ : ∀ i, 0 ≤ γ i) 
 
 end ConeProblem
 
-end DdgProofs
+end DDG

@@ -83,12 +83,12 @@ is the bridge to the oracle's flipped length.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
 open Real
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 variable {a b c d e : ℝ}
 
@@ -576,4 +576,4 @@ theorem layout_coords (hk : IsTriangle a b c) (hl : IsTriangle a d e)
 
 end Delaunay
 
-end DdgProofs
+end DDG

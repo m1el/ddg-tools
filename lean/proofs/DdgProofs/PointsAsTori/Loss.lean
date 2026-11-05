@@ -11,7 +11,7 @@ and has unit gradient on the valid queries (`loss_spec`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -47,4 +47,4 @@ theorem loss_spec (S1 S2 : Finset Q) (φ φt gnorm : Q → ℝ) :
 
 end PAT
 
-end DdgProofs
+end DDG

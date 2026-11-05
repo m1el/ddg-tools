@@ -21,5 +21,5 @@ import DdgProofs.RepulsiveCurves.NearPairSecond
 Machine-checked derivations of the formulas of `crates/ddg-repulsive-curves` (contract
 `crates/ddg-repulsive-curves/SPEC.md`, formula ids `rc-…`, §12). The smooth theory and the
 convergence and error bounds are cited in `lean/proofs/CITED.md`, section "Repulsive Curves".
-All theorems are in `namespace DdgProofs.RC`.
+All theorems are in `namespace DDG.RC`.
 -/

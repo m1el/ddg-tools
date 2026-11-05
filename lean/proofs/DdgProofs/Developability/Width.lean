@@ -23,11 +23,11 @@ is cited (`dev-min-width-hull-edge`, CITED.md).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 /-! ## Finite maxima and minima -/
@@ -308,4 +308,4 @@ theorem hasDerivAt_gramWidth {xs xt xa xb : ℝ → V3} {xs' xt' xa' xb' : V3} {
 
 end Dev
 
-end DdgProofs
+end DDG

@@ -33,11 +33,11 @@ theory and is **cited** (`CITED.md`, `cut-ripple-linearization`). Machine-checke
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The oracle's definitions -/
@@ -341,4 +341,4 @@ theorem sphere_unit_area_threshold :
 
 end Cuts
 
-end DdgProofs
+end DDG

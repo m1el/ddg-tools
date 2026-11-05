@@ -25,10 +25,10 @@ argument (`sda_combo₃`, `sda_four`), at the corners.
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Intrinsic (dist2_comm)
-open DdgProofs.Delaunay.Planar
+open DDG.Intrinsic (dist2_comm)
+open DDG.Delaunay.Planar
 open Set Filter Topology
 
 /-- The triangle with the corners `A, B, C`. -/
@@ -399,4 +399,4 @@ theorem openSegment_new_subset :
 
 end ConvexQuad
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

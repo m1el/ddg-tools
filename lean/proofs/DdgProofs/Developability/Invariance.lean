@@ -22,7 +22,7 @@ and dot products are Mathlib's `crossProduct` and `dotProduct`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
@@ -178,4 +178,4 @@ end
 
 end Dev
 
-end DdgProofs
+end DDG

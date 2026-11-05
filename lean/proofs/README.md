@@ -163,8 +163,8 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 
 ## Conventions
 
-- Namespace `DdgProofs` holds the math-level definitions of this package. Namespace `Ddg` belongs
-  to `lean/oracle`; theorems in `namespace Ddg.Problem` / `DdgProofs.Oracle` are about the oracle's
+- Namespace `DDG` holds the math-level definitions of this package. Namespace `Ddg` belongs
+  to `lean/oracle`; theorems in `namespace Ddg.Problem` / `DDG.Oracle` are about the oracle's
   scalar-generic definitions instantiated at `ℝ` (the same definitions the `Float` executable runs).
 - Signs are those of `CLAUDE.md`: `L` is positive semidefinite, `u` is the true log scale factor,
   the state equation is `L u = µ − Ω`. The **optimality system** for `(u, φ, µ)` is
@@ -311,8 +311,8 @@ vertex, `L` a square matrix on an index set `V` split by a predicate into the un
 the rest `B` (for a mesh: the cotan Laplacian of a region, `B` = cut vertices and vertices of
 `∂M`), `u_I` the restriction to `I`, `L_II`, `L_BI` the blocks. "Oracle" names are the
 definitions of `lean/oracle/DdgOracle/Formulas/Cuts.lean` at `ℝ`; the theorems are about them
-unless a definition of this package is named. All theorems are in `namespace DdgProofs.Cuts`
-(mesh statements in `DdgProofs.TriMesh`).
+unless a definition of this package is named. All theorems are in `namespace DDG.Cuts`
+(mesh statements in `DDG.TriMesh`).
 
 | id | exact statement | theorems |
 |---|---|---|
@@ -424,7 +424,7 @@ of reals; `|pq| = dist2 p q` and `[p,q,r] = sda p q r` (twice the signed area) a
 `α_j = cornerAngle b c a`, `β_j = cornerAngle d e a`. `Convex` is this package's
 `DiamondConvex a b c d e`: the oracle's `flipConvex` of the standard layout. After a flip the
 edge `kl` has the diamond `(f, c, e, b, d)` (apexes `j` and `i`). All theorems are in
-`namespace DdgProofs.Intrinsic`.
+`namespace DDG.Intrinsic`.
 
 | id | exact statement | theorems |
 |---|---|---|
@@ -446,7 +446,7 @@ edge `kl` has the diamond `(f, c, e, b, d)` (apexes `j` and `i`). All theorems a
 | `it-odt-update` | `weightedBarycenter ℓ_ab ℓ_ac ℓ_bc A = A·⅓((0,0) + (ℓ_ab,0) + (diamondX ℓ_ab ℓ_ac ℓ_bc, 2A/ℓ_ab))`; `odtDisplacement w total α = (α/total)·w`. A triangle `(x,b,c)`: `circumVec x b c = ¼[\|x\|² rot(c−b) − \|b\|² rot(c−x) + \|c\|² rot(b−x)]`, `rot u = (−u₂, u₁)`; for `[x,b,c] ≠ 0` the point `circumVec/(½[x,b,c])` is equidistant from `x, b, c`; `circumVec (0,0) (ℓ_ab,0) (c_x,h) = weightedCircumcenter ℓ_ab ℓ_ac ℓ_bc (ℓ_ab h/2)` (`c_x` as above, `c_x² + h² = ℓ_ac²`). A closed link `p n = p 0`, `\|T_k\| = [x,p_k,p_{k+1}]/2`, `S(x) = Σ_k (\|x\|² + \|p_k\|² + \|p_{k+1}\|²)\|T_k\|/3` (`odtEnergy`), `G = ⅔ Σ_k (\|T_k\| x − circumVec x p_k p_{k+1})` (`odtGradient`), `\|ω\| = Σ_k \|T_k\|` (`starArea`): `HasFDerivAt S (v ↦ ⟨G, v⟩) x` and `t ↦ S(x + t e)` has the derivative `⟨G, e⟩` at `0` (Chen–Holst Eq. 4.5, `d = 2`); `\|ω\|` does not depend on `x`; `S(x + v) = S(x) + ⟨G,v⟩ + \|ω\|·\|v\|²/3`; with `w = Σ_k (circumVec − \|T_k\| x)`: `odtDisplacement w \|ω\| α = −(3α/(2\|ω\|))·G` and, for `\|ω\| ≠ 0`, `S(x + odtDisplacement w \|ω\| α) = S(x) − 3\|G\|²/(4\|ω\|)·α(2 − α)`; for `\|ω\| > 0`, `0 ≤ α ≤ 2` the step does not increase `S`, and `α = 1` gives the minimum of `S` over all `y`. | `weightedBarycenter_eq`, `odtDisplacement_eq`, `circumVec_fst`, `circumVec_snd`, `circumVec_equidistant`, `circumVec_layout`, `hasFDerivAt_triTerm`, `triGrad_split`, `sum_triGrad`, `hasFDerivAt_odtEnergy`, `hasDerivAt_odtEnergy_line`, `starArea_indep`, `odtEnergy_add`, `odtDisplacement_eq_gradient`, `odtEnergy_step`, `odtEnergy_step_le` |
 
 Delaunay triangulations, layer 1 (`DdgProofs/Delaunay/{Local,Rippa,Potential,Encroachment}.lean`,
-`namespace DdgProofs.Delaunay`; notation as above, with this package's clean definitions
+`namespace DDG.Delaunay`; notation as above, with this package's clean definitions
 `IsLocallyDelaunay a b c d e := θ_k + θ_l ≤ π`, `IsConvexDiamond a b c d e := α_i + β_i < π ∧
 α_j + β_j < π`, `flipLength a b c d e` (the five-length formula, equal to `f` for `T(a,b,c)`,
 `T(a,d,e)`: `flipLength_eq_flippedLengthFromLengths`), `A_xyz` the Heron area). The local criteria
@@ -461,7 +461,7 @@ and the flip (`isLocallyDelaunay_iff_cot_nonneg`, `inside_circumcircle_iff`,
 | `it-encroachment-angle` | For points `a, b, p` of a Euclidean space, `m` the midpoint of `ab`: `⟪a − p, b − p⟫ = \|pm\|² − (\|ab\|/2)²`; `\|pm\| < \|ab\|/2 ⟺ ∠apb > π/2`, `= ⟺ = π/2`, `> ⟺ < π/2`. `T(s,x,y)`: `cornerAngle s x y > π/2 ⟺ x² + y² < s²`; for `p ≠ a, b`: `\|pm\| < \|ab\|/2 ⟺ cornerAngle \|ab\| \|ap\| \|bp\| > π/2` (the test of `is_encroached`). `circumradius a b c = abc/(4A) = a/(2 sin θ_a)`; `a < R ⟺ 2 sin θ_a < 1`; `θ_a < π/6 ⟹ a < R`. | `inner_vsub_vsub_eq_dist_midpoint_sq`, `dist_midpoint_lt_iff`, `dist_midpoint_eq_iff`, `dist_midpoint_gt_iff`, `pi_div_two_lt_cornerAngle_iff`, `encroaches_iff_cornerAngle`, `circumradius_eq_div_sin`, `lt_circumradius_iff`, `lt_circumradius_of_lt_pi_div_six` |
 
 Delaunay triangulations, layer 2 (`DdgProofs/Delaunay/{Complex,Flip,Metric,FromTriMesh}.lean`,
-`namespace DdgProofs.Delaunay.Gluing`, and `DdgProofs.TriMesh` for the bridge): gluing data
+`namespace DDG.Delaunay.Gluing`, and `DDG.TriMesh` for the bridge): gluing data
 `G : Gluing F` is an involution `twin` of the halfedges `F × Fin 3` (`(f, k)` runs from corner `k`
 to corner `k + 1`; `twin h = h` on the boundary); `Edge` = twin orbits, `Vertex` = classes of corners
 under the equivalence generated by `x ~ next (twin x)` (`twin x ≠ x`); `numVertices`, `numEdges` are
@@ -482,7 +482,7 @@ Gauss–Bonnet theorem (`IsMetric.gauss_bonnet_closed`) carries `gauss-bonnet`.
 | `complex-boundary-fan` | (`BoundaryFan.lean`) two boundary halfedges (`twin h = h`) with the same tail class are equal, and with the same head class; `boundaryCount v ≤ 1`, `boundaryInCount v ≤ 1` (boundary halfedges with head `v`) and, for finite `F`, `boundaryInCount v = boundaryCount v`; `boundaryCount v = 1 ⟺ IsBoundaryVertex v` (some boundary halfedge leaves `v`), `= 0` otherwise; for a metric, `Σ_{v ¬boundary} (2π − Θ_v) + Σ_{v boundary} (π − Θ_v) = 2πχ` | `eq_of_isBoundary_of_vertexOf_eq`, `eq_of_isBoundary_of_vertexOf_next_eq`, `boundaryCount_le_one`, `boundaryInCount_le_one`, `boundaryInCount_eq_boundaryCount`, `boundaryCount_eq_one_iff`, `boundaryCount_eq_zero_iff`, `IsMetric.gauss_bonnet_boundary` |
 
 Delaunay triangulations, layer 3 (`DdgProofs/Delaunay/{Termination,FlipQueue}.lean`,
-`namespace DdgProofs.Delaunay.Gluing` and `DdgProofs.Delaunay.MetricGluing`): a state
+`namespace DDG.Delaunay.Gluing` and `DDG.Delaunay.MetricGluing`): a state
 `s : MetricGluing F` is gluing data with a metric; `IsDelaunay G ℓ`: `LocallyDelaunayAt ℓ h` for
 every `h` with `twin h ≠ h`; `DelaunayFlippable`: `Flippable h ∧ ¬ LocallyDelaunayAt ℓ h`;
 `DelaunayFlip s t`: `t` is `s` flipped at a `DelaunayFlippable` halfedge, `ConvexFlip` at a
@@ -497,7 +497,7 @@ lifting potential `Σ_f liftEnergy`, `H = Σ_f harmonicIndex`, `A = Σ_f triArea
 | `it-delaunay-flip-loop` | `angleSumCriterion τ`: `cot θ_k + cot θ_l < 0 ∧ τ < (θ_k − π) + θ_l`; `cotanCriterion τ`: `½(cot θ_k + cot θ_l) < −τ` (`τ ≥ 0`); a failing interior halfedge is `DelaunayFlippable` and `ConvexAt`; an edge whose two faces avoid the diamond's keeps its test result; `QueueInv` (off-queue halfedges pass) holds for the full queue, after a passing test and after a flip with `flipQueue` (σ-image of the rest plus the four outer edges); `LoopStep` (any queued halfedge) keeps it; every run from `reach`-finite `s₀` is finite; a stopped run from `⟨s₀, univ⟩` has an empty queue, no failing halfedge, a state `ReflTransGen DelaunayFlip`-reachable from `s₀` with its `χ`, `B`, `A`, cone angles and `P ≤ P(s₀)`; for `AngleSum τ ≥ 0`: `θ_k + θ_l ≤ π + τ`, for `τ = 0`: `IsDelaunay` | `angleSum_not_fails_iff`, `IsMetric.delaunayFlippable_of_fails`, `IsMetric.convexAt_of_fails`, `fails_flip_iff_of_far`, `queueInv_pass`, `queueInv_flip`, `loop_reach`, `loop_acc`, `loop_acc'` (unconditional, `Surface/Finite.lean`), `loop_result`, `isDelaunay_of_angleSum_zero`, `angleSum_le_of_not_fails` |
 
 Delaunay triangulations of a planar point set (`DdgProofs/Delaunay/Planar{Basic,Flip,Termination,Lemma,Bridge,Uniqueness,FlipCount}.lean`,
-`namespace DdgProofs.Delaunay.Planar`; written for extraction: Mathlib plus `sda`, `sqDist2` of
+`namespace DDG.Delaunay.Planar`; written for extraction: Mathlib plus `sda`, `sqDist2` of
 `Bff/Quality.lean` and the area of a triangle of `TriangleIntegral/Basic.lean`, layer 1 only in the
 bridge). Points are `ℝ × ℝ`; `inCircle a b c d = Σ_cyc \|da\|² sda(d,b,c)`;
 `InCircumcircle a b c d :⟺ sda(a,b,c)·inCircle a b c d > 0`; `circleLift a b c p =
@@ -538,7 +538,7 @@ namespace `Ddg.Dev`, at `ℝ`); vectors are `Ddg.Point ℝ` (`V3`), a face is `(
 `e_i = f_k − f_j`, `e_j = f_i − f_k`, `e_k = f_j − f_i`. **Derivatives** are along arbitrary
 differentiable curves (`HasDerivAt3`: each coordinate has a derivative; `DdgProofs/Developability/Vec.lean`),
 so "`dF = Σ_p g_p·δ_p`" contains the gradient with respect to each argument and the chain rule.
-All theorems are in `namespace DdgProofs.Dev`.
+All theorems are in `namespace DDG.Dev`.
 
 | id | exact statement | theorems |
 |---|---|---|
@@ -585,7 +585,7 @@ oracle file marks as numerical devices.
 
 Yu, Schumacher, Crane, ACM TOG 40(2), 2021 ("the RC paper"); contract
 `crates/ddg-repulsive-curves/SPEC.md` (decisions `D1`–`D30`, formula table §12). Own definitions
-(no oracle definitions are used), all in `namespace DdgProofs.RC`. Vectors are `V3 = Fin 3 → ℝ`
+(no oracle definitions are used), all in `namespace DDG.RC`. Vectors are `V3 = Fin 3 → ℝ`
 with Mathlib's `⬝ᵥ` and `crossProduct`, `vnorm v = √(v·v)`; a network has endpoints
 `ep : E → Fin 2 → V` (`i₁ = ep I 0`, `i₂ = ep I 1`), positions `γ : V → V3`, `s₁ = −1`, `s₂ = +1`
 (`sgn`). **Derivatives** are along arbitrary differentiable motions `s ↦ Γ s` of the vertices
@@ -995,8 +995,8 @@ in `t`, so prescribing `µ` gives the linearized equation `L u = µ − Ω`, not
 
 The oracle (`lean/oracle`, `DdgOracle/Formulas/*`) defines the formulas once for a generic scalar;
 `DdgProofs/Oracle/Scalar.lean` provides the instance `Ddg.Scalar ℝ` (every field the genuine real
-operation). The instance is `scoped`: it is active inside `namespace DdgProofs.Oracle` and after
-`open DdgProofs.Oracle`, and does not affect how arithmetic on `ℝ` is elaborated elsewhere.
+operation). The instance is `scoped`: it is active inside `namespace DDG.Oracle` and after
+`open DDG.Oracle`, and does not affect how arithmetic on `ℝ` is elaborated elsewhere.
 Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
 
 - scalar: `softThreshold`, `clamp`, `boundedThreshold`, `regularizedMeasure`, `InSubdiff`,

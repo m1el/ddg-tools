@@ -21,7 +21,7 @@ from the face lengths `l_c = |p_c p_{c+1}|` as `corner_cotan(l_{c+1}, l_c, l_{c+
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriangleIntegral
 
@@ -141,4 +141,4 @@ theorem side_flux_add_twin {p p' : Fin 3 → ℝ × ℝ} {k k' : Fin 3} (h0 : p'
 
 end TriangleIntegral
 
-end DdgProofs
+end DDG

@@ -29,7 +29,7 @@ as a complex number.
 
 noncomputable section
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 namespace Frames
 
@@ -216,4 +216,4 @@ theorem wrap_exp (x : ℝ) : cexp ((wrap x : ℝ) * I) = cexp (x * I) := by
 
 end Frames
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

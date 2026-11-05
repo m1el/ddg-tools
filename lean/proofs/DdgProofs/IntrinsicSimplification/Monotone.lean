@@ -25,7 +25,7 @@ SPEC §3.4 (`iem-flatten-monotone`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -382,4 +382,4 @@ theorem root_unique_of_valid (hp : ∀ f, (S f).Pos) {u₁ u₂ : ℝ}
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

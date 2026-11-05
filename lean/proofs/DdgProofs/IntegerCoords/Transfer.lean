@@ -43,7 +43,7 @@ minimizer `f̂` of `‖f − f̂‖² = (P₁f − P₀f̂)ᵀ M (P₁f − P₀
   tile their input triangle is not proved (it is checked numerically in Rust).
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -278,4 +278,4 @@ theorem pieceMass_fan_apex {N : ℕ} (p : Fin (N + 1) → Fin 3 → ℝ)
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

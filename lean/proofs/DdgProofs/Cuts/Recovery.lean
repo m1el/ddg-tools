@@ -32,12 +32,12 @@ with `k p q = 0` whenever `p ∈ S`, `q ∉ S`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
 open Matrix
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 section Recovery
 
@@ -281,4 +281,4 @@ end Recovery
 
 end Cuts
 
-end DdgProofs
+end DDG

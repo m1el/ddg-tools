@@ -22,7 +22,7 @@ vertex the identity (the coordinates lie in `[0, π]` by construction).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -97,4 +97,4 @@ theorem wrapAngle_ccw {φ ψ : ℝ} (h0 : φ ≤ ψ) (h1 : ψ < φ + 2 * π) :
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

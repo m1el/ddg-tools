@@ -13,9 +13,9 @@ rigid motion `R` without changing anything else: the face's layout and its cells
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Delaunay.Planar
+open DDG.Delaunay.Planar
 open Set
 open scoped Classical
 
@@ -216,4 +216,4 @@ theorem relayout_layΔ_eq_id {h₀ : Halfedge F} (hf : t.G.Flippable h₀) :
 
 end Overlay
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

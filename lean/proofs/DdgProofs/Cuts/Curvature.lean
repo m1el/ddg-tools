@@ -31,7 +31,7 @@ to the right-hand side and nothing to the left.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real Matrix
 
@@ -224,7 +224,7 @@ end TriMesh
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 variable {faces : List Ddg.Face} {len : ℕ → ℕ → ℝ} {nv : ℕ}
 
@@ -380,4 +380,4 @@ theorem sum_face_omega_closed (hv : Oracle.MeshValid faces len nv)
 
 end Cuts
 
-end DdgProofs
+end DDG

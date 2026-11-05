@@ -36,7 +36,7 @@ halfedges `j→k` (old `(f, s+1)`) and `i→l` (old `(g, t+1)`) move with their 
 
 set_option linter.unusedSectionVars false
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerCoord emanating faceValid nPlus nMinus flipNormal roundaboutUpdate)
 
@@ -924,4 +924,4 @@ theorem flip_roundabouts (hC : C.Valid) (D : C.FlipAt) (hn : -1 ≤ D.nkl) {L : 
 
 end Cx
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

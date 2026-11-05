@@ -58,7 +58,7 @@ the definitions in this file, not taken from the works.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -584,4 +584,4 @@ end Planar
 
 end Delaunay
 
-end DdgProofs
+end DDG

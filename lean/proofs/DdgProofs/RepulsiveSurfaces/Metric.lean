@@ -31,7 +31,7 @@ SPEC §4.1–§4.3, §8.3)
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -575,4 +575,4 @@ end projector
 
 end RS
 
-end DdgProofs
+end DDG

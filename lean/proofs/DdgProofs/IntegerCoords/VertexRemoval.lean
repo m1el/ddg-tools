@@ -43,7 +43,7 @@ the angle statement, which is what is proved here, exactly as the paper's proof 
   `2π` star the inner corners are not automatically below `π`, which is where that argument stops.
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -221,4 +221,4 @@ theorem cross_star_no_strict : ¬ ∃ k, crossStar.inner k < π ∧ crossStar.ou
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

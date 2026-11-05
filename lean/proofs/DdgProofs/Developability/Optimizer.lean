@@ -19,11 +19,11 @@ Termination and existence of weak Wolfe steps (L&O Thm. 2.5, 2.7) are cited
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 /-! ## The curvature condition -/
 
@@ -157,4 +157,4 @@ end lineSearch
 
 end Dev
 
-end DdgProofs
+end DDG

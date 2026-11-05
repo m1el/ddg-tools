@@ -26,11 +26,11 @@ come from the geometric sum of the `k`-th roots of unity.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 /-! ## Sums over the roots of unity -/
@@ -384,4 +384,4 @@ end cone
 
 end Dev
 
-end DdgProofs
+end DDG

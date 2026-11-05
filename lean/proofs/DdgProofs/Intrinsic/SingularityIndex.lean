@@ -44,7 +44,7 @@ the pair sum lies outside `[−π, π]` (`omegaCode`); in exact arithmetic that 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real Complex
 
@@ -441,4 +441,4 @@ theorem sum_round_faceIndexFixed (hM : M.Valid) (hman : M.Manifold)
 
 end TriMesh
 
-end DdgProofs
+end DDG

@@ -26,7 +26,7 @@ differentiable motion `Γ`:
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -326,4 +326,4 @@ end willmore
 
 end RS
 
-end DdgProofs
+end DDG

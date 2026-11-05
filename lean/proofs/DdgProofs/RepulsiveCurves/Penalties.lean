@@ -17,7 +17,7 @@ gradient blocks are read off as in `Constraints.lean`. `ℓ_I' = Σ_a s_a T_I·�
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -202,4 +202,4 @@ theorem penalty_surface {W K : Type*} [Fintype W] [Fintype K] {m : W → ℝ →
 
 end RC
 
-end DdgProofs
+end DDG

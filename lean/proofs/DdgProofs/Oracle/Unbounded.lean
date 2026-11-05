@@ -4,7 +4,7 @@ import DdgProofs.Oracle.Regularized
 # The oracle's theorems for vertices without bounds
 
 At the real numbers the bounds `lo_i`, `hi_i` of `Ddg.Problem ℝ` are finite numbers, so the
-theorems of `DdgProofs.Oracle.Problem` and `DdgProofs.Oracle.Regularized` are about problems in
+theorems of `DDG.Oracle.Problem` and `DDG.Oracle.Regularized` are about problems in
 which every cone angle is bounded. The `Float` executable's default is `lo_i = −∞`, `hi_i = +∞`
 (and one-sided choices such as `lo_i = 0`, `hi_i = +∞` are allowed). This file extends the
 theorems to that case.
@@ -40,7 +40,7 @@ Results (`Lo`, `Hi` arbitrary; `Lo = Hi = fun _ => False` gives back the finite 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Oracle
 
@@ -184,11 +184,11 @@ theorem clampOff_eq_value {loInf hiInf : Prop} {t lo hi : ℝ} (ht : 0 ≤ t)
 
 end Oracle
 
-end DdgProofs
+end DDG
 
 namespace Ddg.Problem
 
-open DdgProofs DdgProofs.Oracle Matrix
+open DDG DDG.Oracle Matrix
 
 /-- Admissible data when the lower bound of the vertices in `Lo` and the upper bound of the
 vertices in `Hi` are absent: `L` symmetric, `wE, mass, t ≥ 0`, and at every vertex either each
@@ -391,7 +391,7 @@ the dual constraints of the absent bounds: `φ_i ≤ t_i` where the upper bound 
 `−t_i ≤ φ_i` where the lower bound is absent (`|φ_i| ≤ t_i` at a vertex without bounds). Then
 `dualValueOff ũ φ` is a lower bound for the objective of every feasible point; so if
 `objective u μ − dualValueOff ũ φ ≤ gap`, the objective of `(u, μ)` is within `gap` of the optimum.
-The hypotheses are exact: see `DdgProofs.Certificate` for what holds for inexact data.
+The hypotheses are exact: see `DDG.Certificate` for what holds for inexact data.
 
 [formula: duality-gap-certificate] -/
 theorem objective_le_add_gap_off (hp : p.AdmissibleOff Lo Hi) {u μ ũ φ : ℕ → ℝ}

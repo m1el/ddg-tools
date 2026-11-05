@@ -16,7 +16,7 @@ import DdgProofs.PointsAsTori.Apps
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -202,4 +202,4 @@ theorem fwn_expansion {y : V3} (hy : y ≠ 0) :
 
 end PAT
 
-end DdgProofs
+end DDG

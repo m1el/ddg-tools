@@ -31,7 +31,7 @@ arcs from `k` to `l` (impossible for straight arcs in a convex quadrilateral); t
 for them as well.
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -208,4 +208,4 @@ theorem flipNormal_flipNormal {a b c d e : ℤ} (ha : -1 ≤ a) (v1 : faceValid 
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

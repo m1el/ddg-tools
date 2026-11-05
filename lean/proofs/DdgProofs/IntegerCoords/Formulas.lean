@@ -37,7 +37,7 @@ corner; it is `c^{ji}_l` (corner `l` of `jil`), which is what `Ddg.IntegerCoords
 computes. Eq. 6 is `max(n_ki, n_jk, 0)` (SPEC §4.5 drops the `0`, wrong when both are `−1`).
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -300,4 +300,4 @@ theorem splitEdgeNormal_eq {n0 n1 n2 : ℤ} (hv : faceValid n0 n1 n2 = true) (h0
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

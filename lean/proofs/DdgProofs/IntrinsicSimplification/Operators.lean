@@ -32,7 +32,7 @@ import DdgProofs.Intrinsic.Barycentric
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -408,4 +408,4 @@ end Quadric
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

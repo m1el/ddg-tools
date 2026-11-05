@@ -48,11 +48,11 @@ Own definitions: `rot`, `nsq`, `circumVec`, `odtEnergy`, `odtGradient`, `toDual`
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Intrinsic
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Finset
 
 /-! ## Plane helpers -/
@@ -555,4 +555,4 @@ theorem odtEnergy_step_le {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) (x
 
 end Intrinsic
 
-end DdgProofs
+end DDG

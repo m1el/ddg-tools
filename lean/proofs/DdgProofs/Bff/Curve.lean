@@ -75,7 +75,7 @@ general statement takes an arbitrary matrix `T`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Finset Matrix
 open scoped Real
@@ -1236,4 +1236,4 @@ theorem hilbertVector_minimizes_conformalEnergy_iff [DecidableEq V] (next : Equi
 
 end Hilbert
 
-end DdgProofs
+end DDG

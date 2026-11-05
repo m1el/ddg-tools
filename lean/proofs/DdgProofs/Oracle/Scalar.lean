@@ -8,22 +8,22 @@ import DdgProofs.Triangle
 `lean/oracle` writes every formula once, against the interface `Ddg.Scalar`, and runs it at
 `Float`. This file supplies the instance for `ℝ` and identifies the oracle's scalar and
 per-vertex definitions (namespace `Ddg`) with the math-level definitions of this package
-(namespace `DdgProofs`), so that the theorems can be read as statements about the code that runs.
+(namespace `DDG`), so that the theorems can be read as statements about the code that runs.
 
 The identifications hold for exact real arithmetic; nothing is claimed about rounding.
 -/
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Oracle
 
 /-- The real numbers as a `Ddg.Scalar`: the obvious instance (`sqrt = Real.sqrt`,
 `atan = Real.arctan`, `pi = Real.pi`, order and lattice operations those of `ℝ`).
 
-The instance is `scoped`: it is active inside `namespace DdgProofs.Oracle` and after
-`open DdgProofs.Oracle`, and nowhere else, so importing this package does not change how
+The instance is `scoped`: it is active inside `namespace DDG.Oracle` and after
+`open DDG.Oracle`, and nowhere else, so importing this package does not change how
 `+`, `/`, `<`, `max` on `ℝ` are elaborated in a downstream file. -/
 scoped instance instScalarReal : Ddg.Scalar ℝ where
   ofNat := fun n => (n : ℝ)
@@ -55,7 +55,7 @@ theorem ofNat_eq (n : ℕ) : (@OfNat.ofNat ℝ n Ddg.instOfNatScalar) = (n : ℝ
 
 /-! ## Soft threshold, clamp, bounded threshold -/
 
-/-- The oracle's soft threshold is `DdgProofs.softThreshold`. -/
+/-- The oracle's soft threshold is `DDG.softThreshold`. -/
 theorem softThreshold_eq (t x : ℝ) : Ddg.softThreshold t x = softThreshold t x := by
   simp [Ddg.softThreshold, softThreshold]
 
@@ -310,11 +310,11 @@ theorem boundedThreshold_eq_regularizedMeasure (t lo hi x : ℝ) :
 
 /-! ## Triangle formulas -/
 
-/-- The oracle's Heron area is `DdgProofs.triArea`. -/
+/-- The oracle's Heron area is `DDG.triArea`. -/
 theorem triArea_eq (a b c : ℝ) : Ddg.triArea a b c = triArea a b c := by
   simp [Ddg.triArea, triArea]
 
-/-- The oracle's cotangent is `DdgProofs.cornerCot`. -/
+/-- The oracle's cotangent is `DDG.cornerCot`. -/
 theorem cornerCot_eq (a b c : ℝ) : Ddg.cornerCot a b c = cornerCot a b c := by
   unfold Ddg.cornerCot cornerCot
   rw [triArea_eq]
@@ -340,4 +340,4 @@ theorem dist_eq (p q : Ddg.Point ℝ) :
 
 end Oracle
 
-end DdgProofs
+end DDG

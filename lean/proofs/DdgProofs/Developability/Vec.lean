@@ -23,11 +23,11 @@ work on `Ddg.Point α`. Here they are taken at `ℝ` (the scoped instance of
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Filter Topology
 
 /-- Vectors of `ℝ³` as the oracle stores them. -/
@@ -379,4 +379,4 @@ end atan2
 
 end Dev
 
-end DdgProofs
+end DDG

@@ -73,7 +73,7 @@ The algorithm as the Rust code runs it (a queue of edges, a tolerance, a cap) is
 `DdgProofs/Delaunay/FlipQueue.lean`.
 -/
 
-namespace DdgProofs.Delaunay
+namespace DDG.Delaunay
 
 open Real
 
@@ -777,4 +777,4 @@ theorem reach_finite_of_boundedLengthFinite (hB : BoundedLengthFinite s) : (reac
 
 end MetricGluing
 
-end DdgProofs.Delaunay
+end DDG.Delaunay

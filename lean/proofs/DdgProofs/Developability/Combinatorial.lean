@@ -38,11 +38,11 @@ exactly once (D9).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Finset
 
 /-! ## Bipartitions of a cycle and of a path -/
@@ -348,7 +348,7 @@ theorem hasDerivAt_partWidth (n : ℕ) (hn : 0 < n) (N : ℕ → ℝ → V3) (N'
       (2 / n) * dot (N i t) (N' i) - (2 / n) * dot M (N' i) := by
     intro i
     simp only [partWidthSensitivity, dot_def, smul_x, smul_y, smul_z, sub_x, sub_y, sub_z,
-      scalar_ofNat, DdgProofs.Oracle.two_eq, M]
+      scalar_ofNat, DDG.Oracle.two_eq, M]
     ring
   have key2 : ∑ i ∈ range n, dot M (N' i) =
       M.x * ∑ i ∈ range n, (N' i).x + M.y * ∑ i ∈ range n, (N' i).y +
@@ -416,11 +416,11 @@ theorem hasDerivAt_pairTerm {N1 N2 : ℝ → V3} {N1' N2' : V3} {t : ℝ}
       (dot (pairSensitivity (N1 t) (N2 t)) N1' - dot (pairSensitivity (N1 t) (N2 t)) N2') t := by
   convert (h1.sub h2).norm2 using 1
   simp only [pairSensitivity, dot_def, smul_x, smul_y, smul_z, sub_x, sub_y, sub_z,
-    DdgProofs.Oracle.two_eq]
+    DDG.Oracle.two_eq]
   ring
 
 end maxwidth
 
 end Dev
 
-end DdgProofs
+end DDG

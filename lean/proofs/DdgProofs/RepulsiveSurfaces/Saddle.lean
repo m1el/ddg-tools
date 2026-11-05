@@ -30,7 +30,7 @@ Jacobian of the nonlinear constraints. The Schur complement is `S = −C A⁻¹ 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -260,4 +260,4 @@ end nested
 
 end RS
 
-end DdgProofs
+end DDG

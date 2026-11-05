@@ -10,7 +10,7 @@ vectors as functions `Nat → α` of which only the indices `< n` matter, the th
 `t_i = λ·wR_i`, and **finite** bounds `lo_i`, `hi_i` (in the `Float` executable an absent bound is
 `±∞`; at the real numbers a bound is always finite, so the statements below are about problems
 with finite bounds — the unbounded problem is covered by the math-level theorems on
-`DdgProofs.ConeProblem`).
+`DDG.ConeProblem`).
 
 A vertex is admissible if `t_i ≥ 0` and either `lo_i ≤ 0 ≤ hi_i`, or `t_i = 0` and
 `lo_i = hi_i` (the oracle's encoding of a prescribed cone; `lo = hi = 0` is a forbidden vertex).
@@ -27,7 +27,7 @@ Results, all about the oracle's own definitions `F`, `stateResidual`, `adjointRe
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Oracle
 
@@ -123,11 +123,11 @@ theorem conj_siteOf {t lo hi : ℝ} (h : AdmissibleVertex t lo hi) (p : ℝ) :
 
 end Oracle
 
-end DdgProofs
+end DDG
 
 namespace Ddg.Problem
 
-open DdgProofs DdgProofs.Oracle Matrix
+open DDG DDG.Oracle Matrix
 
 /-- The oracle's problem data are admissible: `L` symmetric on the unknowns, `wE ≥ 0`,
 `mass ≥ 0`, and every vertex admissible (`t ≥ 0`; `lo ≤ 0 ≤ hi`, or `t = 0` and `lo = hi`). -/

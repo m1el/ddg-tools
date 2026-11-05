@@ -19,7 +19,7 @@ vector `α s + β t + γ n`. Dot and cross products of combinations reduce to co
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -164,4 +164,4 @@ end Frame
 
 end PAT
 
-end DdgProofs
+end DDG

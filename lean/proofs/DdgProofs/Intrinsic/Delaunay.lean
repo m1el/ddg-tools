@@ -34,11 +34,11 @@ triangulation and Rippa's theorem are cited (`CITED.md`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Intrinsic
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The oracle's definitions at `ℝ` -/
@@ -455,4 +455,4 @@ end Laplacian
 
 end Intrinsic
 
-end DdgProofs
+end DDG

@@ -45,7 +45,7 @@ The walk back past inserted vertices on the input edge (Alg. 3 lines 1–5, the 
 given by the realization.
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerCoord emanating nPlus nMinus identifyIndex)
 
@@ -251,4 +251,4 @@ theorem RoundaboutsOK.lab_next {L : Labels F} (hL : C.RoundaboutsOK L) {c c' : F
 
 end Cx
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

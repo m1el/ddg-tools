@@ -2223,7 +2223,7 @@ Optimization*, 2nd ed., Springer 2006.
 
 **What the machine-checked part covers, and what it does not.** There is no certifiable minimizer:
 the library runs a descent method on a nonconvex energy. Machine-checked
-(`DdgProofs/RepulsiveSurfaces/*.lean`, namespace `DdgProofs.RS`, 35 `rs-` ids): the exponent
+(`DdgProofs/RepulsiveSurfaces/*.lean`, namespace `DDG.RS`, 35 `rs-` ids): the exponent
 bookkeeping; the face quantities and dual areas; the derivatives of face area, unit normal and
 barycenter along any differentiable motion; the kernel (Eq. 16), its invariances, homogeneity and
 projector form, and its gradient for `α > 1` everywhere off the diagonal, **including `ν = 0`**;
@@ -2416,7 +2416,7 @@ equation and figure numbers are the paper's. The contract is `crates/ddg-points-
 ("SPEC", formula table §13); "N§k" is the reference survey `crates/ddg-points-as-tori/NOTES-REFERENCE.md`.
 
 **What the machine-checked part covers, and what it does not.** Machine-checked
-(`DdgProofs/PointsAsTori/*.lean`, namespace `DdgProofs.PAT`): the neighborhood scale (the median
+(`DdgProofs/PointsAsTori/*.lean`, namespace `DDG.PAT`): the neighborhood scale (the median
 and its homogeneity), the reference frame rule on both branches, the translation and scale
 invariance of the features; the Monge patch, its fundamental forms, `H` and `K` of Eq. 19, the
 eigenvector pair of the reference and Eq. 20, the Rayleigh quotients, the principal directions and

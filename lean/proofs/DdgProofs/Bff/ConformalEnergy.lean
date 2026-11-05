@@ -28,7 +28,7 @@ The per-face identity is `[formula: bff-conformal-energy-triangle]` (`TriangleIn
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriMesh
 
@@ -171,4 +171,4 @@ theorem loopConformalEnergy_eq_zero_iff (hM : M.Valid) (hO : M.Oriented) {next :
 
 end TriMesh
 
-end DdgProofs
+end DDG

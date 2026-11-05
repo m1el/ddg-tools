@@ -27,7 +27,7 @@ oriented triangle `T` (`Plane.lean`):
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
 open Set Filter Topology
 
@@ -403,4 +403,4 @@ theorem exists_wedge_dir {a b : Pt} (h : cross2 a b ≠ 0) :
     rw [e, one_div, inv_mul_cancel₀ h]
     norm_num
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

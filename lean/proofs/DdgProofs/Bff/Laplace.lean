@@ -42,7 +42,7 @@ boundary for the source `φ = −Ω`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix Real
 
@@ -322,4 +322,4 @@ theorem hilbertTransform_cotan {β : Type*} [Fintype β] (hM : M.Valid) (hconn :
 
 end TriMesh
 
-end DdgProofs
+end DDG

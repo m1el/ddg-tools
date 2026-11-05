@@ -33,7 +33,7 @@ every result below is a function of the edge lengths only, through `triArea` and
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriangleIntegral
 
@@ -444,4 +444,4 @@ theorem integral_bary_monomial_area {p : Fin 3 → ℝ × ℝ} (hD : D p ≠ 0) 
 
 end TriangleIntegral
 
-end DdgProofs
+end DDG

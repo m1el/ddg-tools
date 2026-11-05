@@ -49,11 +49,11 @@ stages are not modelled.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The oracle's definitions at `ℝ` -/
@@ -425,4 +425,4 @@ theorem vertexLimit_two_regions (φ φ' : ℝ) {a b : Fin 2} (hab : a ≠ b) (τ
 
 end Cuts
 
-end DdgProofs
+end DDG

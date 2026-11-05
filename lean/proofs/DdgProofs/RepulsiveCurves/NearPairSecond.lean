@@ -27,7 +27,7 @@ clamped value 0).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -240,4 +240,4 @@ theorem foldgate_hasDerivAt {r c : ℝ → ℝ} {wc w : ℝ → ℝ} {r' c' wc' 
 
 end RC
 
-end DdgProofs
+end DDG

@@ -58,7 +58,7 @@ the definitions of `DdgProofs/Delaunay/PlanarFlip.lean`, not taken from the work
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -684,4 +684,4 @@ end Planar
 
 end Delaunay
 
-end DdgProofs
+end DDG

@@ -41,7 +41,7 @@ relation `r`, every element equivalent (under `EqvGen r`) to an element without 
 reaches it by forward steps.
 -/
 
-namespace DdgProofs.Delaunay
+namespace DDG.Delaunay
 
 open Real
 
@@ -284,4 +284,4 @@ theorem IsMetric.gauss_bonnet_boundary [DecidablePred G.IsBoundaryVertex] {ℓ :
 
 end Gluing
 
-end DdgProofs.Delaunay
+end DDG.Delaunay

@@ -24,9 +24,9 @@ and `sin ∠PvQ = |a × b|/(|a||b|)`; additivity is the identities
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open Real Set DdgProofs.Intrinsic
+open Real Set DDG.Intrinsic
 
 /-- The angle at `v` between `P` and `Q`, from the three lengths. -/
 def angleAt (v P Q : Pt) : ℝ := cornerAngle (dist2 P Q) (dist2 v P) (dist2 v Q)
@@ -239,4 +239,4 @@ theorem sum_angleAt_ray_lt_pi {v p d : Pt} (hv : cross2 d (v - p) ≠ 0) (m : �
   have h : t 0 < t (Fin.last m) := hmono (by simp [Fin.lt_def, hm])
   exact sub_ne_zero.2 h.ne'
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

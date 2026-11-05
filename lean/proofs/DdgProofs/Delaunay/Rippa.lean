@@ -46,7 +46,7 @@ functions and the difference vanishes on them) is not needed.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -211,4 +211,4 @@ theorem forall_rippa_le_iff (hk : IsTriangle a b c) (hl : IsTriangle a d e)
 
 end Delaunay
 
-end DdgProofs
+end DDG

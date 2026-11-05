@@ -31,7 +31,7 @@ one `m + m_i α − m_i δ_i` (`newMass`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -209,4 +209,4 @@ theorem coupling_single_source_unique {mi : ℝ} {a : X → ℝ} {i : X} {π : X
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

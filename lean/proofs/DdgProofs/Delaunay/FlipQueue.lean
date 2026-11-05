@@ -52,7 +52,7 @@ algorithm of `DdgProofs/Delaunay/Termination.lean` with three differences:
 Everything here is exact arithmetic; the floating-point loop is not verified.
 -/
 
-namespace DdgProofs.Delaunay
+namespace DDG.Delaunay
 
 open Real Relation
 
@@ -435,4 +435,4 @@ theorem angleSum_le_of_not_fails {τ : ℝ} (hτ : 0 ≤ τ) {s : MetricGluing F
 
 end MetricGluing
 
-end DdgProofs.Delaunay
+end DDG.Delaunay

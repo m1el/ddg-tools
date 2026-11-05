@@ -30,10 +30,10 @@ For a metric triangulation `s : MetricGluing F` (`DdgProofs/Delaunay/Termination
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Intrinsic (apexK diamond_isometric diamond_sda dist2_comm)
-open DdgProofs.Delaunay.Planar
+open DDG.Intrinsic (apexK diamond_isometric diamond_sda dist2_comm)
+open DDG.Delaunay.Planar
 open Set
 open scoped Classical
 
@@ -372,4 +372,4 @@ theorem angleAt_tri (c : Cell F) (j : Fin 3) :
   rw [h1, Cell.tri_dist, dist2_comm (c.tri s j), h2]
   rfl
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

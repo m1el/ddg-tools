@@ -46,7 +46,7 @@ Dependencies: Mathlib and `DdgProofs/Triangle.lean` only.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -197,4 +197,4 @@ theorem lt_circumradius_of_lt_pi_div_six (h : IsTriangle a b c)
 
 end Delaunay
 
-end DdgProofs
+end DDG

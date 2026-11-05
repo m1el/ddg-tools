@@ -56,7 +56,7 @@ summed over the four hat functions of the diamond (`harmonicIndex_flip`):
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -234,4 +234,4 @@ theorem harmonicIndex_flip_eq_of_tie (hk : IsTriangle a b c) (hl : IsTriangle a 
 
 end Delaunay
 
-end DdgProofs
+end DDG

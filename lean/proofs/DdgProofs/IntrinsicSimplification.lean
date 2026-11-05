@@ -14,5 +14,5 @@ import DdgProofs.IntrinsicSimplification.Wrap
 
 Tiers A, A/B and B′ of `crates/ddg-intrinsic-simplification/SPEC.md` §13 (formula ids `iem-…`).
 Cited results: `CITED.md`, section "Intrinsic Simplification". All theorems are in
-`namespace DdgProofs.IntrinsicSimplification`.
+`namespace DDG.IntrinsicSimplification`.
 -/

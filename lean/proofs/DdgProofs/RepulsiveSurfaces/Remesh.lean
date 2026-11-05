@@ -15,7 +15,7 @@ import DdgProofs.RepulsiveSurfaces.Basic
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -161,4 +161,4 @@ theorem delaunay_test {θ₁ θ₂ : ℝ} (h1 : 0 < θ₁) (h1' : θ₁ < π) (h
 
 end RS
 
-end DdgProofs
+end DDG

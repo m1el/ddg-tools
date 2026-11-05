@@ -20,7 +20,7 @@ the method are `z_j = R e_j`, and `w0 = R (Ω - a_F)`. Two solvers occur:
 * `pinnedSolver A w p = P ∘ pad ∘ A_p⁻¹ ∘ restrict` (`A` singular with kernel the constants, `p` the
   pin, `P x = x - (Σ w x / Σ w)·1`).
 
-Contents (namespace `DdgProofs.ConeProblem` unless said otherwise).
+Contents (namespace `DDG.ConeProblem` unless said otherwise).
 
 * `reduced-lasso-problem`: `reducedU_eq`, `distortion_reducedU`, `objective_reducedU` (the objective
   identity `½ uᵀWu = ½ μ_Sᵀ G μ_S + qᵀ μ_S + ½ w0ᵀ W w0`),
@@ -47,7 +47,7 @@ set_option linter.unusedSectionVars false
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -1050,4 +1050,4 @@ example : ∃ (P : ConeProblem (Fin 2)) (p : Fin 2) (μ y : Fin 2 → ℝ) (ν :
         Fin.sum_univ_two, weight]
       ring
 
-end DdgProofs
+end DDG

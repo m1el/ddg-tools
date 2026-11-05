@@ -38,11 +38,11 @@ radial function on the plane and `(sin ψ · u′)′ = K sin ψ` on the unit sp
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Powers -/
@@ -592,4 +592,4 @@ theorem hasDerivAt_capEnergy_density {ψ₀ : ℝ} (h : ψ₀ ∈ Set.Ioo (-π) 
 
 end Cuts
 
-end DdgProofs
+end DDG

@@ -43,7 +43,7 @@ On it:
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriangleIntegral
 
@@ -155,7 +155,7 @@ end IsTiling
 section Odt
 
 open Intrinsic
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 variable {ι : Type*} {s : Finset ι} {q : ι → Fin 3 → ℝ × ℝ} {Ω : Set (ℝ × ℝ)}
 
@@ -186,7 +186,7 @@ theorem IsTiling.integral_abs_odt_error (h : IsTiling s q Ω) {g : ℝ × ℝ �
   rw [h.integral_abs_odt_error_eq_sum hg, h.integral_eq_sum_of_continuous continuous_nsq,
     ← Finset.sum_sub_distrib]
   exact Finset.sum_congr rfl fun k hk =>
-    _root_.DdgProofs.TriangleIntegral.integral_abs_odt_error (h.nondeg k hk)
+    _root_.DDG.TriangleIntegral.integral_abs_odt_error (h.nondeg k hk)
 
 /-- **The interpolation error is a function of the edge lengths**:
 `E = Σ_k (|T_k|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)` over a tiling.
@@ -443,4 +443,4 @@ end Transfer
 
 end TriangleIntegral
 
-end DdgProofs
+end DDG

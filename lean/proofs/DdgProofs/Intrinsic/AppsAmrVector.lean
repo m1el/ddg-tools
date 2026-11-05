@@ -23,7 +23,7 @@ import Mathlib
   that determine the singular values.
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace Apps
 
@@ -102,4 +102,4 @@ theorem singular_values_from_parts (p q r s : ℝ) :
 
 end Apps
 
-end DdgProofs
+end DDG

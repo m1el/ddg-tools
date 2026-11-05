@@ -20,6 +20,6 @@ Machine-checked derivations of the formulas of `crates/ddg-repulsive-surfaces` (
 `crates/ddg-repulsive-surfaces/SPEC.md`, formula ids `rs-…`, §12). The smooth theory, the
 approximation properties and the convergence of the optimizers are cited in
 `lean/proofs/CITED.md`, section "Repulsive Surfaces". All theorems are in
-`namespace DdgProofs.RS`; vectors, norms and the curve-motion calculus come from the curves
-package (`DdgProofs.RC`).
+`namespace DDG.RS`; vectors, norms and the curve-motion calculus come from the curves
+package (`DDG.RC`).
 -/

@@ -19,7 +19,7 @@ weights of both (`primDist`). In any real normed space (for `ℝ³` with the Euc
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -124,4 +124,4 @@ theorem primDist_advance {ι κ : Type*} [Fintype ι] [Fintype κ] [DecidableEq 
 
 end RC
 
-end DdgProofs
+end DDG

@@ -33,7 +33,7 @@ triangle is not formalized anywhere in this package, see `README.md`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -291,7 +291,7 @@ theorem edgeRuleEnergy_neg_example : edgeRuleEnergy 4 13 15 1 1 0 1 (-1) (-1) < 
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 variable {faces : List Ddg.Face} {len : ℕ → ℕ → ℝ} {nv : ℕ}
 
@@ -394,4 +394,4 @@ theorem weightedOffDiag_one (i j : ℕ) :
 
 end Cuts
 
-end DdgProofs
+end DDG

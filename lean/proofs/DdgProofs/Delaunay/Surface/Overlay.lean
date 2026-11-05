@@ -36,10 +36,10 @@ length is in `Fan.lean`.
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Intrinsic (dist2_comm)
-open DdgProofs.Delaunay.Planar
+open DDG.Intrinsic (dist2_comm)
+open DDG.Delaunay.Planar
 open Set
 open scoped Classical
 
@@ -440,4 +440,4 @@ end Walk
 
 end Overlay
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

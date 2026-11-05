@@ -32,7 +32,7 @@ is the plane vector `ρ v`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -193,4 +193,4 @@ theorem z_rotation {w : ℂ} (hw : ‖w‖ = 1) (β : ℝ) :
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

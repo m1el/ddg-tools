@@ -39,7 +39,7 @@ positive sides sum to `π` (`cornerAngle_sum_pos`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -326,4 +326,4 @@ theorem hessian_pos (S : ι → StarFace) [Nonempty ι] {u : ℝ} (h : ∀ f, (S
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

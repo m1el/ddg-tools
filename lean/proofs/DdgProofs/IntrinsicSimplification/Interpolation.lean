@@ -33,7 +33,7 @@ scheme of Springborn et al." (a float check: `lean/oracle`, `iem-selftest`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -154,4 +154,4 @@ theorem projInterp_on_side {b : Fin 3 → ℝ} {k p q : Fin 3} (hpq : p ≠ q) (
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

@@ -24,7 +24,7 @@ at `ν = 0` (Lean's `0 · x = 0`), the value SPEC D24 prescribes.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -228,4 +228,4 @@ theorem tendsto_kgrad {α : ℝ} (β : ℝ) (hα : 1 < α) {x₀ : UnitTriple}
 
 end RC
 
-end DdgProofs
+end DDG

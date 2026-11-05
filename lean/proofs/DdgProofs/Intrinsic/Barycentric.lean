@@ -40,11 +40,11 @@ Own definition: `layoutPoint` (the point `b₁ v₁ + b₂ v₂` of the layout).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Intrinsic
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Barycentric coordinates in a plane triangle -/
@@ -624,4 +624,4 @@ theorem circumradius_gt_of_angle_lt {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2)
 
 end Intrinsic
 
-end DdgProofs
+end DDG

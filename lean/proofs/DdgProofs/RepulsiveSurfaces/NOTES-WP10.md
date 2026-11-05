@@ -1,7 +1,7 @@
 # WP10 notes (Lean proofs and citations for Repulsive Surfaces)
 
-Contract: `crates/ddg-repulsive-surfaces/SPEC.md` §12, §13.6. Namespace `DdgProofs.RS`; vectors,
-`vnorm` and the motion calculus are reused from `DdgProofs.RC` (selective `open RC (...)`).
+Contract: `crates/ddg-repulsive-surfaces/SPEC.md` §12, §13.6. Namespace `DDG.RS`; vectors,
+`vnorm` and the motion calculus are reused from `DDG.RC` (selective `open RC (...)`).
 
 ## Done (all SPEC §12 ids)
 

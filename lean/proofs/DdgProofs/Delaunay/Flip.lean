@@ -51,7 +51,7 @@ to each other, self-loops and multiple edges before or after.
   `f₀` and `f₁` and rotates them; hence the same `V`, `E`, `F`, `χ`.
 -/
 
-namespace DdgProofs.Delaunay
+namespace DDG.Delaunay
 
 namespace Gluing
 
@@ -690,4 +690,4 @@ end Twice
 
 end Gluing
 
-end DdgProofs.Delaunay
+end DDG.Delaunay

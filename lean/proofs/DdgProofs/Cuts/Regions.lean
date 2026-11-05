@@ -47,12 +47,12 @@ package's own definitions of what SPEC says in words.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
 open Matrix
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The region of a vertex (SPEC §8.1) -/
@@ -673,4 +673,4 @@ theorem regionStep_two (φ τ e : ℝ) :
 
 end Cuts
 
-end DdgProofs
+end DDG

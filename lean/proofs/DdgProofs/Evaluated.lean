@@ -6,8 +6,8 @@ import DdgProofs.GaussBonnet
 `crates/ddg-core` evaluates the triangle formulas in numerically stable arrangements (Kahan's
 parenthesization with sorted sides, `atan2` of two square roots) and stores the curvatures as
 per-vertex fields that vanish on the other class of vertices. This file proves that, in exact
-arithmetic, those arrangements are the quantities of `DdgProofs.Triangle` and
-`DdgProofs.GaussBonnet`:
+arithmetic, those arrangements are the quantities of `DDG.Triangle` and
+`DDG.GaussBonnet`:
 
 * `kahanArea_of_sorted_rearrangement` — `triangle_area`: sort the sides, test
   `z − (x − y) > 0`, evaluate `¼√((x+(y+z))(z−(x−y))(z+(x−y))(x+(y−z)))`;
@@ -20,7 +20,7 @@ Nothing is claimed about floating-point rounding.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real
 
@@ -248,4 +248,4 @@ theorem laplacian_apply_self (i : V) :
 
 end TriMesh
 
-end DdgProofs
+end DDG

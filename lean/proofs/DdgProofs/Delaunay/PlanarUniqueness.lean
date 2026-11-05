@@ -52,7 +52,7 @@ The bibliographic data were not checked against the works here.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -307,4 +307,4 @@ end Planar
 
 end Delaunay
 
-end DdgProofs
+end DDG

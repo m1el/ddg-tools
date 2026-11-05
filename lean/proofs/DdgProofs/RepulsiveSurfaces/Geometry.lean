@@ -22,7 +22,7 @@ The key step of the normal variation is `P_N(e × w) = (N·w)(e × N)` for a uni
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -127,4 +127,4 @@ end motion
 
 end RS
 
-end DdgProofs
+end DDG

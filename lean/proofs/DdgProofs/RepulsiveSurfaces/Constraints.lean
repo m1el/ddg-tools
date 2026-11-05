@@ -16,7 +16,7 @@ import DdgProofs.RepulsiveSurfaces.Geometry
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -238,4 +238,4 @@ end bary
 
 end RS
 
-end DdgProofs
+end DDG

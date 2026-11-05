@@ -32,7 +32,7 @@ the workspace's `sda` (twice the signed area, `signed-area-2d`), and `lerp a b s
   `FaceModel.Valid.cut_eq_zero_of_emanating`).
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -275,4 +275,4 @@ theorem corner_arc_crosses_cevian (V : Fin 3 → ℝ × ℝ) (hV : 0 < sda (V 0)
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

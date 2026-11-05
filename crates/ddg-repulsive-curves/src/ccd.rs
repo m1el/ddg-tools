@@ -252,7 +252,7 @@ pub fn point_segment_distance(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
 /// minimizer for that `t` (Ericson's re-projection). Every candidate is the distance of an actual
 /// pair of points. When the lines are not parallel and their closest points lie on both
 /// segments, the pair is that interior pair, so in exact arithmetic the result is the distance
-/// (`DdgProofs.RC.segSegCode_eq`, `segSegDist_le`, `segSegDist_attained` in `lean/proofs`,
+/// (`DDG.RC.segSegCode_eq`, `segSegDist_le`, `segSegDist_attained` in `lean/proofs`,
 /// `RepulsiveCurves/ClosestPoints.lean`; the cross-product form: `cross_formulas_segSeg`).
 ///
 /// The line parameter is `s = ((p₂ − p₁) × d₂)·n / |n|²` with `n = d₁ × d₂`, which equals the
@@ -291,7 +291,7 @@ pub fn segment_segment_distance(p1: [f64; 3], q1: [f64; 3], p2: [f64; 3], q2: [f
 }
 
 /// Distance from `p` to the triangle `a b c` (degenerate triangles: distance to their edges). In
-/// exact arithmetic it is the distance for every triangle (`DdgProofs.RC.ptTriDist_le`,
+/// exact arithmetic it is the distance for every triangle (`DDG.RC.ptTriDist_le`,
 /// `ptTriDist_attained`; the cross-product forms: `cross_formulas_ptTri`).
 ///
 /// [formula: rc-closest-points]

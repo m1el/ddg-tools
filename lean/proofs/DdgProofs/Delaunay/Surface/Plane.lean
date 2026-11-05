@@ -23,10 +23,10 @@ The lemmas about straight segments through triangles are in `Segment.lean`, the 
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Intrinsic (rigid dist2_rigid sda_rigid)
-open DdgProofs.Delaunay.Planar
+open DDG.Intrinsic (rigid dist2_rigid sda_rigid)
+open DDG.Delaunay.Planar
 open Set
 
 /-- A point of the plane. -/
@@ -35,7 +35,7 @@ abbrev Pt := ℝ × ℝ
 /-! ## Rigid motions -/
 
 /-- A rigid motion: the rotation with cosine `cs` and sine `sn`, followed by the translation
-by `t` (`DdgProofs.Intrinsic.rigid`). -/
+by `t` (`DDG.Intrinsic.rigid`). -/
 @[ext]
 structure Rigid where
   cs : ℝ
@@ -578,4 +578,4 @@ theorem map_map (g h : Rigid) : (T.map h).map g = T.map (g.comp h) := by
 
 end Tri
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

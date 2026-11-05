@@ -42,7 +42,7 @@ multiplied by `c = A / A_c`; with `λ_c = c·λ` it has the same minimizers, and
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -418,4 +418,4 @@ example : ∃ (P : ConeProblem (Fin 1)) (u φ μ : Fin 1 → ℝ),
       simp [softThreshold]; norm_num
   exact ⟨P, _, _, _, hK, (kkt_scaleMass_withLam_iff two_pos _ _ _).mpr hK⟩
 
-end DdgProofs
+end DDG

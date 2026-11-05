@@ -75,11 +75,11 @@ puts equal values in the reverse of their original order.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Weights of a list of (value, weight) pairs -/
@@ -1373,4 +1373,4 @@ theorem limited_rate_not_descent_example :
 
 end Cuts
 
-end DdgProofs
+end DDG

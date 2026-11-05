@@ -25,7 +25,7 @@ f_m = (d·ŝ, d·t̂, d·c, n̂_m·ŝ, n̂_m·t̂, n̂_m·c),   d = (P m − P 0
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -200,4 +200,4 @@ theorem features_affine {k : ℕ} (frame : V3 → V3 × V3) (P N : Fin (k + 1) �
 
 end PAT
 
-end DdgProofs
+end DDG

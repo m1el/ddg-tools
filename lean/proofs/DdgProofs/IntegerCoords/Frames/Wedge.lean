@@ -31,7 +31,7 @@ and the curves through the flipped quadrilateral are the same, `Glue.Hyp.outer`,
 the glued pair, not as `Cx.next` of the flipped complex, which WP9 does not model.)
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 namespace Cx
 
@@ -148,4 +148,4 @@ end FlipAt
 
 end Cx
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

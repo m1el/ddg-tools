@@ -45,12 +45,12 @@ scalar definitions `gradientNormLone`, `meanGradient`, `weightedMean`, `ringMean
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
 open Matrix
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Weighted means -/
@@ -694,7 +694,7 @@ angles at the boundary vertex `v` is the turning angle of SPEC §3.10, and by di
 Gauss–Bonnet `Σ_{v ∈ ∂} (π − β_v) = 2πχ − Σ_{v interior} Ω_v`.
 
 [formula: cut-length-step-on-cut] -/
-theorem _root_.DdgProofs.TriMesh.sum_turningAngle (hM : M.Valid) (hman : M.Manifold) :
+theorem _root_.DDG.TriMesh.sum_turningAngle (hM : M.Valid) (hman : M.Manifold) :
     ∑ v ∈ M.boundaryVertices, (π - M.angleSum v) =
       2 * π * (M.eulerChar : ℝ) - ∑ v ∈ M.boundaryVerticesᶜ, M.angleDefect v := by
   have h := M.gauss_bonnet hM hman
@@ -703,7 +703,7 @@ theorem _root_.DdgProofs.TriMesh.sum_turningAngle (hM : M.Valid) (hman : M.Manif
 
 /-- **A closed cut on a flat surface**: if the region is a flat disk (no angle defect at its
 interior vertices, Euler characteristic `1`), its boundary turns by `2π` in total. -/
-theorem _root_.DdgProofs.TriMesh.sum_turningAngle_flat_disk (hM : M.Valid) (hman : M.Manifold)
+theorem _root_.DDG.TriMesh.sum_turningAngle_flat_disk (hM : M.Valid) (hman : M.Manifold)
     (hflat : ∀ v ∈ M.boundaryVerticesᶜ, M.angleDefect v = 0) (hχ : M.eulerChar = 1) :
     ∑ v ∈ M.boundaryVertices, (π - M.angleSum v) = 2 * π := by
   rw [M.sum_turningAngle hM hman, Finset.sum_eq_zero hflat, hχ]
@@ -715,7 +715,7 @@ theorem _root_.DdgProofs.TriMesh.sum_turningAngle_flat_disk (hM : M.Valid) (hman
 `Σ_p ℓ_p λ⁰_p = w (2πχ − Σ_interior Ω)`.
 
 [formula: cut-length-step-on-cut] -/
-theorem _root_.DdgProofs.TriMesh.onCut_force_sum_const (hM : M.Valid) (hman : M.Manifold)
+theorem _root_.DDG.TriMesh.onCut_force_sum_const (hM : M.Valid) (hman : M.Manifold)
     (w : ℝ) {ℓ lam : {v // v ∈ M.boundaryVertices} → ℝ}
     {κ : {v // v ∈ M.boundaryVertices} → {v // v ∈ M.boundaryVertices} → ℝ}
     (hκ : ∀ p q, κ p q = κ q p)
@@ -730,7 +730,7 @@ theorem _root_.DdgProofs.TriMesh.onCut_force_sum_const (hM : M.Valid) (hman : M.
 the rate `2πw`, SPEC §3.10).
 
 [formula: cut-length-step-on-cut] -/
-theorem _root_.DdgProofs.TriMesh.onCut_force_sum_flat_disk (hM : M.Valid) (hman : M.Manifold)
+theorem _root_.DDG.TriMesh.onCut_force_sum_flat_disk (hM : M.Valid) (hman : M.Manifold)
     (hflat : ∀ v ∈ M.boundaryVerticesᶜ, M.angleDefect v = 0) (hχ : M.eulerChar = 1) (w : ℝ)
     {ℓ lam : {v // v ∈ M.boundaryVertices} → ℝ}
     {κ : {v // v ∈ M.boundaryVertices} → {v // v ∈ M.boundaryVertices} → ℝ}
@@ -975,7 +975,7 @@ the sum of the corner angles there and a constant weight `w`,
 `Σ_p ℓ_p λ⁰_p = w (2πχ − Σ_interior Ω)`; for a flat disk this is `2πw`.
 
 [formula: cut-length-step-on-cut] -/
-theorem _root_.DdgProofs.TriMesh.onCut_lengthForce_sum {V F : Type*} [DecidableEq V] [Fintype V]
+theorem _root_.DDG.TriMesh.onCut_lengthForce_sum {V F : Type*} [DecidableEq V] [Fintype V]
     [Fintype F] (M : TriMesh V F) (hM : M.Valid) (hman : M.Manifold) (w : ℝ)
     {ℓ lam : {v // v ∈ M.boundaryVertices} → ℝ}
     {κ : {v // v ∈ M.boundaryVertices} → {v // v ∈ M.boundaryVertices} → ℝ}
@@ -1128,4 +1128,4 @@ theorem adaptiveStep_mul_rho_le (τmax ts ω mm h : ℝ) {ρ : ℝ} (hρ : 0 < �
 
 end Cuts
 
-end DdgProofs
+end DDG

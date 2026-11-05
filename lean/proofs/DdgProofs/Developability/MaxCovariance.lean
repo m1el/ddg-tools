@@ -19,11 +19,11 @@ SPEC) is cited (`dev-max-covariance-voronoi`, `CITED.md`). Proved here, about th
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 theorem siteNormal_eq_faceNormal (a b c : V3) : siteNormal a b c = faceNormal a b c := rfl
@@ -166,4 +166,4 @@ end gradient
 
 end Dev
 
-end DdgProofs
+end DDG

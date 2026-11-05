@@ -30,7 +30,7 @@ vertices, with the same ids.
   are the same statement for such meshes.
 -/
 
-namespace DdgProofs
+namespace DDG
 
 open Real
 
@@ -221,4 +221,4 @@ example : (exampleTetrahedronOriented.toGluing (by intro h h' e; revert h h'; de
       simp only [TriMesh.la, TriMesh.lb, TriMesh.lc, exampleTetrahedronOriented]
       exact ⟨by norm_num, by norm_num, by norm_num⟩⟩ (by decide)
 
-end DdgProofs
+end DDG

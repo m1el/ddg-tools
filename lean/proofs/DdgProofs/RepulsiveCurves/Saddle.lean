@@ -35,7 +35,7 @@ means `[A Cᵀ; C 0][x; μ] = [b; r]`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -500,4 +500,4 @@ end scaling
 
 end RC
 
-end DdgProofs
+end DDG

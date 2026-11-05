@@ -31,7 +31,7 @@ of D9; the clamps are absolute thresholds and break exact scale covariance when 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -653,4 +653,4 @@ theorem fit_scale (Fr : Frame) (p : V3) (a : Coef) {c : ℝ} (hc : 0 < c) (x : V
 
 end PAT
 
-end DdgProofs
+end DDG

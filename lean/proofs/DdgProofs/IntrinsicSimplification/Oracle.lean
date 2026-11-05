@@ -22,12 +22,12 @@ they are the definitions the theorems of this directory are about:
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
 open Real
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 /-- [formula: iem-flatten-monotone] -/
 theorem iemExtAngle_eq {a b c : ℝ} (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) :
@@ -74,4 +74,4 @@ theorem iemProjInterp_eq (w0 w1 w2 b0 b1 b2 : ℝ) :
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

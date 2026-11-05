@@ -33,7 +33,7 @@ identity in `ℝ³`, see the end of the file).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -1664,4 +1664,4 @@ end Cross
 
 end RC
 
-end DdgProofs
+end DDG

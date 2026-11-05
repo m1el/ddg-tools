@@ -15,7 +15,7 @@ import DdgProofs.PointsAsTori.Blend
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -261,4 +261,4 @@ theorem sphere_trace_step_safe {φ : V3 → ℝ} {L ℓ : ℝ} (hL : 0 < L)
 
 end PAT
 
-end DdgProofs
+end DDG

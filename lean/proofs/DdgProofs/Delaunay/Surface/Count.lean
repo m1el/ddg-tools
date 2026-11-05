@@ -26,7 +26,7 @@ through a fan of corners at one vertex subtends less than `π`, so a block has f
 `π / α_min` chords) and `c₀` (`sin α_min · ℓ_min`).
 -/
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
 open Finset
 
@@ -156,4 +156,4 @@ theorem fan_count {α : Type*} {n M : ℕ} (v : Fin n → α) (lam : Fin n → �
   have hM : (0 : ℝ) ≤ M := by positivity
   nlinarith
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

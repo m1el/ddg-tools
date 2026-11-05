@@ -65,12 +65,12 @@ crossings' input edges by `ic-extract-intrinsic-edge`).
 
 noncomputable section
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 namespace Frames
 
 open Real
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 /-- The star of an input vertex as the signposts see it: the input corner angles counter-clockwise
 from the reference halfedge, and whether the vertex is on the boundary. -/
@@ -313,4 +313,4 @@ end Star
 
 end Frames
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

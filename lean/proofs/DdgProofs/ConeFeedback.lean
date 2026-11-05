@@ -34,7 +34,7 @@ the crate README), and anything about the threshold rule, which is a design choi
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace ConeFeedback
 
@@ -212,4 +212,4 @@ theorem mismatch_eq_zero_of_const {u : ι → ℝ} {nb : ι → List (ℝ × ℝ
 
 end ConeFeedback
 
-end DdgProofs
+end DDG

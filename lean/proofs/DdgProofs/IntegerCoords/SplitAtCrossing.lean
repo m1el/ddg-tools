@@ -32,7 +32,7 @@ whose ends interleave with the chord from rank `r` to corner `k`.
 The two new faces and the merge back are in `SplitAtCrossingFaces.lean`.
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus faceValid)
 
@@ -372,4 +372,4 @@ theorem splitSideAtCrossingR_eq_none (n : Fin 3 → ℤ) (s : Fin 3) (j : ℤ) :
   · simp only [Bool.not_eq_true] at hv
     simp only [splitSideAtCrossingR, hv, Bool.false_eq_true, ↓reduceIte, true_or]
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

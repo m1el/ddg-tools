@@ -34,7 +34,7 @@ Cited in `CITED.md`: `mobius-centering-existence` (a centering inversion exists 
 to rotation), `spherical-triangle-area` (Van Oosterom–Strackee), `sphere-injectivity-criterion`.
 -/
 
-namespace DdgProofs
+namespace DDG
 
 /-! ## Stereographic projection -/
 
@@ -324,4 +324,4 @@ theorem hasDerivAt_sphereInversion (u1 u2 u3 x1 x2 x3 : ℝ)
   rw [hD0]
   ring
 
-end DdgProofs
+end DDG

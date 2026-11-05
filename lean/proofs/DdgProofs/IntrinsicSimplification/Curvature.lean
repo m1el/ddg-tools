@@ -26,7 +26,7 @@ number of its two ends labelled `i` (Eq. 3 with `u_j = 0` for `j ≠ i`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
@@ -203,4 +203,4 @@ theorem weights_eq_eq9 {dK : ι → ℝ} {Ki tol : ℝ} (htol : 0 ≤ tol) (hcon
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

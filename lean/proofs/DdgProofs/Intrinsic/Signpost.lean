@@ -32,11 +32,11 @@ The fold over a list of corners is `List.foldl` of the oracle's update (the loop
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Intrinsic
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The oracle's definitions at `ℝ` -/
@@ -285,4 +285,4 @@ theorem flip_signpost_at_l {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTri
 
 end Intrinsic
 
-end DdgProofs
+end DDG

@@ -17,7 +17,7 @@ import DdgProofs.RepulsiveCurves.Saddle
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -137,4 +137,4 @@ end prolongation
 
 end RC
 
-end DdgProofs
+end DDG

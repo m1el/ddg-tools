@@ -20,7 +20,7 @@ returns `H_k q` (`twoLoop_eq`). If `H₀` is symmetric positive definite and eve
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -125,4 +125,4 @@ theorem bfgsInv_posDef {H₀ : Matrix n n ℝ} (hsym : H₀ᵀ = H₀) (hpd : �
 
 end RS
 
-end DdgProofs
+end DDG

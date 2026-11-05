@@ -22,10 +22,10 @@ overlay**.
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Intrinsic (dist2_comm)
-open DdgProofs.Delaunay.Planar
+open DDG.Intrinsic (dist2_comm)
+open DDG.Delaunay.Planar
 open Set
 open scoped Classical Topology
 
@@ -79,8 +79,8 @@ theorem newLength_twin {ℓ : Halfedge F → ℝ} (hm : G.IsMetric ℓ) (hf : G.
   unfold Gluing.newLength
   rw [G.twin_twin, hm.twin h₀, flipLength_eq_flippedLengthFromLengths hl.swap hk.swap,
     flipLength_eq_flippedLengthFromLengths hk hl]
-  exact (DdgProofs.Intrinsic.flippedLengthFromLengths_comm _ _ _ _ _).trans
-    (DdgProofs.Intrinsic.flippedLengthFromLengths_mirror hk.pos_a.ne' _ _ _ _)
+  exact (DDG.Intrinsic.flippedLengthFromLengths_comm _ _ _ _ _).trans
+    (DDG.Intrinsic.flippedLengthFromLengths_mirror hk.pos_a.ne' _ _ _ _)
 
 theorem flipLen_twin_eq {ℓ : Halfedge F → ℝ} (hm : G.IsMetric ℓ) (hf : G.Flippable h₀) :
     G.flipLen ℓ (G.twin h₀) = G.flipLen ℓ h₀ := by
@@ -415,7 +415,7 @@ theorem newLength_eq : t.G.newLength t.ℓ h₀ = dist2 (O.dK h₀) (O.dL h₀) 
     exact this.symm
   unfold Gluing.newLength
   rw [flipLength_eq_flippedLengthFromLengths hk hl, e1, e2, e3, e4, e5]
-  exact DdgProofs.Intrinsic.flippedLengthFromLengths_realized hq.hK hq.hL'
+  exact DDG.Intrinsic.flippedLengthFromLengths_realized hq.hK hq.hL'
 
 /-! ### The flipped state -/
 
@@ -637,4 +637,4 @@ theorem flip (O : Overlay s t) {t' : MetricGluing F} (h : MetricGluing.ConvexFli
 
 end Overlay
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

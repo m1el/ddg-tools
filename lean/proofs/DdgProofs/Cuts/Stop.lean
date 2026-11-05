@@ -58,7 +58,7 @@ code and is reported as `EnergyStalled`; that is outside these statements.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
@@ -303,7 +303,7 @@ theorem lowestState_lt_of_rose {ε : ℝ} (hε : 0 ≤ ε) {E : ℕ → ℝ} {k 
 
 section Motion
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 /-- The motion criterion of the stop rule as the Rust code evaluates it (`motion_criterion`):
 the tolerance is positive, the step moved the cut by at most the tolerance, and the predicted
@@ -468,4 +468,4 @@ end MotionRest
 
 end Cuts
 
-end DdgProofs
+end DDG

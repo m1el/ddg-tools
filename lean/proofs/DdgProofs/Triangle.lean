@@ -22,7 +22,7 @@ the sides `b` and `c`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real
 
@@ -341,4 +341,4 @@ theorem dist_eq_sqrt_sum_sq (p q : EuclideanSpace ℝ (Fin 3)) :
 
 end Euclidean
 
-end DdgProofs
+end DDG

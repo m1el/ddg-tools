@@ -41,7 +41,7 @@ set_option linter.unusedTactic false
 set_option linter.unreachableTactic false
 set_option linter.unnecessarySeqFocus false
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -556,4 +556,4 @@ theorem splitCount_faceValid {n c : Fin 3 → ℕ} (hc : Admissible n c)
 
 end IntegerCoords
 
-end DdgProofs
+end DDG

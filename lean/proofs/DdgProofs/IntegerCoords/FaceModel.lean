@@ -53,7 +53,7 @@ Results.
   (`Valid.traceStep_eq`).
 -/
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntegerCoords
 
@@ -193,9 +193,9 @@ end FaceModel
 
 end IntegerCoords
 
-end DdgProofs
+end DDG
 
-namespace DdgProofs.IntegerCoords.FaceModel
+namespace DDG.IntegerCoords.FaceModel
 
 variable {M : FaceModel}
 
@@ -245,9 +245,9 @@ def IsL (M : FaceModel) (k : Fin 3) (p : ℕ) : Prop := ∃ q, M.partner k p = .
 /-- Crossing `p` of side `k` cuts corner `k + 1` (its partner is on side `k + 1`). -/
 def IsR (M : FaceModel) (k : Fin 3) (p : ℕ) : Prop := ∃ q, M.partner k p = .side (k + 1) q
 
-end DdgProofs.IntegerCoords.FaceModel
+end DDG.IntegerCoords.FaceModel
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 /-! ### Initial segments and strictly decreasing maps of natural numbers -/
 
@@ -314,14 +314,14 @@ lemma anti_ge {f : ℕ → ℕ} {a L : ℕ} (hanti : ∀ p p', p < p' → p' < a
     have h2 := hanti p (p + 1) (by omega) (by omega)
     omega
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords
 
-namespace DdgProofs.IntegerCoords.FaceModel
+namespace DDG.IntegerCoords.FaceModel
 
 variable {M : FaceModel}
 
 /-- The position of a boundary point on its side (`0` for a corner). -/
-def _root_.DdgProofs.IntegerCoords.Pt.pos : Pt → ℕ
+def _root_.DDG.IntegerCoords.Pt.pos : Pt → ℕ
   | .corner _ => 0
   | .side _ p => p
 
@@ -481,9 +481,9 @@ theorem Valid.eq_canon (hM : M.Valid) :
   · exact hmid k p (by omega) h2
   · exact hfin k p hp (by omega)
 
-end DdgProofs.IntegerCoords.FaceModel
+end DDG.IntegerCoords.FaceModel
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 lemma canon_normal {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) (p : ℕ) (hp : p < n k) :
     (∃ q, q < n (k + 2) ∧ canon n c k p = .side (k + 2) q) ∨
@@ -554,9 +554,9 @@ lemma canon_disjoint {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) (p :
 theorem canon_valid {n c : Fin 3 → ℕ} (h : Admissible n c) : (⟨n, canon n c⟩ : FaceModel).Valid :=
   ⟨canon_normal h, canon_symm h, canon_disjoint h⟩
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus faceValid)
 
@@ -679,7 +679,7 @@ theorem Valid.counts (hM : M.Valid) (k : Fin 3) :
   · rw [hem]; exact hco.2
 
 /-- Admissible corner counts are Eq. 1 of the side counts. -/
-lemma _root_.DdgProofs.IntegerCoords.Admissible.c_eq {n c : Fin 3 → ℕ} (hc : Admissible n c)
+lemma _root_.DDG.IntegerCoords.Admissible.c_eq {n c : Fin 3 → ℕ} (hc : Admissible n c)
     (k : Fin 3) : (c k : ℤ) = cornerCoord (n (k + 1)) (n k) (n (k + 2)) := (hc.coords k).1.symm
 
 /-- **`ic-face-decoding`, uniqueness (Fig. 11).** Two valid face models with the same side counts
@@ -865,4 +865,4 @@ theorem FaceModel.Valid.traceStep_eq {M : FaceModel} (hM : M.Valid) (s : Fin 3) 
   rw [hci, hcj, np, np]
   split_ifs <;> simp only [stepPt] <;> first | omega | rfl | (congr 1; omega)
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

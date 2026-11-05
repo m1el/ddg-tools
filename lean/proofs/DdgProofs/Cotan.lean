@@ -17,7 +17,7 @@ import DdgProofs.Triangle
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -582,4 +582,4 @@ theorem angleC_scale {s : ℝ} (hs : s ≠ 0) (f : F) : (M.scale s).angleC f = M
 
 end TriMesh
 
-end DdgProofs
+end DDG

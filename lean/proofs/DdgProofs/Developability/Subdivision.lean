@@ -27,11 +27,11 @@ no smoothing). A face `t = (a, b, c)` with the edge midpoints `m_ab, m_bc, m_ca`
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 theorem midpoint_coords (a b : V3) :
@@ -185,4 +185,4 @@ theorem partWidth_const {n : ℕ} (hn : 0 < n) (N : V3) : partWidth n (fun _ => 
 
 end Dev
 
-end DdgProofs
+end DDG

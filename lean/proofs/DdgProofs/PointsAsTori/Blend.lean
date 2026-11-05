@@ -24,7 +24,7 @@ For a finite neighbor set `ι`, data points `p i`, per-torus SDFs `g i` and para
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -422,4 +422,4 @@ theorem blend_laplacian [Nonempty ι] (p : ι → V3) {g : ι → V3 → ℝ} {G
 
 end PAT
 
-end DdgProofs
+end DDG

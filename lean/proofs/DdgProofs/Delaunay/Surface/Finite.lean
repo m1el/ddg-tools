@@ -31,9 +31,9 @@ Surfaces with boundary, self-loops, multiple edges and self-glued faces are incl
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Delaunay.Planar
+open DDG.Delaunay.Planar
 open Set Relation
 open scoped Classical
 
@@ -156,7 +156,7 @@ theorem finite_states [Fintype F] (Λ : Set ℝ) (hΛ : Λ.Finite) :
 the flip class with all edges `≤ L` are finitely many (up to isomorphism, and in fact outright).
 
 [formula: it-delaunay-flip-termination] -/
-theorem _root_.DdgProofs.Delaunay.MetricGluing.boundedLengthFinite [Fintype F] [DecidableEq F]
+theorem _root_.DDG.Delaunay.MetricGluing.boundedLengthFinite [Fintype F] [DecidableEq F]
     (s : MetricGluing F) : MetricGluing.BoundedLengthFinite s := by
   intro L
   cases isEmpty_or_nonempty F with
@@ -173,9 +173,9 @@ theorem _root_.DdgProofs.Delaunay.MetricGluing.boundedLengthFinite [Fintype F] [
     rw [Set.Finite.mem_toFinset]
     exact fun x => length_mem s L ht hL x
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface
 
-namespace DdgProofs.Delaunay.MetricGluing
+namespace DDG.Delaunay.MetricGluing
 
 open Relation
 
@@ -238,4 +238,4 @@ theorem loop_acc' {C : FlipCriterion} (s₀ : MetricGluing F) (c : Config F)
     (hc : c.state ∈ reach s₀) : Acc (Function.swap (LoopStep C)) c :=
   loop_acc (reach_finite s₀) c hc
 
-end DdgProofs.Delaunay.MetricGluing
+end DDG.Delaunay.MetricGluing

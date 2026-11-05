@@ -39,12 +39,12 @@ nonempty `B` the hypotheses hold (`TriMesh.yamabe_existsUnique`, …).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
 open Matrix
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 variable {V : Type*} [Fintype V]
 
@@ -814,4 +814,4 @@ theorem harmonicExtension_faceEnergy_le (hM : M.Valid) {σ τ : V → ℝ}
 
 end TriMesh
 
-end DdgProofs
+end DDG

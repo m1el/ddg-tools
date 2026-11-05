@@ -22,7 +22,7 @@ import DdgProofs.RepulsiveSurfaces.Saddle
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -181,4 +181,4 @@ end frac
 
 end RS
 
-end DdgProofs
+end DDG

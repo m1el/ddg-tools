@@ -43,7 +43,7 @@ functions of the corners and `A = area p` the Heron area of the Euclidean side l
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriangleIntegral
 
@@ -706,4 +706,4 @@ theorem sum_integral_weighted_grad_sq (hM : M.Valid) {P : F → Fin 3 → ℝ ×
 
 end TriMesh
 
-end DdgProofs
+end DDG

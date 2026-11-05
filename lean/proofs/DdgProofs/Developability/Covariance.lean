@@ -23,11 +23,11 @@ import DdgProofs.Developability.Vec
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Ddg.Dev (Sym3)
 
 /-! ## Helpers -/
@@ -312,4 +312,4 @@ theorem covMatrix_split_corner (n j : ℕ) (hj : j < n) (θ θ' : ℕ → ℝ) (
 
 end Dev
 
-end DdgProofs
+end DDG

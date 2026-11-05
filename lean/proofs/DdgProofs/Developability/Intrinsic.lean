@@ -30,11 +30,11 @@ The exact coefficients `G`, `H` are covered; their Taylor polynomials near `φ =
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 /-! ## The log map -/
@@ -349,4 +349,4 @@ theorem apply_eq_smul_of_tangent_eigen (n : ℕ) (θ : ℕ → ℝ) (Nt : ℕ �
 
 end Dev
 
-end DdgProofs
+end DDG

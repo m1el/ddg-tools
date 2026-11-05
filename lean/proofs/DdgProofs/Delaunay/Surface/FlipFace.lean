@@ -26,10 +26,10 @@ there), the germs at points of the open old diamond are consistent (`germ_D`), a
 
 noncomputable section
 
-namespace DdgProofs.Delaunay.Surface
+namespace DDG.Delaunay.Surface
 
-open DdgProofs.Intrinsic (dist2_comm)
-open DdgProofs.Delaunay.Planar
+open DDG.Intrinsic (dist2_comm)
+open DDG.Delaunay.Planar
 open Set
 open scoped Classical
 
@@ -189,8 +189,8 @@ theorem quad : ConvexQuad (O.dP h₀) (O.dQ h₀) (O.dK h₀) (O.dL h₀) := by
   unfold Gluing.ConvexAt at hconv
   obtain ⟨hk, hl⟩ := t.isMetric.diamond_isTriangle h₀
   rw [isConvexDiamond_iff_diamondConvex hk hl] at hconv
-  unfold DdgProofs.Intrinsic.DiamondConvex at hconv
-  rw [DdgProofs.Intrinsic.flipConvex_iff] at hconv
+  unfold DDG.Intrinsic.DiamondConvex at hconv
+  rw [DDG.Intrinsic.flipConvex_iff] at hconv
   have e1 : t.ℓ h₀ = dist2 (O.dP h₀) (O.dQ h₀) := (O.lay_dist h₀.1 h₀.2).symm
   have e2 : t.ℓ h₀.prev = dist2 (O.dP h₀) (O.dK h₀) := by
     have := O.lay_dist h₀.1 (h₀.2 + 2)
@@ -210,7 +210,7 @@ theorem quad : ConvexQuad (O.dP h₀) (O.dQ h₀) (O.dK h₀) (O.dL h₀) := by
       dist2_comm] at this
     exact this.symm
   rw [e1, e2, e3, e4, e5] at hconv
-  obtain ⟨a1, a2⟩ := DdgProofs.Intrinsic.flipArea_realized hK hL'
+  obtain ⟨a1, a2⟩ := DDG.Intrinsic.flipArea_realized hK hL'
   rw [a1, a2] at hconv
   exact ⟨hK, hL, hconv.1, hconv.2⟩
 
@@ -445,4 +445,4 @@ end FlipOK
 
 end Overlay
 
-end DdgProofs.Delaunay.Surface
+end DDG.Delaunay.Surface

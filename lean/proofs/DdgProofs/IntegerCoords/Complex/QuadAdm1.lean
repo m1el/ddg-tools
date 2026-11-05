@@ -3,7 +3,7 @@ import DdgProofs.IntegerCoords.Complex.Quad
 /-! # The new face `F₁` of the flip is valid (`Complex/Quad.lean`); a file of its own so that the
 two case analyses build in parallel. -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (faceValid)
 
@@ -37,4 +37,4 @@ lemma Hyp.model1 (h : Hyp nA nB m) (hD : Dkl nA nB ≤ 1) :
 
 end Glue
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

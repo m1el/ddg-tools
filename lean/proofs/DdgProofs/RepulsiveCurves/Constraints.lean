@@ -23,7 +23,7 @@ Jacobian rows (`Σ_k T_k P_T e_k = P_T T = 0`), which is why D7 uses two rows.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -257,4 +257,4 @@ theorem duff_frame {n : V3} (hn : n ⬝ᵥ n = 1) {sgnz : ℝ} (hs : sgnz ^ 2 = 
 
 end RC
 
-end DdgProofs
+end DDG

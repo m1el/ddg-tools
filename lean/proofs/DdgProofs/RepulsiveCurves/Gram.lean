@@ -36,7 +36,7 @@ SPEC D2 are instances, see below), edge data `ℓ : E → ℝ`, `T : E → ℝ³
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -888,4 +888,4 @@ end classic
 
 end RC
 
-end DdgProofs
+end DDG

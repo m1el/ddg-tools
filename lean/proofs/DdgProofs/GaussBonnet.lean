@@ -23,7 +23,7 @@ Orientability is not needed.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real Matrix
 
@@ -289,4 +289,4 @@ example : exampleTetrahedron.Valid ∧ exampleTetrahedron.Manifold ∧
   simp only [TriMesh.la, TriMesh.lb, TriMesh.lc, exampleTetrahedron]
   exact ⟨by norm_num, by norm_num, by norm_num⟩
 
-end DdgProofs
+end DDG

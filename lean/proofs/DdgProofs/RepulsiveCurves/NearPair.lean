@@ -33,7 +33,7 @@ The series that evaluates `S` and the Gauss–Legendre error of the graded rule 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -323,4 +323,4 @@ theorem perpPair_lower_bound {α β d : ℝ} (hα : 0 ≤ α) (hβ : 0 ≤ β) (
 
 end RC
 
-end DdgProofs
+end DDG

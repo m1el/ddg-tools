@@ -36,11 +36,11 @@ that the scheme converges to the geodesic distance (`cut-fast-marching-convergen
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The oracle's closed form at `ℝ` -/
@@ -458,4 +458,4 @@ theorem hopfLaxTriangle_isLeast_intrinsic {lij lik ljk : ℝ} (h : IsTriangle li
 
 end Cuts
 
-end DdgProofs
+end DDG

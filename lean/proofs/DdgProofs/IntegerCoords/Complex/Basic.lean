@@ -44,7 +44,7 @@ them (`ic-trace-terminates`). Disjointness of arcs is inherited from the face mo
 (combinatorial, by non-interleaving: no Jordan curve theorem is needed anywhere).
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerCoord cornerNumerator emanating faceValid nPlus nMinus traceStep)
 
@@ -315,4 +315,4 @@ theorem Valid.next_eq_oracle (hC : C.Valid) {z : Xing F} (hz : C.IsX z) :
 
 end Cx
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

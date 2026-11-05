@@ -23,7 +23,7 @@ termination of flipping (`exists_flips_to_locallyDelaunay`) are statements about
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Delaunay
 
@@ -70,7 +70,7 @@ theorem cornerCot_dist2 {i j k : ℝ × ℝ} (h : sda i j k ≠ 0) :
 
 [formula: planar-local-delaunay-bridge] -/
 theorem isLocallyDelaunay_dist2_iff {i j k l : ℝ × ℝ} (hk : sda i j k * sda i j l < 0) :
-    _root_.DdgProofs.Delaunay.IsLocallyDelaunay (dist2 i j) (dist2 i k) (dist2 j k) (dist2 i l)
+    _root_.DDG.Delaunay.IsLocallyDelaunay (dist2 i j) (dist2 i k) (dist2 j k) (dist2 i l)
       (dist2 j l) ↔ ¬ InCircumcircle i j k l := by
   have hD : sda i j k ≠ 0 := by rintro h0; simp [h0] at hk
   have hD' : sda i j l ≠ 0 := by rintro h0; simp [h0] at hk
@@ -96,4 +96,4 @@ end Planar
 
 end Delaunay
 
-end DdgProofs
+end DDG

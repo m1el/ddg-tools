@@ -16,7 +16,7 @@ subject to   (L u)_i = s_i − Ω̂_i     for all vertices i,   s_i ∈ feasible
 ```
 
 This is `ConeProblem V` for `L` the full cotan Laplacian (`TriMesh.boundaryProblem`), so the
-results of `DdgProofs.Optimality` and `DdgProofs.Closed` apply: the full Laplacian annihilates
+results of `DDG.Optimality` and `DDG.Closed` apply: the full Laplacian annihilates
 constants, so `u` is determined only up to an additive constant, which is optimized too.
 
 * `boundaryProblem_isMinimizer`: the optimality system is sufficient for a global minimum;
@@ -30,7 +30,7 @@ constants, so `u` is determined only up to an additive constant, which is optimi
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix Real
 
@@ -325,4 +325,4 @@ example (wE : Fin 3 → ℝ) (hwE : ∀ v, 0 ≤ wE v) (lam : ℝ) (hlam : 0 ≤
   · intro i; simp [show (fun _ : Fin 3 => (0 : ℝ)) = 0 from rfl]
   · intro i; exact (Site.stationary_boundary_free_iff hlam _ _).mpr rfl
 
-end DdgProofs
+end DDG

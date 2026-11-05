@@ -18,7 +18,7 @@ import DdgProofs.RepulsiveCurves.Constraints
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -205,4 +205,4 @@ end subdivision
 
 end RC
 
-end DdgProofs
+end DDG

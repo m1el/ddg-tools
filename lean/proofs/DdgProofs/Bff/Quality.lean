@@ -98,7 +98,7 @@ Nothing is claimed about floating-point rounding.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real
 
@@ -1694,4 +1694,4 @@ example : mollifyNeeded 1 1 2 0 = 0 ∧ ¬IsTriangle ((1 : ℝ) + 0) (1 + 0) (2 
   have := h.lt_c
   norm_num at this
 
-end DdgProofs
+end DDG

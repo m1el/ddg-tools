@@ -17,7 +17,7 @@ constraint `L u = μ − Ω` of the canonical problem, to first order.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Real
 
@@ -255,4 +255,4 @@ theorem hasDerivAt_angleDefect_conformalScale_add (u : V → ℝ) (hM : (M.confo
 
 end TriMesh
 
-end DdgProofs
+end DDG

@@ -8,13 +8,13 @@ The oracle (`lean/oracle`, `DdgOracle/Formulas/Mesh.lean`) gives a mesh as a lis
 vertex indices in `Nat`, an edge-length function `len : Nat → Nat → α` and a vertex count `nv`.
 This file identifies its `laplacian`, `angleDefect`, `geodesicCurvature` and `lumpedMass` at the
 real numbers with the corresponding quantities of the `TriMesh` it describes
-(`Oracle.toTriMesh`), and restates the theorems of `DdgProofs.Cotan` and `DdgProofs.GaussBonnet`
+(`Oracle.toTriMesh`), and restates the theorems of `DDG.Cotan` and `DDG.GaussBonnet`
 about the oracle's definitions.
 -/
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Oracle
 
@@ -243,4 +243,4 @@ theorem sum_lumpedMass (hv : MeshValid faces len nv) (hne : faces ≠ []) :
 
 end Oracle
 
-end DdgProofs
+end DDG

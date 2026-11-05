@@ -24,7 +24,7 @@ Main results: the gap identity (`gap_identity`), weak duality (`weak_duality`), 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -305,4 +305,4 @@ theorem dualObjectiveOfAdjoint_le (hP : P.WellFormed) (hpos : ∀ i, 0 < P.wE i 
 
 end ConeProblem
 
-end DdgProofs
+end DDG

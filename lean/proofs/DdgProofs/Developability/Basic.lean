@@ -23,11 +23,11 @@ The corrections of the SPEC are part of the statements: the normal derivative ha
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 /-! ## Helpers -/
@@ -493,4 +493,4 @@ end vertexNormal
 
 end Dev
 
-end DdgProofs
+end DDG

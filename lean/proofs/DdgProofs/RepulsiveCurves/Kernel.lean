@@ -19,7 +19,7 @@ total function; "finite" in the SPEC corresponds to `p ≠ q` here (`Energy.lean
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -126,4 +126,4 @@ theorem kernel_sq_quadrature (σ : ℝ) {p q : V3} (hpq : p ≠ q) (T : V3) :
 
 end RC
 
-end DdgProofs
+end DDG

@@ -3,7 +3,7 @@ import DdgProofs.Problem
 /-!
 # The optimality system characterizes the global minimizers
 
-For the canonical discrete problem (`DdgProofs.Problem`):
+For the canonical discrete problem (`DDG.Problem`):
 
 * **sufficiency** (`ConeProblem.KKT.isMinimizer`): any solution `(u, φ, μ)` of the optimality
   system is a global minimizer. No assumption on `L` is needed, so the statement covers the
@@ -19,7 +19,7 @@ For the canonical discrete problem (`DdgProofs.Problem`):
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -417,4 +417,4 @@ example : ∃ (P : ConeProblem (Fin 2)) (u φ μ : Fin 2 → ℝ),
     rw [Site.stationary_plain_iff zero_le_one]
     rw [softThreshold_of_gt zero_le_one (by norm_num)]; norm_num
 
-end DdgProofs
+end DDG

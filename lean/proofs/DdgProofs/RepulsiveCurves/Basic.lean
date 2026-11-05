@@ -31,7 +31,7 @@ with `P_T w = w − (T·w) T`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -343,4 +343,4 @@ end curveDeriv
 
 end RC
 
-end DdgProofs
+end DDG

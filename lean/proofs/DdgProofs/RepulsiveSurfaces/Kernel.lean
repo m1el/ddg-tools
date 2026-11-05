@@ -25,7 +25,7 @@ function, "finite" in the SPEC is `X ≠ Y` here).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -154,4 +154,4 @@ theorem hasDerivAt_kernel {α β : ℝ} (hα : 1 < α) {X N Y : ℝ → V3} {X' 
 
 end RS
 
-end DdgProofs
+end DDG

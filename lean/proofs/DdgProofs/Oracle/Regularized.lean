@@ -19,7 +19,7 @@ eliminates `μ`). Each Newton step solves the affine system `Fpiece γ σ = 0` o
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Oracle
 
@@ -49,11 +49,11 @@ theorem stationary_siteOf_of_eq_regularizedMeasure {t lo hi m γ : ℝ}
 
 end Oracle
 
-end DdgProofs
+end DDG
 
 namespace Ddg.Problem
 
-open DdgProofs DdgProofs.Oracle Matrix
+open DDG DDG.Oracle Matrix
 
 variable {p : Ddg.Problem ℝ}
 
@@ -200,7 +200,7 @@ end Ddg.Problem
 
 namespace Ddg.Problem
 
-open DdgProofs DdgProofs.Oracle Matrix
+open DDG DDG.Oracle Matrix
 
 variable {p : Ddg.Problem ℝ}
 

@@ -4,7 +4,7 @@ import DdgProofs
 # Axiom audit of every declaration
 
 `lake env lean DdgProofs/AuditAll.lean` collects the axioms of **every** declaration defined in a
-`DdgProofs.*` or `DdgOracle.*` module (theorems, definitions, instances, auxiliary and private
+`DdgProofs.*` (module names; also `DDG.*` once the library is split out) or `DdgOracle.*` module (theorems, definitions, instances, auxiliary and private
 declarations) and reports the union and every declaration that uses an axiom other than `propext`,
 `Classical.choice`, `Quot.sound`. `scripts/check-formulas.sh --audit-all` runs it.
 
@@ -21,7 +21,7 @@ This file is not imported by the library.
 
 open Lean Elab Command
 
-/-- Collect the axioms of every declaration defined in a `DdgProofs.*` or `DdgOracle.*` module. -/
+/-- Collect the axioms of every declaration defined in a `DdgProofs.*`, `DDG.*` or `DdgOracle.*` module (module names, not namespaces). -/
 elab "#audit_all" : command => do
   let env ← getEnv
   let mut cnt : Nat := 0
@@ -29,7 +29,7 @@ elab "#audit_all" : command => do
   let mut all : Std.HashSet Name := {}
   for i in [0:env.header.moduleNames.size] do
     let m := env.header.moduleNames[i]!
-    if (`DdgProofs).isPrefixOf m || (`DdgOracle).isPrefixOf m then
+    if (`DdgProofs).isPrefixOf m || (`DDG).isPrefixOf m || (`DdgOracle).isPrefixOf m then
       for c in env.header.moduleData[i]!.constNames do
         cnt := cnt + 1
         let axs ← Lean.collectAxioms c

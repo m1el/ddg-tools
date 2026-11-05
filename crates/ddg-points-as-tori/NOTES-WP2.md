@@ -2,7 +2,7 @@
 
 Files: `lean/proofs/DdgProofs/PointsAsTori/*.lean`, `lean/proofs/DdgProofs/PointsAsTori.lean`,
 the import line in `lean/proofs/DdgProofs.lean`, section "Points as Tori" of `lean/proofs/CITED.md`.
-Namespace `DdgProofs.PAT`; vectors `RC.V3 = Fin 3 → ℝ`, `RC.vnorm`.
+Namespace `DDG.PAT`; vectors `RC.V3 = Fin 3 → ℝ`, `RC.vnorm`.
 Build: `cd lean/proofs && lake build DdgProofs.PointsAsTori.<M> > runs_tmp/pat-wp2/<M>.log 2>&1`.
 
 ## Findings (to report; SPEC not edited)

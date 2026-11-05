@@ -3,7 +3,7 @@ import DdgProofs.Duality
 /-!
 # The certificate when the data are inexact
 
-`DdgProofs.Duality` proves the duality-gap certificate for a pair `(u, μ)` that satisfies the
+`DDG.Duality` proves the duality-gap certificate for a pair `(u, μ)` that satisfies the
 state equation `L u = μ − Ω` **exactly** and a dual point that satisfies the adjoint equation and
 the dual constraints **exactly**. No computed triple `(u, φ, μ)` does. This file says what remains
 true for an **arbitrary** triple, in exact real arithmetic (rounding in *evaluating* the formulas
@@ -51,7 +51,7 @@ Notation: `w_i = wE_i m_i`, `r = L u − μ + Ω` (state residual, `stateResidua
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -922,4 +922,4 @@ example : ∃ (P : ConeProblem (Fin 1)) (φ u' μ' : Fin 1 → ℝ),
 
 end Examples
 
-end DdgProofs
+end DDG

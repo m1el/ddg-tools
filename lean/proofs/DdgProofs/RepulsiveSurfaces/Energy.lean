@@ -25,7 +25,7 @@ SPEC §3.1–§3.3)
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -327,4 +327,4 @@ end differential
 
 end RS
 
-end DdgProofs
+end DDG

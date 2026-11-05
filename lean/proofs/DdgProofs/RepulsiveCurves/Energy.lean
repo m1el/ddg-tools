@@ -34,7 +34,7 @@ regroups the finite sums of `energyGrad`.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RC
 
@@ -549,4 +549,4 @@ end identities
 
 end RC
 
-end DdgProofs
+end DDG

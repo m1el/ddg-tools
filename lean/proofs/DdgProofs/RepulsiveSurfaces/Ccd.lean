@@ -16,7 +16,7 @@ contact). The same holds for an obstacle triangle (corner speeds `0`).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -61,4 +61,4 @@ theorem ccd_edge_edge (p a : Fin 2 → E) (q b : Fin 2 → E) {lA lB : ℝ}
 
 end RS
 
-end DdgProofs
+end DDG

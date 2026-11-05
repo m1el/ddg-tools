@@ -17,7 +17,7 @@ distances are coordinate distances); points are pairs of coordinates.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -172,4 +172,4 @@ theorem blend2_shift {ι : Type*} [Fintype ι] (a ρ g : ι → ℝ) (lam σ : �
 
 end PAT
 
-end DdgProofs
+end DDG

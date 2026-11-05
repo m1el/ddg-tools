@@ -39,12 +39,12 @@ at `i` computed from the lengths (law of cosines).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicSimplification
 
 open Real Finset
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 
 /-! ## Plane layouts -/
 
@@ -357,4 +357,4 @@ end FlatHalfStar
 
 end IntrinsicSimplification
 
-end DdgProofs
+end DDG

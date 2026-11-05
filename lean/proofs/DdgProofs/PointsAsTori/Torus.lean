@@ -22,7 +22,7 @@ For a center `c`, a unit axis `u`, a major radius `R` and a signed minor radius 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace PAT
 
@@ -768,4 +768,4 @@ theorem torus_sdf_laplacian {c u : V3} (hu : u ⬝ᵥ u = 1) (R r : ℝ) {x : V3
 
 end PAT
 
-end DdgProofs
+end DDG

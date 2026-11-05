@@ -30,7 +30,7 @@ A triangle is given by the coordinates of its corners `p₀, p₁, p₂` in the 
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace IntrinsicApps
 
@@ -165,4 +165,4 @@ theorem midline {E : Type*} [SeminormedAddCommGroup E] [NormedSpace ℝ E] (a b 
 
 end IntrinsicApps
 
-end DdgProofs
+end DDG

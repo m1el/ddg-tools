@@ -31,7 +31,7 @@ one). An inserted vertex is flat (`Θ = 2π` inside, `π` on the boundary), so i
 
 noncomputable section
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 namespace Frames
 
@@ -144,4 +144,4 @@ theorem frame_along_boundary {x : ℝ × ℝ} {c : ℝ} (hc : 0 < c) : IsDir x (
 
 end Frames
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

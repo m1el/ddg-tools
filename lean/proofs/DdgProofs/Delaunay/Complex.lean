@@ -65,7 +65,7 @@ cone angles in `DdgProofs/Delaunay/Metric.lean`, the simplicial `TriMesh` of
 `DdgProofs/GaussBonnet.lean` as gluing data in `DdgProofs/Delaunay/FromTriMesh.lean`.
 -/
 
-namespace DdgProofs.Delaunay
+namespace DDG.Delaunay
 
 /-! ## Quotients: an equivalence from maps in both directions -/
 
@@ -530,4 +530,4 @@ example : Gluing.doubleTriangle.Closed := by
   simp only [Gluing.doubleTriangle, ne_eq, Prod.mk.injEq]
   revert f k; decide
 
-end DdgProofs.Delaunay
+end DDG.Delaunay

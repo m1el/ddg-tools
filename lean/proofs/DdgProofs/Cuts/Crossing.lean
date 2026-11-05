@@ -34,11 +34,11 @@ scalar-generic definitions (`lean/oracle/DdgOracle/Formulas/Cuts.lean`) instanti
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Crossing of an edge by the zero level set -/
@@ -498,4 +498,4 @@ theorem cutFace_det_sum_bq (t s : ℝ) :
 
 end Cuts
 
-end DdgProofs
+end DDG

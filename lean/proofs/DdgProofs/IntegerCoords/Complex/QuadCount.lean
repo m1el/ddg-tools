@@ -17,7 +17,7 @@ import DdgProofs.IntegerCoords.Complex.Quad
   `jil` and of `ijk` and `n⁻_ij` between them (and the same at `l`, `j`).
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
 
@@ -124,4 +124,4 @@ theorem Hyp.em_j (h : Hyp nA nB m) (hD : Dkl nA nB ≤ 1) :
 
 end Glue
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

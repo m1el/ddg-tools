@@ -32,11 +32,11 @@ Own definition: `MeetsAxis` (a closed segment has a point on the x-axis).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Intrinsic
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## The crossing of an edge with the axis -/
@@ -258,4 +258,4 @@ theorem exit_ahead_below {up down apex : ℝ × ℝ} (hu : 0 < up.2) (hd : down.
 
 end Intrinsic
 
-end DdgProofs
+end DDG

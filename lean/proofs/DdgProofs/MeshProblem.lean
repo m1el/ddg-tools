@@ -27,7 +27,7 @@ arrays `u, φ, μ` that are zero off the unknowns, a condition that can be teste
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 open Matrix
 
@@ -140,4 +140,4 @@ theorem coneProblem_wellFormed (hM : M.Valid) (hwE : ∀ v, p v → 0 ≤ wE v) 
 
 end TriMesh
 
-end DdgProofs
+end DDG

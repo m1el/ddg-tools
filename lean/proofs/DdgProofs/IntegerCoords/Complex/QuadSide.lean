@@ -8,7 +8,7 @@ import DdgProofs.IntegerCoords.Complex.QuadAdm2
 analyses build in parallel).
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 namespace Glue
 
@@ -40,4 +40,4 @@ macro "glue_side" : tactic =>
 
 end Glue
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

@@ -27,7 +27,7 @@ a set of inadmissible ("near") leaves `near ℓ`. Node aggregates `A_C = Σ_{T�
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -234,4 +234,4 @@ theorem box_distance (loA hiA loB hiB x y : V3) (hx : ∀ k, loA k ≤ x k ∧ x
 
 end RS
 
-end DdgProofs
+end DDG

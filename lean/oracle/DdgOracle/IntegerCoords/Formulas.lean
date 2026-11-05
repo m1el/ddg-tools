@@ -14,7 +14,7 @@ and side `k` (which starts at it); the side opposite corner `k` is side `k + 1`.
 modulo 3 (`next`, `prev`).
 
 **Never `/` on a negative integer** (SPEC I14): the numerator of Eq. 1 is never negative
-(`DdgProofs.IntegerCoords.cornerNumerator_nonneg`), and `cornerCoord?` refuses an odd one instead
+(`DDG.IntegerCoords.cornerNumerator_nonneg`), and `cornerCoord?` refuses an odd one instead
 of rounding it.
 -/
 
@@ -171,7 +171,7 @@ side counts `n` and corner coordinates `c` (`n`, `c` as the positive parts): the
 (from corner `k`) cut corner `k` and reach side `k + 2` in reverse order, the last `c_{k+1}` cut
 corner `k + 1` and reach side `k + 1` in reverse order, and the ones between come from the opposite
 corner `k + 2`. This is the pairing of Alg. 9 in both of its cases (case 2 is the one where the
-middle block is not empty); it is the only valid one (`DdgProofs.IntegerCoords.FaceModel.eq_canon`).
+middle block is not empty); it is the only valid one (`DDG.IntegerCoords.FaceModel.eq_canon`).
 [formula: ic-face-decoding] -/
 def partner (n c : Nat → Nat) (k p : Nat) : Pt :=
   if p < c k then .side (prev k) (n (prev k) - 1 - p)

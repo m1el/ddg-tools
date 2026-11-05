@@ -19,7 +19,7 @@ chord `mc`, `ic-chord-interleave`), which is `sepCount n c before 2` (`FaceSplit
   `clamp(before − c_a, 0, e_c)` (the Rust `emanating_before`).
 -/
 
-namespace DdgProofs.IntegerCoords
+namespace DDG.IntegerCoords
 
 open Ddg.IntegerCoords (cornerCoord emanating nPlus faceValid)
 
@@ -66,4 +66,4 @@ theorem emanatingBefore_eq {n c : Fin 3 → ℕ} (before : ℕ) :
     ext s; simp only [Finset.mem_filter, Finset.mem_range]; omega
   rw [this, Finset.card_range]
 
-end DdgProofs.IntegerCoords
+end DDG.IntegerCoords

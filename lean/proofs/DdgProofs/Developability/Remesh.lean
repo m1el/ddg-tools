@@ -12,7 +12,7 @@ angle exceeds `π − 2θ_s` and which is flipped across its longest edge; one s
 * `smallAngleCount_le_two`, `third_angle_of_two_small`: for any three angles with sum `π` and
   `θ_s ≤ π/3`;
 * `cornerAngleAt_eq_cornerAngle`: the corner angle `atan2(|a × b|, a·b)` of the code is the angle
-  of the law of cosines of the three edge lengths (`DdgProofs.cornerAngle`), so the three corner
+  of the law of cosines of the three edge lengths (`DDG.cornerAngle`), so the three corner
   angles of a nondegenerate face add up to `π` (`cornerAngleAt_add`);
 * `cornerAngle_lt_iff`, `cornerAngleAt_lt_iff`: the larger of two corner angles is opposite the
   longer edge;
@@ -21,11 +21,11 @@ angle exceeds `π − 2θ_s` and which is flipped across its longest edge; one s
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Ddg.Dev
 
 /-! ## Angles only -/

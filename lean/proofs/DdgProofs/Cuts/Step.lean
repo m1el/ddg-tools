@@ -47,12 +47,12 @@ import DdgProofs.Cuts.Dirichlet
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Cuts
 
 open Matrix
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Speed on the cut and the sign of the flow -/
@@ -916,4 +916,4 @@ theorem one_le_aspectRatio {a b c : ℝ} (h : IsTriangle a b c) (ha : a ≤ c) (
 
 end Cuts
 
-end DdgProofs
+end DDG

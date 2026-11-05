@@ -7,7 +7,7 @@ import DdgProofs.RepulsiveCurves.Basic
 ("the paper"); contract `crates/ddg-repulsive-surfaces/SPEC.md` ("SPEC"), §2.1, §2.2.
 
 Vectors are `V3 = Fin 3 → ℝ` with Mathlib's `dotProduct` (`⬝ᵥ`) and `crossProduct` (`⨯₃`); `vnorm`
-is the Euclidean norm (all from `DdgProofs.RC`, the curves package). A triangle mesh has vertices
+is the Euclidean norm (all from `DDG.RC`, the curves package). A triangle mesh has vertices
 `V`, faces `F` and corners `fv : F → Fin 3 → V` (`S = (i, j, k) = (fv S 0, fv S 1, fv S 2)`, the
 caller's order; nothing here needs the mesh to be manifold or oriented). Positions are
 `f : V → V3`. Per face `S`:
@@ -26,7 +26,7 @@ a_v = ⅓ Σ_{S ∋ v} a_S
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -212,4 +212,4 @@ end faces
 
 end RS
 
-end DdgProofs
+end DDG

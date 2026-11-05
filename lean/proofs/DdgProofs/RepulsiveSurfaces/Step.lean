@@ -12,7 +12,7 @@ same `c` exactly when `‖g‖ < 1`, for a descent direction).
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace RS
 
@@ -51,4 +51,4 @@ theorem armijo_reference_stricter {c τ : ℝ} (hc : 0 < c) (hτ : 0 < τ) (g x 
 
 end RS
 
-end DdgProofs
+end DDG

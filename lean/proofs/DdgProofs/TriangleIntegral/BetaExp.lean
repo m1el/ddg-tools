@@ -32,7 +32,7 @@ SPEC N43 are those of the gauge model (`app-vector-fem-connection-laplacian`, ci
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace TriangleIntegral
 
@@ -312,4 +312,4 @@ theorem norm_tail_betaExp_le (p m : ℕ) (Ω : ℝ) (K : ℕ) (hρ : |Ω| / (K +
 
 end TriangleIntegral
 
-end DdgProofs
+end DDG

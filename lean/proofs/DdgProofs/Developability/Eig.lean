@@ -27,11 +27,11 @@ the threshold that sets tiny `a_pq` to zero, convergence of the sweeps.
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Dev
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real Matrix
 
 /-! ## The rotation parameters -/
@@ -222,4 +222,4 @@ theorem jacobi2_eigen (p q b : ℝ) (hb : b ≠ 0) :
 
 end Dev
 
-end DdgProofs
+end DDG

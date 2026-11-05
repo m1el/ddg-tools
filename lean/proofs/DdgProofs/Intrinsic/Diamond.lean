@@ -20,11 +20,11 @@ All tagged theorems are about the oracle's definitions (`Ddg.diamondX`, `diamond
 
 noncomputable section
 
-namespace DdgProofs
+namespace DDG
 
 namespace Intrinsic
 
-open scoped DdgProofs.Oracle
+open scoped DDG.Oracle
 open Real
 
 /-! ## Plane helpers -/
@@ -117,7 +117,7 @@ theorem two_mul_triArea_dist2 (i j k : ℝ × ℝ) :
   ring
 
 /-- The triangle inequalities do not depend on the order of the last two sides. -/
-theorem _root_.DdgProofs.IsTriangle.swap {a b c : ℝ} (h : IsTriangle a b c) : IsTriangle a c b :=
+theorem _root_.DDG.IsTriangle.swap {a b c : ℝ} (h : IsTriangle a b c) : IsTriangle a c b :=
   ⟨by linarith [h.lt_a], by linarith [h.lt_c], by linarith [h.lt_b]⟩
 
 /-! ## The oracle's definitions at `ℝ` -/
@@ -863,4 +863,4 @@ theorem flipConvex_iff_turns {a xk hk xl hl : ℝ} (ha : 0 < a) (hhk : 0 < hk) (
 
 end Intrinsic
 
-end DdgProofs
+end DDG
