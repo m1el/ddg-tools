@@ -111,3 +111,4 @@ import DdgProofs.Core.Fields
 import DdgProofs.Laplace.Cotan
 import DdgProofs.Laplace.Kernel
 import DdgProofs.Optimization.PiecewiseAffine
+import DdgProofs.Optimization.Wolfe
