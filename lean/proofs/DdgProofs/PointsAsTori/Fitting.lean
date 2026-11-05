@@ -1,4 +1,4 @@
-import DdgProofs.PointsAsTori.Features
+import DdgProofs.PointsAsTori.Basic
 
 /-!
 # Points as Tori: torus fitting from the six coefficients (Sec. 4.1, App. C; SPEC §7.1)

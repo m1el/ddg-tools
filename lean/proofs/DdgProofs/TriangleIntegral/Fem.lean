@@ -3,6 +3,7 @@ import DdgProofs.Cotan
 import DdgProofs.Cuts.Weighted
 import DdgProofs.IntrinsicApps.HeatFem
 import DdgProofs.Geometry.PlaneLemmas
+import DdgProofs.Laplace.Cotan
 
 /-!
 # Finite element integrals over a triangle

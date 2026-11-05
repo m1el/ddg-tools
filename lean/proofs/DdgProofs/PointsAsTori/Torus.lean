@@ -1,4 +1,5 @@
 import DdgProofs.PointsAsTori.Fitting
+import DdgProofs.PointsAsTori.Features
 
 /-!
 # Points as Tori: the torus SDF (Eq. 23–24; SPEC §7.2–7.3) and the contact of the fitted torus

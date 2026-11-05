@@ -1,4 +1,5 @@
 import DdgProofs.Delaunay.Rippa
+import DdgProofs.Laplace.Cotan
 
 /-!
 # Delaunay triangulations, layer 1: potentials that decrease under a Delaunay flip

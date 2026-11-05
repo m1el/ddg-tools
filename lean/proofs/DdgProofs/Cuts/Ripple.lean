@@ -1,4 +1,5 @@
 import DdgProofs.Cuts.OnCut
+import DdgProofs.Cuts.Dirichlet
 import DdgProofs.Cuts.Analytic
 
 /-!

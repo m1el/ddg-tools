@@ -1,4 +1,5 @@
 import DdgProofs.RepulsiveCurves.Constraints
+import DdgProofs.Repulsive.Curves.DualLengths
 
 /-!
 # Repulsive Curves: the penalties (paper Sec. 8.1; SPEC §5.3, D19, D20)

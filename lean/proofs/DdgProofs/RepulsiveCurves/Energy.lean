@@ -1,5 +1,5 @@
 import DdgProofs.RepulsiveCurves.KernelGradient
-import DdgProofs.Developability.Invariance
+import DdgProofs.Geometry.RigidInvariance
 
 /-!
 # Repulsive Curves: the discrete energy and its differential (paper Eq. 17–18; SPEC §3)

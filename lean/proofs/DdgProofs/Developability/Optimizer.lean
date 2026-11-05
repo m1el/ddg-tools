@@ -1,14 +1,16 @@
 import DdgProofs.Developability.Vec
+import DdgProofs.Optimization.Wolfe
 
 /-!
-# Developability: the weak Wolfe line search and the BFGS curvature condition
+# Developability: the weak Wolfe line search
 
 `crates/ddg-developability/SPEC.md` §4.2 (L-BFGS: a pair is stored only if `sᵀy > 0`) and §4.3
 (Lewis–Overton Algorithm 2.6; A. S. Lewis, M. L. Overton, *Nonsmooth optimization via
 quasi-Newton methods*, Math. Program. A 141, 2013). The paper (Sec. 4.3) names the method.
 
-* `weakWolfe_curvature` — a step satisfying the weak Wolfe condition `C(t)` along a descent
-  direction gives `sᵀy > t (c2 − 1) gᵀd > 0` (so the BFGS update keeps `H` positive definite);
+* `weakWolfe_curvature_of_curvatureHolds` — the BFGS curvature condition `sᵀy > 0` for a step
+  that satisfies the oracle's `curvatureHolds` (the statement on real vectors,
+  `Dev.weakWolfe_curvature`, is in `DdgProofs.Optimization.Wolfe`);
 * `lineSearch_spec` — about the oracle's `Ddg.Dev.lineSearch` (the loop of Algorithm 2.6 with the
   limits of SPEC §4.3): an `accepted t` outcome satisfies `S(t)` and `C(t)`; a `capped t` outcome
   satisfies `S(t)`; a `weak t` outcome satisfies `S(t)` and `t > 0`.
@@ -27,26 +29,15 @@ open scoped DDG.Oracle
 
 /-! ## The curvature condition -/
 
-/-- **Weak Wolfe implies the curvature condition** (SPEC §4.2): for a step `t > 0` along a
-descent direction `d` (`gᵀd < 0`) with `c2 < 1`, if the weak Wolfe condition
-`C(t): c2 gᵀd < g₊ᵀd` holds (as the oracle's `curvatureHolds c2 (gᵀd) (g₊ᵀd)`), then the
-BFGS pair `s = t d`, `y = g₊ − g` has `sᵀy > t (c2 − 1) gᵀd > 0`.
-
-[formula: dev-weak-wolfe-curvature] -/
-theorem weakWolfe_curvature {n : ℕ} (g gp d : Fin n → ℝ) {t c2 : ℝ} (ht : 0 < t)
+/-- **Weak Wolfe implies the curvature condition**, with the weak Wolfe condition as the oracle's
+`curvatureHolds c2 (gᵀd) (g₊ᵀd)` (bridge to `Dev.weakWolfe_curvature`). -/
+theorem weakWolfe_curvature_of_curvatureHolds {n : ℕ} (g gp d : Fin n → ℝ) {t c2 : ℝ} (ht : 0 < t)
     (hdesc : g ⬝ᵥ d < 0) (hc2 : c2 < 1)
     (hC : Ddg.Dev.curvatureHolds c2 (g ⬝ᵥ d) (gp ⬝ᵥ d) = true) :
     t * (c2 - 1) * (g ⬝ᵥ d) < (t • d) ⬝ᵥ (gp - g) ∧ 0 < (t • d) ⬝ᵥ (gp - g) := by
   simp only [Ddg.Dev.curvatureHolds, decide_eq_true_eq] at hC
-  have e : (t • d) ⬝ᵥ (gp - g) = t * (gp ⬝ᵥ d - g ⬝ᵥ d) := by
-    rw [smul_dotProduct, dotProduct_sub, dotProduct_comm d gp, dotProduct_comm d g, smul_eq_mul]
-  rw [e]
-  have h1 : (c2 - 1) * (g ⬝ᵥ d) < gp ⬝ᵥ d - g ⬝ᵥ d := by linarith
-  have h2 : 0 < (c2 - 1) * (g ⬝ᵥ d) := mul_pos_of_neg_of_neg (by linarith) hdesc
-  constructor
-  · have := mul_lt_mul_of_pos_left h1 ht
-    linarith
-  · exact mul_pos ht (by linarith)
+  exact weakWolfe_curvature g gp d ht hdesc hc2 hC
+
 
 /-! ## The line search -/
 

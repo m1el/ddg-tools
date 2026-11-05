@@ -247,21 +247,6 @@ theorem gauss_bonnet_closed (hM : M.Valid) (hman : M.Manifold)
   rw [hclosed] at h
   simpa using h
 
-/-- **Total cone angle on a closed mesh.** If `L u = μ − Ω` on a closed valid manifold mesh
-(`L` the cotan Laplacian, `Ω` the angle defects) then `Σ_v μ_v = 2π·χ`.
-
-[formula: closed-mesh-cone-sum] -/
-theorem sum_cone_eq_two_pi_eulerChar (hM : M.Valid) (hman : M.Manifold)
-    (hclosed : M.boundaryVertices = ∅) {u μ : V → ℝ}
-    (h : M.laplacian *ᵥ u = μ - M.angleDefect) : ∑ v, μ v = 2 * π * (M.eulerChar : ℝ) := by
-  have h1 : (fun _ => (1 : ℝ)) ⬝ᵥ (M.laplacian *ᵥ u) = 0 := by
-    rw [Matrix.dotProduct_mulVec, M.laplacian_vecMul_one]
-    simp
-  rw [h] at h1
-  simp only [dotProduct, Pi.sub_apply, one_mul, Finset.sum_sub_distrib] at h1
-  rw [← M.gauss_bonnet_closed hM hman hclosed]
-  linarith
-
 end TriMesh
 
 /-! ## The hypotheses are satisfiable -/

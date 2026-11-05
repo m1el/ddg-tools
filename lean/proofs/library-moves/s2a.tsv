@@ -1,0 +1,48 @@
+# S2a: module moves for the base splits. Columns: current module <TAB> final module.
+# Declarations moved between files (old file -> new file; full names unchanged):
+#   Bff/Quality -> Bff/Quality (kept as Geometry/Plane): dot2..layout_isometric, sda_layout; toC_injective, toC_sub (from the signed-angle section)
+#   Bff/Quality -> Conformal/Distortion: layoutX/Y stay in Plane; jacS .. qcErrorEval_eq, sda_eq_jacDet_mul_area, sda_neg_iff_jacDet_neg, logScaleFactor*
+#   Bff/Quality -> Geometry/SignedAngle: signedCornerAngle*, conj_toC_mul_toC
+#   Bff/Quality -> Geometry/SegmentCrossing: strictlyOpposite*, crossingParam, crossingPoint, sda_sub_sda, properCrossing*
+#   Bff/Quality -> Geometry/SimilarityFit: centroid, simFit*, fit*, fit_similarity_*
+#   Bff/Quality -> Intrinsic/Mollification: MarginHolds, mollify*, isTriangle_of_margin, isTriangle_mollified
+#   Evaluated -> Evaluated (kept as Geometry/Stable): atan2, IsRearrangement, kahan*, sixteen_mul_triArea_sq_eq, ...
+#   Evaluated -> Core/Fields (app): TriMesh.angleDefectField, geodesicCurvatureField, gauss_bonnet_fields, laplacian_apply_of_ne, laplacian_apply_self
+#   Cotan -> Cotan (kept as Mesh/TriMesh): TriMesh, la lb lc, cotA-C, angleA-C, area, Valid, scale, angleA/B/C_scale
+#   Cotan -> Laplace/Cotan: cotEnergy, cotan_formula, faceEnergy, cotOpp, offDiag, laplacian*, Adj, Connected, mass, vertexArea, totalArea*, laplacian_scale, mass_scale
+#   GaussBonnet -> Laplace/Cotan: TriMesh.sum_cone_eq_two_pi_eulerChar
+#   Solver -> Laplace/Kernel: Solver.mulVec_eq_of_sum_eq, Solver.sum_eq_zero_of_mulVec_eq
+#   Newton -> Optimization/PiecewiseAffine: IsPiecewiseAffine, newton_stageI_exact, newton_stageII_exact
+#   Developability/Optimizer -> Optimization/Wolfe: Dev.weakWolfe_curvature (now stated with the real inequality c2*(g.d) < g+.d; the oracle form is the new app bridge Dev.weakWolfe_curvature_of_curvatureHolds, which stays in Developability/Optimizer)
+#   RepulsiveCurves/Basic -> Repulsive/Curves/DualLengths: RC.dualLen, RC.sum_dualLen, RC.dualLen_nonneg
+#   Cuts/Weighted -> Cuts/Weighted (kept as Laplace/Weighted): lapOfOffDiag*, TriMesh.weightedOffDiag*, faceMean, weightedLaplacian*, edgeRule*, edgeRuleEnergy*, triArea_4_13_15
+#   Cuts/Weighted -> Cuts/WeightedEntries (app): Cuts.triangleMean_*, Cuts.weightedOffDiag_eq, Cuts.weightedEntry*, Cuts.weighted_*, Cuts.weightedOffDiag_one
+#   Cuts/Dirichlet -> Laplace/Dirichlet: Cuts block products (mulVec_*, dotProduct_mulVec_*), IsDirichletSolution*, boundaryFlux*, existsUnique_isDirichletSolution, isUnit_det_of_posDef, existsUnique_dirichlet_data, existsUnique_harmonicExtension, harmonic_*, harmonicExtension_*, TriMesh.existsUnique_harmonicExtension, TriMesh.harmonicExtension_faceEnergy_le
+#   Cuts/Dirichlet keeps (app): yamabe_*, normalFlux*, dirichletEnergy*, gradient densities, adjoints, TriMesh.lumped, sum_lumped, yamabe_existsUnique, sum_normalFlux_lumped, dirichletEnergy_eq_sum_faceEnergy
+#   Bff/Laplace -> Laplace/Poisson: TriMesh.existsUnique_poisson, neumannData*, sum_neumannData, sum_eq_zero_of_laplacian_mulVec_eq, existsUnique_pinned, exists_laplacian_mulVec_eq_iff, sub_const_of_laplacian_mulVec_eq, existsUnique_neumann
+#   Bff/Laplace keeps (Conformal/Cherrier): gauss_bonnet_conformal, sum_exteriorAngle*, hasDerivAt_geodesicCurvature_conformalScale, hilbertTransform_cotan
+DdgProofs.Bff.Quality	DDG.Geometry.Plane
+DdgProofs.Conformal.Distortion	DDG.Conformal.Distortion
+DdgProofs.Geometry.SignedAngle	DDG.Geometry.SignedAngle
+DdgProofs.Geometry.SegmentCrossing	DDG.Geometry.SegmentCrossing
+DdgProofs.Geometry.SimilarityFit	DDG.Geometry.SimilarityFit
+DdgProofs.Intrinsic.Mollification	DDG.Intrinsic.Mollification
+DdgProofs.Evaluated	DDG.Geometry.Stable
+DdgProofs.Core.Fields	DdgProofs.Core.Fields
+DdgProofs.Cotan	DDG.Mesh.TriMesh
+DdgProofs.Laplace.Cotan	DDG.Laplace.Cotan
+DdgProofs.Laplace.Kernel	DDG.Laplace.Kernel
+DdgProofs.Optimization.PiecewiseAffine	DDG.Optimization.PiecewiseAffine
+DdgProofs.Newton	DDG.OptimalCones.Newton
+DdgProofs.Solver	DdgProofs.OptimalCones.Solver
+DdgProofs.Optimization.Wolfe	DDG.Optimization.Wolfe
+DdgProofs.Developability.Optimizer	DdgProofs.Developability.Optimizer
+DdgProofs.Geometry.RigidInvariance	DDG.Geometry.RigidInvariance
+DdgProofs.RepulsiveCurves.Basic	DDG.Geometry.Vec3
+DdgProofs.Repulsive.Curves.DualLengths	DDG.Repulsive.Curves.DualLengths
+DdgProofs.Cuts.Weighted	DDG.Laplace.Weighted
+DdgProofs.Cuts.WeightedEntries	DdgProofs.Cuts.WeightedEntries
+DdgProofs.Laplace.Dirichlet	DDG.Laplace.Dirichlet
+DdgProofs.Cuts.Dirichlet	DdgProofs.Cuts.Dirichlet
+DdgProofs.Laplace.Poisson	DDG.Laplace.Poisson
+DdgProofs.Bff.Laplace	DDG.Conformal.Cherrier

@@ -1,5 +1,6 @@
 import DdgOracle.Formulas
-import DdgProofs.Newton
+import DdgProofs.Optimization.PiecewiseAffine
+import DdgProofs.SoftThreshold
 import DdgProofs.Triangle
 
 /-!
