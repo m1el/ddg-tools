@@ -1,4 +1,5 @@
 import DdgProofs.Cuts.Step
+import DdgProofs.Cuts.Dirichlet
 
 /-!
 # Cut flow: closed-form solutions

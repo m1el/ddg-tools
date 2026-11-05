@@ -1,4 +1,5 @@
-import DdgProofs.Cuts.Dirichlet
+import DdgProofs.Laplace.Dirichlet
+import DdgProofs.Oracle.Scalar
 import DdgProofs.Cuts.Weighted
 
 /-!

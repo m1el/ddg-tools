@@ -113,3 +113,5 @@ import DdgProofs.Laplace.Kernel
 import DdgProofs.Optimization.PiecewiseAffine
 import DdgProofs.Optimization.Wolfe
 import DdgProofs.Repulsive.Curves.DualLengths
+import DdgProofs.Cuts.WeightedEntries
+import DdgProofs.Laplace.Dirichlet
