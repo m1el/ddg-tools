@@ -450,3 +450,115 @@ fn bad_input_is_an_error() {
     let side = 2.0 * (std::f64::consts::PI / 8.0).sin();
     assert!(d > 0.5 * side && d < 1.5 * side, "{d}");
 }
+
+/// A rotation of `R³` from a seed (unit quaternion; deterministic).
+fn rotation(rng: &mut Rng) -> [[f64; 3]; 3] {
+    let q = [rng.sym(1.0), rng.sym(1.0), rng.sym(1.0), rng.sym(1.0)];
+    let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    let [w, x, y, z] = [q[0] / n, q[1] / n, q[2] / n, q[3] / n];
+    [
+        [
+            1. - 2. * (y * y + z * z),
+            2. * (x * y - z * w),
+            2. * (x * z + y * w),
+        ],
+        [
+            2. * (x * y + z * w),
+            1. - 2. * (x * x + z * z),
+            2. * (y * z - x * w),
+        ],
+        [
+            2. * (x * z - y * w),
+            2. * (y * z + x * w),
+            1. - 2. * (x * x + y * y),
+        ],
+    ]
+}
+
+fn rot(r: &[[f64; 3]; 3], v: P) -> P {
+    [
+        r[0][0] * v[0] + r[0][1] * v[1] + r[0][2] * v[2],
+        r[1][0] * v[0] + r[1][1] * v[1] + r[1][2] * v[2],
+        r[2][0] * v[0] + r[2][1] * v[1] + r[2][2] * v[2],
+    ]
+}
+
+/// Survey finding 1 (`lean/proofs/FORMALIZATION-SURVEY.md`): two nearly parallel segments whose
+/// lines cross at an interior point of both, at height `h`, so the distance is exactly `h`. The
+/// former code skipped the interior pair for `denom ≤ 1e-14·a·e` (`θ ≲ 1e-7`) and evaluated the
+/// closed form `s = (bf − ce)/denom` badly above it; it overestimated by up to `≈ 3e-6·L`
+/// (measured against 80-digit arithmetic), the unsafe direction for the CCD.
+#[test]
+fn near_parallel_crossing_segments_have_the_exact_distance() {
+    let mut rng = Rng(7);
+    for &theta in &[
+        1e-12, 1e-10, 1e-9, 1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2,
+    ] {
+        for &h in &[0.0, 1e-12, 1e-9, 1e-6] {
+            for k in 0..8 {
+                let r = if k == 0 {
+                    [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+                } else {
+                    rotation(&mut rng)
+                };
+                let off = rng.vec(1.0);
+                let (s0, t0) = (0.2 + 0.6 * rng.next(), 0.2 + 0.6 * rng.next());
+                let (c, s) = (f64::cos(theta), f64::sin(theta));
+                let m = |v: P| {
+                    let x = rot(&r, v);
+                    [x[0] + off[0], x[1] + off[1], x[2] + off[2]]
+                };
+                let p1 = m([-2.0 * s0, 0., 0.]);
+                let q1 = m([2.0 * (1.0 - s0), 0., 0.]);
+                let p2 = m([-3.0 * t0 * c, -3.0 * t0 * s, h]);
+                let q2 = m([3.0 * (1.0 - t0) * c, 3.0 * (1.0 - t0) * s, h]);
+                for d in [
+                    segment_segment_distance(p1, q1, p2, q2),
+                    segment_segment_distance(q1, p1, p2, q2),
+                    segment_segment_distance(p2, q2, p1, q1),
+                ] {
+                    // The inputs are rounded to f64 after the rotation: allow a few ulps of the
+                    // coordinates.
+                    assert!(
+                        (d - h).abs() <= 2e-14,
+                        "theta {theta:e}, h {h:e}, rotation {k}: {d:e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The end-to-end consequence of finding 1: a nearly parallel segment moving through another
+/// one. The true distance reaches `0` at `τ = ½`; the CCD must report a contact no later.
+/// (With the former distance the pair was measured at `≈ θ` instead of `h₀`, the advance jumped
+/// over the crossing and no contact was reported.)
+#[test]
+fn near_parallel_segment_passing_through_is_caught() {
+    let mut rng = Rng(11);
+    let z = [0.0; 3];
+    for &theta in &[1e-9, 1e-8, 1e-7, 1e-6, 1e-5] {
+        for &h0 in &[1e-10, 1e-9, 1e-7] {
+            for k in 0..6 {
+                let r = if k == 0 {
+                    [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+                } else {
+                    rotation(&mut rng)
+                };
+                let (c, s) = (f64::cos(theta), f64::sin(theta));
+                let p = [rot(&r, [-1., 0., 0.]), rot(&r, [1., 0., 0.])];
+                let q = [rot(&r, [-c, -s, h0]), rot(&r, [c, s, h0])];
+                // Down with speed 2 h0: the crossing is at τ = ½.
+                let v = rot(&r, [0., 0., -2.0 * h0]);
+                let d0 = segment_segment_distance(p[0], p[1], q[0], q[1]);
+                assert!(
+                    (d0 - h0).abs() <= 1e-15,
+                    "theta {theta:e}, h0 {h0:e}: d0 {d0:e}"
+                );
+                let (t, _) = segment_segment_advance(p, [z, z], q, [v, v], d0, 0.0, 1.0, &OPT);
+                let t = t.unwrap_or_else(|| panic!("theta {theta:e}, h0 {h0:e}: no contact"));
+                assert!(t <= 0.5, "theta {theta:e}, h0 {h0:e}: contact at {t}");
+            }
+        }
+    }
+}

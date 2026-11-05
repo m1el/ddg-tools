@@ -247,10 +247,19 @@ pub fn point_segment_distance(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 /// Distance between the segments `p1 q1` and `p2 q2`: the minimum over the four
-/// endpoint–segment distances and, when the lines are not parallel and the closest points of
-/// the lines are inside both segments, the interior closest pair. Every candidate is the
-/// distance of an actual pair of points, and the true minimum is one of them, so ill-conditioned
-/// (nearly parallel) cases err by second-order amounts only.
+/// endpoint–segment distances and the pair `(s, t)` found from the closest points of the lines:
+/// `s` clamped to `[0, 1]`, then `t` the clamped minimizer for that `s`, then `s` the clamped
+/// minimizer for that `t` (Ericson's re-projection). Every candidate is the distance of an actual
+/// pair of points. When the lines are not parallel and their closest points lie on both
+/// segments, the pair is that interior pair, so in exact arithmetic the result is the distance
+/// (`DdgProofs.RC.segSegCode_eq_segSegDist`, `lean/proofs/DdgProofs/RepulsiveCurves/ClosestPoints.lean`).
+///
+/// The line parameter is `s = ((p₂ − p₁) × d₂)·n / |n|²` with `n = d₁ × d₂`, which equals the
+/// closed form `(bf − ce)/(ae − b²)` (Lagrange's identity) but is well conditioned for nearly
+/// parallel lines. The former code skipped the interior pair for `ae − b² ≤ 1e-14·ae` and used
+/// the closed form above it; for nearly parallel crossing segments it overestimated the
+/// distance (in exact arithmetic `d̃² ≤ d² + ¼·1e-14·min(a, e)`, tight; in f64 up to `≈ 3e-6·L`
+/// for angles near `1e-6`), the unsafe direction for the conservative advancement.
 ///
 /// [formula: rc-closest-points]
 pub fn segment_segment_distance(p1: [f64; 3], q1: [f64; 3], p2: [f64; 3], q2: [f64; 3]) -> f64 {
@@ -260,21 +269,22 @@ pub fn segment_segment_distance(p1: [f64; 3], q1: [f64; 3], p2: [f64; 3], q2: [f
         .min(point_segment_distance(q2, p1, q1));
     let d1 = sub(q1, p1);
     let d2 = sub(q2, p2);
-    let r = sub(p1, p2);
     let a = dot(d1, d1);
     let e = dot(d2, d2);
-    let b = dot(d1, d2);
-    let c = dot(d1, r);
-    let f = dot(d2, r);
-    let denom = a * e - b * b;
-    if a > 0.0 && e > 0.0 && denom > 1e-14 * a * e {
-        let s = (b * f - c * e) / denom;
-        let t = (a * f - b * c) / denom;
-        if (0.0..=1.0).contains(&s) && (0.0..=1.0).contains(&t) {
-            let c1 = add(p1, scale(d1, s));
-            let c2 = add(p2, scale(d2, t));
-            best = best.min(norm(sub(c1, c2)));
-        }
+    let n = cross(d1, d2);
+    let nn = dot(n, n);
+    if a > 0.0 && e > 0.0 && nn > 0.0 {
+        let r = sub(p1, p2);
+        let b = dot(d1, d2);
+        let c = dot(d1, r);
+        let f = dot(d2, r);
+        // `clamp` returns NaN for NaN (overflowing inputs); `min` below then ignores the pair.
+        let s = (dot(cross(sub(p2, p1), d2), n) / nn).clamp(0.0, 1.0);
+        let t = ((b * s + f) / e).clamp(0.0, 1.0);
+        let s = ((b * t - c) / a).clamp(0.0, 1.0);
+        let c1 = add(p1, scale(d1, s));
+        let c2 = add(p2, scale(d2, t));
+        best = best.min(norm(sub(c1, c2)));
     }
     best
 }
