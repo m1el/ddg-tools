@@ -47,7 +47,7 @@ given by the realization.
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord emanating nPlus nMinus identifyIndex)
+open DDG.IntegerCoords.Formulas (cornerCoord emanating nPlus nMinus identifyIndex)
 
 namespace Cx
 
@@ -161,7 +161,7 @@ lemma emanating_nPlus (a b c : ℤ) : emanating a b c = emanating (nPlus a) (nPl
 lemma cornerCoord_nPlus (a b c : ℤ) :
     cornerCoord a b c = cornerCoord (nPlus a) (nPlus b) (nPlus c) := by
   have h : ∀ x : ℤ, nPlus (nPlus x) = nPlus x := fun x => by simp only [nPlus]; omega
-  simp only [cornerCoord, Ddg.IntegerCoords.cornerNumerator, emanating, h]
+  simp only [cornerCoord, DDG.IntegerCoords.Formulas.cornerNumerator, emanating, h]
 
 lemma np_cast (s : F × Fin 3) : ((C.np s : ℕ) : ℤ) = nPlus (C.n s) := by
   simp only [np, nPlus]; omega

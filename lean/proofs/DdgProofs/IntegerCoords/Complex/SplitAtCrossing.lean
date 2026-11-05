@@ -37,7 +37,7 @@ set_option linter.unusedSimpArgs false
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord faceValid nPlus)
+open DDG.IntegerCoords.Formulas (cornerCoord faceValid nPlus)
 
 namespace SplitAtCrossing
 

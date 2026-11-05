@@ -8,7 +8,7 @@ changing them.
 
 | file | content | ids |
 |---|---|---|
-| `Formulas.lean` | arithmetic of the oracle's integer formulas (`Ddg.IntegerCoords.*`): signs, Eq. 1–2 on a face given by its arcs (`FaceParams`, `coord_eval`), validity, crossings, Eq. 3 term by term (`flipDoubled_eval`), Eq. 6 | `ic-normal-sign`, `ic-emanating`, `ic-corner-coordinates`, `ic-face-validity`, `ic-reverse-crossing`, `ic-split-edge-normal`, `ic-flip-normal` (identity) |
+| `Formulas.lean` | arithmetic of the oracle's integer formulas (`DDG.IntegerCoords.Formulas.*`): signs, Eq. 1–2 on a face given by its arcs (`FaceParams`, `coord_eval`), validity, crossings, Eq. 3 term by term (`flipDoubled_eval`), Eq. 6 | `ic-normal-sign`, `ic-emanating`, `ic-corner-coordinates`, `ic-face-validity`, `ic-reverse-crossing`, `ic-split-edge-normal`, `ic-flip-normal` (identity) |
 | `FaceModel.lean` | the face model, its validity, the structure theorem, counts, decoding, the oracle's pairing, Alg. 1 | `ic-face-decoding`, `ic-corner-coordinates`, `ic-emanating`, `ic-cevians-cross` (combinatorial), `ic-trace-step` |
 | `FaceSplit.lean` | gaps, separation, the arc families, the oracle's face split (I15) | `ic-face-split-normal` |
 | `Flip.lean` | the quadrilateral model `Quad`, Eq. 3 as a count, Eq. 3 applied twice | `ic-flip-normal`, `ic-flip-involution` |
@@ -82,7 +82,7 @@ minute each); the whole IntegerCoords tree builds in about 2.5 minutes from scra
    `twin : F × Fin 3 → F × Fin 3` (an involution without fixed points on interior sides; boundary
    sides unglued), a face model `M f` per face, and the matching conditions
    `(M f).n k = (M f').n k'` for `twin (f, k) = (f', k')`. Crossing `p` of `(f, k)` **is** crossing
-   `n − 1 − p` of `(f', k')` (`ic-reverse-crossing`: `Ddg.IntegerCoords.reverseCrossing`). Vertices are
+   `n − 1 − p` of `(f', k')` (`ic-reverse-crossing`: `DDG.IntegerCoords.Formulas.reverseCrossing`). Vertices are
    classes of corners under the gluing; keep the Rust halfedge numbering (`h = 3f + k`) so that the
    oracle's `tracecurve` task and the Rust data structure can be compared literally.
 2. **Curves.** A curve step from crossing `(f, k, p)`: pass to the twin `(f', k', n − 1 − p)`, take

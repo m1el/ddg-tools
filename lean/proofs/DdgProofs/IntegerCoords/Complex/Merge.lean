@@ -39,7 +39,7 @@ spoke next to `m` from the half `m X0` or the corner `X0` to the half `m X2` or 
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (faceValid nPlus nMinus)
+open DDG.IntegerCoords.Formulas (faceValid nPlus nMinus)
 
 namespace Merge
 

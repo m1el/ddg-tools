@@ -34,7 +34,7 @@ Validity (`FaceModel.Valid`) is purely combinatorial:
 Results.
 
 * **The structure theorem** (`FaceModel.Valid.eq_canon`): every valid model is the canonical one
-  (`canon n c`, the oracle's `Ddg.IntegerCoords.partner`) for corner counts `c` that are admissible
+  (`canon n c`, the oracle's `DDG.IntegerCoords.Formulas.partner`) for corner counts `c` that are admissible
   (`Admissible`): on side `k` the first `c k` crossings cut corner `k` and reach side `k + 2` in
   reverse order, the last `c (k+1)` cut corner `k + 1` and reach side `k + 1` in reverse order, the
   ones between come from corner `k + 2`; at most one corner has arcs to its opposite side, and then
@@ -57,7 +57,7 @@ namespace DDG
 
 namespace IntegerCoords
 
-open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus)
+open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus)
 
 /-! ## Boundary points and interleaving -/
 
@@ -558,7 +558,7 @@ end DDG.IntegerCoords
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus faceValid)
+open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
 
 /-! ## Counting arcs by type: Eq. 1 and 2 -/
 
@@ -773,16 +773,16 @@ end FaceModel
 /-! ## The oracle's decoding and pairing (Alg. 9) -/
 
 /-- A boundary point as the oracle writes it. -/
-def Pt.toOracle : Pt → Ddg.IntegerCoords.Pt
+def Pt.toOracle : Pt → DDG.IntegerCoords.Formulas.Pt
   | .corner k => .corner k.val
   | .side k p => .side k.val p
 
 /-- The oracle's `decode?` of a valid face returns `n⁺` and Eq. 1 per side and corner. -/
 lemma decode?_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = true) :
-    ∃ d, Ddg.IntegerCoords.decode? n0 n1 n2 = some d ∧
-      d.n = (fun k => (nPlus (Ddg.IntegerCoords.side n0 n1 n2 k)).toNat) ∧
-      d.c = (fun k => (Ddg.IntegerCoords.faceCorner n0 n1 n2 k).toNat) := by
-  unfold Ddg.IntegerCoords.decode?
+    ∃ d, DDG.IntegerCoords.Formulas.decode? n0 n1 n2 = some d ∧
+      d.n = (fun k => (nPlus (DDG.IntegerCoords.Formulas.side n0 n1 n2 k)).toNat) ∧
+      d.c = (fun k => (DDG.IntegerCoords.Formulas.faceCorner n0 n1 n2 k).toNat) := by
+  unfold DDG.IntegerCoords.Formulas.decode?
   simp only [h, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
   split <;> exact ⟨_, rfl, rfl, rfl⟩
 
@@ -790,9 +790,9 @@ lemma decode?_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = true) :
 model, the oracle decodes the side counts and its `partner` returns the other end of every arc.
 [formula: ic-face-decoding] -/
 theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
-    ∃ d, Ddg.IntegerCoords.decode? (M.n 0) (M.n 1) (M.n 2) = some d ∧
+    ∃ d, DDG.IntegerCoords.Formulas.decode? (M.n 0) (M.n 1) (M.n 2) = some d ∧
       ∀ (k : Fin 3) (p : ℕ), p < M.n k →
-        Ddg.IntegerCoords.partner d.n d.c k.val p = (M.partner k p).toOracle := by
+        DDG.IntegerCoords.Formulas.partner d.n d.c k.val p = (M.partner k p).toOracle := by
   have hv := (exists_valid_iff M.n).1 ⟨M, rfl, hM⟩
   obtain ⟨d, hd, hdn, hdc⟩ := decode?_of_faceValid hv
   refine ⟨d, hd, fun k p hp => ?_⟩
@@ -804,23 +804,23 @@ theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
   have hc2 := hc.c_eq 2
   simp only [l1, l2, l3, l4, l5, l6] at hc0 hc1 hc2
   have dn0 : d.n 0 = M.n 0 := by
-    rw [hdn]; simp [Ddg.IntegerCoords.side, np]
+    rw [hdn]; simp [DDG.IntegerCoords.Formulas.side, np]
   have dn1 : d.n 1 = M.n 1 := by
-    rw [hdn]; simp [Ddg.IntegerCoords.side, np]
+    rw [hdn]; simp [DDG.IntegerCoords.Formulas.side, np]
   have dn2 : d.n 2 = M.n 2 := by
-    rw [hdn]; simp [Ddg.IntegerCoords.side, np]
+    rw [hdn]; simp [DDG.IntegerCoords.Formulas.side, np]
   have dc0 : d.c 0 = c 0 := by
-    rw [hdc]; simp [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.side, Ddg.IntegerCoords.next,
-      Ddg.IntegerCoords.prev]; omega
+    rw [hdc]; simp [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.side, DDG.IntegerCoords.Formulas.next,
+      DDG.IntegerCoords.Formulas.prev]; omega
   have dc1 : d.c 1 = c 1 := by
-    rw [hdc]; simp [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.side, Ddg.IntegerCoords.next,
-      Ddg.IntegerCoords.prev]; omega
+    rw [hdc]; simp [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.side, DDG.IntegerCoords.Formulas.next,
+      DDG.IntegerCoords.Formulas.prev]; omega
   have dc2 : d.c 2 = c 2 := by
-    rw [hdc]; simp [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.side, Ddg.IntegerCoords.next,
-      Ddg.IntegerCoords.prev]; omega
+    rw [hdc]; simp [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.side, DDG.IntegerCoords.Formulas.next,
+      DDG.IntegerCoords.Formulas.prev]; omega
   rw [e k p hp]
   rcases fin3_cases k with rfl | rfl | rfl <;>
-    simp only [Ddg.IntegerCoords.partner, canon, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev,
+    simp only [DDG.IntegerCoords.Formulas.partner, canon, DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev,
       l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two, dn0, dn1, dn2,
       dc0, dc1, dc2] <;> norm_num <;> split_ifs <;> rfl
 
@@ -829,7 +829,7 @@ theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
 /-- Where Alg. 1's step sends the curve, as a boundary point of the face it enters through side
 `s`: `ik→` is side `s + 1` (counted from `i`, corner `s + 1`), `kj→` is side `s + 2` (counted from
 `k`, corner `s + 2`), and the vertex `k` is corner `s + 2`. -/
-def stepPt (s : Fin 3) : Ddg.IntegerCoords.Step → Pt
+def stepPt (s : Fin 3) : DDG.IntegerCoords.Formulas.Step → Pt
   | .toIK p => .side (s + 1) p.toNat
   | .toKJ p => .side (s + 2) p.toNat
   | .vertex => .corner (s + 2)
@@ -846,7 +846,7 @@ through that crossing: crossing `p` of `ik→` (Fig. 7 case 3), crossing `n_kj +
 (case 1), or the vertex `k` (case 2). [formula: ic-trace-step] -/
 theorem FaceModel.Valid.traceStep_eq {M : FaceModel} (hM : M.Valid) (s : Fin 3) (p : ℕ)
     (hp : p < M.n s) :
-    stepPt s (Ddg.IntegerCoords.traceStep (M.n s) (M.n (s + 1)) (M.n (s + 2)) p) =
+    stepPt s (DDG.IntegerCoords.Formulas.traceStep (M.n s) (M.n (s + 1)) (M.n (s + 2)) p) =
       M.partner s (M.n s - 1 - p) := by
   obtain ⟨c, hc, e⟩ := hM.eq_canon
   have hci : cornerCoord (M.n (s + 2)) (M.n s) (M.n (s + 1)) = c (s + 1) := by
@@ -861,7 +861,7 @@ theorem FaceModel.Valid.traceStep_eq {M : FaceModel} (hM : M.Valid) (s : Fin 3) 
   rw [fin3_add_one_add_one] at a1
   rw [fin3_add_two_add_one] at a2
   rw [e s _ (by omega)]
-  unfold Ddg.IntegerCoords.traceStep canon
+  unfold DDG.IntegerCoords.Formulas.traceStep canon
   rw [hci, hcj, np, np]
   split_ifs <;> simp only [stepPt] <;> first | omega | rfl | (congr 1; omega)
 

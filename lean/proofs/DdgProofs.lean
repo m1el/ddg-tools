@@ -17,6 +17,7 @@ import DdgProofs.Oracle.Problem
 import DdgProofs.Oracle.Regularized
 import DdgProofs.Oracle.Unbounded
 import DdgProofs.Oracle.Mesh
+import DdgProofs.Oracle.NormalCoords
 import DdgProofs.Bff.Laplace
 import DdgProofs.Bff.Cut
 import DdgProofs.Bff.Curve

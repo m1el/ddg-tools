@@ -35,7 +35,7 @@ namespace DDG
 
 namespace IntegerCoords
 
-open Ddg.IntegerCoords
+open DDG.IntegerCoords.Formulas
 
 /-- The arcs of a quadrilateral `i, l, j, k` by kind. -/
 structure Quad where

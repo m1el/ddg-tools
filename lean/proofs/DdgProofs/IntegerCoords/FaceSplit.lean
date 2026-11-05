@@ -45,7 +45,7 @@ namespace DDG
 
 namespace IntegerCoords
 
-open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus faceValid)
+open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
 
 /-! ## Gaps, separation, the arc families -/
 
@@ -163,7 +163,7 @@ lemma em_lits (n c : Fin 3 → ℕ) :
 
 /-- The emanation cases of an admissible face with the oracle's decoding, as equalities (no
 implications left for `omega` to split). -/
-lemma Admissible.split_cases {n c : Fin 3 → ℕ} (hc : Admissible n c) {d : Ddg.IntegerCoords.Decoded}
+lemma Admissible.split_cases {n c : Fin 3 → ℕ} (hc : Admissible n c) {d : DDG.IntegerCoords.Formulas.Decoded}
     (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
         (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
@@ -272,13 +272,13 @@ theorem sepCount_eq {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : 
   · exact Finset.sum_congr rfl (fun k _ => card_cornerArc hc k j hg)
   · exact Finset.sum_congr rfl (fun κ _ => card_fanArc hc κ j hg)
 
-/-- **The region of a gap**, in the oracle's labels (`Ddg.IntegerCoords.Region`): on side `k` at
+/-- **The region of a gap**, in the oracle's labels (`DDG.IntegerCoords.Formulas.Region`): on side `k` at
 slot `q` (between crossings `q − 1` and `q`), the corner region `(k, q)` if `q < c_k`, the corner
 region `(k + 1, n_k − q)` if `q > n_k − c_{k+1}`, else a middle region: the fan region `q − c_k` if
 side `k` receives the fan (`κ = k + 2`), the last fan region `e` if the fan's corner is `k + 1`, the
 first (`0`) if it is `k`, and the central region `0` if nothing emanates.
 [formula: ic-face-split-normal] -/
-def gapRegion (n c : Fin 3 → ℕ) (g : ℕ) : Ddg.IntegerCoords.Region :=
+def gapRegion (n c : Fin 3 → ℕ) (g : ℕ) : DDG.IntegerCoords.Formulas.Region :=
   let k := gapSide n g
   let q := g - cornerRank n k
   if q < c k then .corner k.val q
@@ -289,32 +289,32 @@ def gapRegion (n c : Fin 3 → ℕ) (g : ℕ) : Ddg.IntegerCoords.Region :=
 /-! ## The oracle's decoded face -/
 
 lemma oracle_side (n : Fin 3 → ℕ) :
-    Ddg.IntegerCoords.side (n 0) (n 1) (n 2) 0 = n 0 ∧ Ddg.IntegerCoords.side (n 0) (n 1) (n 2) 1 = n 1 ∧
-      Ddg.IntegerCoords.side (n 0) (n 1) (n 2) 2 = n 2 := by
-  simp [Ddg.IntegerCoords.side]
+    DDG.IntegerCoords.Formulas.side (n 0) (n 1) (n 2) 0 = n 0 ∧ DDG.IntegerCoords.Formulas.side (n 0) (n 1) (n 2) 1 = n 1 ∧
+      DDG.IntegerCoords.Formulas.side (n 0) (n 1) (n 2) 2 = n 2 := by
+  simp [DDG.IntegerCoords.Formulas.side]
 
 /-- The oracle's per-corner Eq. 1 and 2 on an admissible face are `c` and `em`. -/
 lemma oracle_corner {n c : Fin 3 → ℕ} (hc : Admissible n c) :
-    (Ddg.IntegerCoords.faceCorner (n 0) (n 1) (n 2) 0 = c 0 ∧
-      Ddg.IntegerCoords.faceCorner (n 0) (n 1) (n 2) 1 = c 1 ∧
-      Ddg.IntegerCoords.faceCorner (n 0) (n 1) (n 2) 2 = c 2) ∧
-    (Ddg.IntegerCoords.faceEmanating (n 0) (n 1) (n 2) 0 = em n c 0 ∧
-      Ddg.IntegerCoords.faceEmanating (n 0) (n 1) (n 2) 1 = em n c 1 ∧
-      Ddg.IntegerCoords.faceEmanating (n 0) (n 1) (n 2) 2 = em n c 2) := by
+    (DDG.IntegerCoords.Formulas.faceCorner (n 0) (n 1) (n 2) 0 = c 0 ∧
+      DDG.IntegerCoords.Formulas.faceCorner (n 0) (n 1) (n 2) 1 = c 1 ∧
+      DDG.IntegerCoords.Formulas.faceCorner (n 0) (n 1) (n 2) 2 = c 2) ∧
+    (DDG.IntegerCoords.Formulas.faceEmanating (n 0) (n 1) (n 2) 0 = em n c 0 ∧
+      DDG.IntegerCoords.Formulas.faceEmanating (n 0) (n 1) (n 2) 1 = em n c 1 ∧
+      DDG.IntegerCoords.Formulas.faceEmanating (n 0) (n 1) (n 2) 2 = em n c 2) := by
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   have h0 := hc.coords 0
   have h1 := hc.coords 1
   have h2 := hc.coords 2
   simp only [l1, l2, l3, l4, l5, l6] at h0 h1 h2
-  simp only [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.faceEmanating, Ddg.IntegerCoords.side,
-    Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev]
+  simp only [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.faceEmanating, DDG.IntegerCoords.Formulas.side,
+    DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev]
   norm_num
   exact ⟨⟨h0.1, h1.1, h2.1⟩, ⟨h0.2, h1.2, h2.2⟩⟩
 
 /-- **The oracle's decoding of an admissible face**: `n⁺`, `c` per corner, and the emanating corner
 with its count (`κ = 0`, `e = 0` if none). -/
 lemma oracle_decode {n c : Fin 3 → ℕ} (hc : Admissible n c) :
-    ∃ d, Ddg.IntegerCoords.decode? (n 0) (n 1) (n 2) = some d ∧
+    ∃ d, DDG.IntegerCoords.Formulas.decode? (n 0) (n 1) (n 2) = some d ∧
       d.n 0 = n 0 ∧ d.n 1 = n 1 ∧ d.n 2 = n 2 ∧ d.c 0 = c 0 ∧ d.c 1 = c 1 ∧ d.c 2 = c 2 ∧
       ((em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
@@ -324,7 +324,7 @@ lemma oracle_decode {n c : Fin 3 → ℕ} (hc : Admissible n c) :
   obtain ⟨⟨k0, k1, k2⟩, ⟨f0, f1, f2⟩⟩ := oracle_corner hc
   obtain ⟨s0, s1, s2⟩ := oracle_side n
   have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
-  unfold Ddg.IntegerCoords.decode?
+  unfold DDG.IntegerCoords.Formulas.decode?
   simp only [hv, Bool.not_true, Bool.false_eq_true, ↓reduceIte, List.map_cons, List.map_nil,
     List.find?_cons, f0, f1, f2, Int.toNat_natCast]
   by_cases e0 : 0 < em n c 0
@@ -390,13 +390,13 @@ lemma values_side2 {n c : Fin 3 → ℕ} {g : ℕ} (h : gapSide n g = 2) :
 
 set_option maxHeartbeats 2000000 in
 lemma splitCount_gapRegion_side0 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n)
-    {d : Ddg.IntegerCoords.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
+    {d : DDG.IntegerCoords.Formulas.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
     (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
         (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
         (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2)) (j : Fin 3)
     (hs : gapSide n g = 0) (hgs : g ≤ n 0) :
-    Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
+    DDG.IntegerCoords.Formulas.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rw [sepCount_eq hc hg]
   obtain ⟨a0, a1, a2, -⟩ := hc.lits
@@ -414,20 +414,20 @@ lemma splitCount_gapRegion_side0 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g 
   simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.reduceEq, reduceIte, Fin.val_zero,
     Fin.val_one, Fin.val_two] <;>
   split_ifs <;>
-  simp only [Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.Region.valid,
-    Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
+  simp only [DDG.IntegerCoords.Formulas.splitCount, DDG.IntegerCoords.Formulas.Region.valid,
+    DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
     Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] <;>
   (try split_ifs) <;> first | omega | contradiction
 
 set_option maxHeartbeats 2000000 in
 lemma splitCount_gapRegion_side1 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n)
-    {d : Ddg.IntegerCoords.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
+    {d : DDG.IntegerCoords.Formulas.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
     (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
         (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
         (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2)) (j : Fin 3)
     (hs : gapSide n g = 1) (hgs : n 0 + 1 ≤ g ∧ g ≤ n 0 + n 1 + 1) :
-    Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
+    DDG.IntegerCoords.Formulas.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rw [sepCount_eq hc hg]
   obtain ⟨a0, a1, a2, -⟩ := hc.lits
@@ -445,20 +445,20 @@ lemma splitCount_gapRegion_side1 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g 
   simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.reduceEq, reduceIte, Fin.val_zero,
     Fin.val_one, Fin.val_two] <;>
   split_ifs <;>
-  simp only [Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.Region.valid,
-    Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
+  simp only [DDG.IntegerCoords.Formulas.splitCount, DDG.IntegerCoords.Formulas.Region.valid,
+    DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
     Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] <;>
   (try split_ifs) <;> first | omega | contradiction
 
 set_option maxHeartbeats 2000000 in
 lemma splitCount_gapRegion_side2 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n)
-    {d : Ddg.IntegerCoords.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
+    {d : DDG.IntegerCoords.Formulas.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
     (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
         (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
         (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2)) (j : Fin 3)
     (hs : gapSide n g = 2) (hgs : n 0 + n 1 + 2 ≤ g) :
-    Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
+    DDG.IntegerCoords.Formulas.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rw [sepCount_eq hc hg]
   obtain ⟨a0, a1, a2, -⟩ := hc.lits
@@ -476,20 +476,20 @@ lemma splitCount_gapRegion_side2 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g 
   simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.reduceEq, reduceIte, Fin.val_zero,
     Fin.val_one, Fin.val_two] <;>
   split_ifs <;>
-  simp only [Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.Region.valid,
-    Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
+  simp only [DDG.IntegerCoords.Formulas.splitCount, DDG.IntegerCoords.Formulas.Region.valid,
+    DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
     Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] <;>
   (try split_ifs) <;> first | omega | contradiction
 
 /-- The oracle's counts for the region of a gap are the separation counts, and the region is one of
 the face's. -/
 theorem splitCount_gapRegion {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n)
-    {d : Ddg.IntegerCoords.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
+    {d : DDG.IntegerCoords.Formulas.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
     (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
         (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
         (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2)) (j : Fin 3) :
-    Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
+    DDG.IntegerCoords.Formulas.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rcases gapSide_cases n g with ⟨hs, hgs⟩ | ⟨hs, hgs⟩ | ⟨hs, hgs⟩
   · exact splitCount_gapRegion_side0 hc hg dc0 dc1 dc2 hk j hs hgs
@@ -503,14 +503,14 @@ that separate `g` from the corners `0, 1, 2` — the normal coordinates of the e
 inserted in that region to the corners, joined by arcs disjoint from the others (straight segments).
 [formula: ic-face-split-normal] -/
 theorem faceSplit?_gapRegion {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n) :
-    Ddg.IntegerCoords.faceSplit? (n 0) (n 1) (n 2) (gapRegion n c g) =
+    DDG.IntegerCoords.Formulas.faceSplit? (n 0) (n 1) (n 2) (gapRegion n c g) =
       some (sepCount n c g 0, sepCount n c g 1, sepCount n c g 2) := by
   obtain ⟨d, hd, -, -, -, dc0, dc1, dc2, hk⟩ := oracle_decode hc
   have h0 := splitCount_gapRegion hc hg dc0 dc1 dc2 hk 0
   have h1 := splitCount_gapRegion hc hg dc0 dc1 dc2 hk 1
   have h2 := splitCount_gapRegion hc hg dc0 dc1 dc2 hk 2
   simp only [Fin.val_zero, Fin.val_one, Fin.val_two] at h0 h1 h2
-  unfold Ddg.IntegerCoords.faceSplit?
+  unfold DDG.IntegerCoords.Formulas.faceSplit?
   rw [hd]
   simp only [h0.2, ↓reduceIte, h0.1, h1.1, h2.1]
 
@@ -519,14 +519,14 @@ set_option maxHeartbeats 4000000 in
 of a valid face, the new face `(k, k + 1, m)` with the sides `n_k` (old), `n_{m,k+1}`, `n_{mk}`
 (the oracle's `splitCount`) is valid in the sense of Eq. 1 (`faceValid`). [formula: ic-face-split-normal] -/
 theorem splitCount_faceValid {n c : Fin 3 → ℕ} (hc : Admissible n c)
-    {d : Ddg.IntegerCoords.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
+    {d : DDG.IntegerCoords.Formulas.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
     (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
         (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
         (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
         (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2))
-    (R : Ddg.IntegerCoords.Region) (hR : R.valid d = true) (k : Fin 3) :
-    faceValid (n k) (Ddg.IntegerCoords.splitCount d R (k + 1).val)
-      (Ddg.IntegerCoords.splitCount d R k.val) = true := by
+    (R : DDG.IntegerCoords.Formulas.Region) (hR : R.valid d = true) (k : Fin 3) :
+    faceValid (n k) (DDG.IntegerCoords.Formulas.splitCount d R (k + 1).val)
+      (DDG.IntegerCoords.Formulas.splitCount d R k.val) = true := by
   rw [faceValid_iff]
   have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
   simp only [emanating, np]
@@ -535,22 +535,22 @@ theorem splitCount_faceValid {n c : Fin 3 → ℕ} (hc : Admissible n c)
   have hk := hc.split_cases hk
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   rcases R with ⟨k0, t⟩ | s
-  · simp only [Ddg.IntegerCoords.Region.valid, Bool.and_eq_true, decide_eq_true_eq] at hR
+  · simp only [DDG.IntegerCoords.Formulas.Region.valid, Bool.and_eq_true, decide_eq_true_eq] at hR
     obtain ⟨hk0, ht⟩ := hR
     interval_cases k0 <;>
     rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
       ⟨e0, z0, z1, z2, hκ, he⟩ <;>
     rcases fin3_cases k with rfl | rfl | rfl <;>
     simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two,
-      Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he,
+      DDG.IntegerCoords.Formulas.splitCount, DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev, hκ, he,
       dc0, dc1, dc2, beq_iff_eq, Bool.and_eq_true, Bool.or_eq_true] at ht ⊢ <;>
     (try split_ifs) <;> (try contradiction) <;> omega
-  · simp only [Ddg.IntegerCoords.Region.valid, decide_eq_true_eq] at hR
+  · simp only [DDG.IntegerCoords.Formulas.Region.valid, decide_eq_true_eq] at hR
     rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
       ⟨e0, z0, z1, z2, hκ, he⟩ <;>
     rcases fin3_cases k with rfl | rfl | rfl <;>
     simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two,
-      Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he,
+      DDG.IntegerCoords.Formulas.splitCount, DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev, hκ, he,
       dc0, dc1, dc2, beq_iff_eq, Bool.and_eq_true, Bool.or_eq_true] at hR ⊢ <;>
     (try split_ifs) <;> (try contradiction) <;> omega
 

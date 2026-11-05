@@ -38,15 +38,15 @@ set_option linter.unusedSectionVars false
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord emanating faceValid nPlus nMinus flipNormal roundaboutUpdate)
+open DDG.IntegerCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal roundaboutUpdate)
 
 /-! ## Rotating a face -/
 
 lemma faceValid_rot (a b c : ℤ) : faceValid a b c = faceValid b c a := by
   simp only [faceValid]
-  generalize (Ddg.IntegerCoords.cornerNumerator b a c % 2 == 0) = x
-  generalize (Ddg.IntegerCoords.cornerNumerator c b a % 2 == 0) = y
-  generalize (Ddg.IntegerCoords.cornerNumerator a c b % 2 == 0) = z
+  generalize (DDG.IntegerCoords.Formulas.cornerNumerator b a c % 2 == 0) = x
+  generalize (DDG.IntegerCoords.Formulas.cornerNumerator c b a % 2 == 0) = y
+  generalize (DDG.IntegerCoords.Formulas.cornerNumerator a c b % 2 == 0) = z
   cases x <;> cases y <;> cases z <;> rfl
 
 lemma cc_rot (n : Fin 3 → ℕ) (r k : Fin 3) : cc (fun k => n (k + r)) k = cc n (k + r) := by

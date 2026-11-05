@@ -34,7 +34,7 @@ The two new faces and the merge back are in `SplitAtCrossingFaces.lean`.
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus faceValid)
+open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
 
 /-- Decidability of interleaving (named, to stay out of the way of other instances). -/
 instance decInterleaveSAC (a b x y : ℕ) : Decidable (Interleave a b x y) := by

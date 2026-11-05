@@ -21,7 +21,7 @@ chord `mc`, `ic-chord-interleave`), which is `sepCount n c before 2` (`FaceSplit
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord emanating nPlus faceValid)
+open DDG.IntegerCoords.Formulas (cornerCoord emanating nPlus faceValid)
 
 /-- **`ic-split-crossed-edge`: the new edge to the opposite corner of a split side.** For a valid
 face (admissible corner counts `c`) and a split point after `before ≤ n_0` crossings of side `0`,

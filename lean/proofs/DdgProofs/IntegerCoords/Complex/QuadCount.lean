@@ -19,7 +19,7 @@ import DdgProofs.IntegerCoords.Complex.Quad
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
+open DDG.IntegerCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
 
 namespace Glue
 

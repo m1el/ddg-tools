@@ -47,7 +47,7 @@ and the definitions of `D_kl` (`min`/`max`) are cleared or made linear before `o
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
+open DDG.IntegerCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
 
 namespace Glue
 

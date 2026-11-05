@@ -5,7 +5,7 @@ two case analyses build in parallel. -/
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (faceValid)
+open DDG.IntegerCoords.Formulas (faceValid)
 
 namespace Glue
 

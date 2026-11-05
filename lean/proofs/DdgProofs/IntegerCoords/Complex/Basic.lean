@@ -46,7 +46,7 @@ them (`ic-trace-terminates`). Disjointness of arcs is inherited from the face mo
 
 namespace DDG.IntegerCoords
 
-open Ddg.IntegerCoords (cornerCoord cornerNumerator emanating faceValid nPlus nMinus traceStep)
+open DDG.IntegerCoords.Formulas (cornerCoord cornerNumerator emanating faceValid nPlus nMinus traceStep)
 
 /-! ## The face model of side counts -/
 

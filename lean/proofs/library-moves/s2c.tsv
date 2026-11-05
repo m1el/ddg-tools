@@ -1,0 +1,5 @@
+# S2c: current module	final module
+# Created/app-bound in S2c.
+# DdgProofs.Oracle.NormalCoords: bridges (rfl) from Ddg.IntegerCoords.* to DDG.IntegerCoords.Formulas.* (names *_eq), conversion maps Step/Pt/Region/Decoded.toOracle, traceStep_eq, partner_eq, decode?_eq, regions_eq, Region.valid_eq, splitCount_eq, faceSplit?_eq.
+# The native defs live in DdgProofs.IntegerCoords.Formulas under namespace DDG.IntegerCoords.Formulas (S4 target NormalCoords/Formulas); the oracle-name copy is not renamed except Ddg.IntegerCoords -> DDG.IntegerCoords.Formulas.
+DdgProofs.Oracle.NormalCoords	DdgProofs.Oracle.NormalCoords
