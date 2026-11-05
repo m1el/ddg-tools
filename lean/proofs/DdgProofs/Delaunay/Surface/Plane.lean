@@ -102,6 +102,20 @@ def inv (g : Rigid) : Rigid :=
   · simp only [rigid_fst, rigid_snd, inv]; linear_combination (p.1 - g.t.1) * h
   · simp only [rigid_fst, rigid_snd, inv]; linear_combination (p.2 - g.t.2) * h
 
+theorem comp_id (g : Rigid) : g.comp id = g := by
+  ext
+  · simp [comp, id]
+  · simp [comp, id]
+  · simp [comp, id, rigid_fst]
+  · simp [comp, id, rigid_snd]
+
+theorem id_comp (g : Rigid) : id.comp g = g := by
+  ext
+  · simp [comp, id]
+  · simp [comp, id]
+  · simp [comp, id, rigid_fst]
+  · simp [comp, id, rigid_snd]
+
 theorem injective (g : Rigid) : Function.Injective (g : Pt → Pt) :=
   Function.LeftInverse.injective (inv_apply_apply g)
 
@@ -171,6 +185,12 @@ theorem ext_of_two {g g' : Rigid} {A B : Pt} (hAB : A ≠ B) (hA : g A = g' A) (
   · exact hs'
   · rw [hc', hs'] at a1; linarith
   · rw [hc', hs'] at a2; linarith
+
+theorem inv_comp (g : Rigid) : g.inv.comp g = id :=
+  ext_of_two (A := (0, 0)) (B := (1, 0)) (by simp) (by simp) (by simp)
+
+theorem comp_inv (g : Rigid) : g.comp g.inv = id :=
+  ext_of_two (A := (0, 0)) (B := (1, 0)) (by simp) (by simp) (by simp)
 
 end Rigid
 
@@ -463,6 +483,22 @@ theorem ne_corner_of_mem_side (hT : T.Pos) {k : Fin 3} {x : Pt} (hx : x ∈ T.si
     simp only [bary, Fin.isValue, Fin.reduceAdd, Fin.zero_eta, Fin.mk_one, Fin.reduceFinMk]
       at h0 h1 h2 <;>
     simp only [sda] at h0 h1 h2 hT' <;> ring_nf at h0 h1 h2 hT' <;> linarith
+
+/-- A point lies on at most one open side. -/
+theorem side_eq_of_mem (hT : T.Pos) {k k' : Fin 3} {x : Pt} (hk : x ∈ T.side k)
+    (hk' : x ∈ T.side k') : k = k' := by
+  by_contra hne
+  have h1 := (mem_side_iff hT).1 hk
+  have h2 := (mem_side_iff hT).1 hk'
+  -- two numerators vanish: `x` is the third corner
+  rcases (by omega : k' = k + 1 ∨ k' = k + 2) with rfl | rfl
+  · rw [show k + 1 + 2 = k by omega] at h2
+    exact ne_corner_of_mem_side hT hk (k + 1)
+      (eq_corner_of_bary hT (k := k + 1) (by rw [show k + 1 + 1 = k + 2 by omega]; exact h1.1)
+        (by rw [show k + 1 + 2 = k by omega]; exact h2.1))
+  · rw [show k + 2 + 2 = k + 1 by omega] at h2
+    exact ne_corner_of_mem_side hT hk k
+      (eq_corner_of_bary hT (k := k) h2.1 h1.1)
 
 /-- A corner is not interior. -/
 theorem corner_not_mem_int (hT : T.Pos) (k : Fin 3) : T k ∉ T.int := by
