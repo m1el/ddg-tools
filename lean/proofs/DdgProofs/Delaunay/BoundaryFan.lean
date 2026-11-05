@@ -264,7 +264,8 @@ theorem boundaryCount_eq_zero_iff (v : G.Vertex) :
 (`boundaryCount_le_one`).
 
 [formula: complex-boundary-fan] -/
-theorem IsMetric.gauss_bonnet_boundary [DecidablePred G.IsBoundaryVertex] {ℓ : Halfedge F → ℝ} (hm : G.IsMetric ℓ) :
+theorem IsMetric.gauss_bonnet_boundary [DecidablePred G.IsBoundaryVertex] {ℓ : Halfedge F → ℝ}
+    (hm : G.IsMetric ℓ) :
     (∑ v ∈ Finset.univ.filter (fun v => ¬ G.IsBoundaryVertex v), (2 * π - G.coneAngle ℓ v)) +
       ∑ v ∈ Finset.univ.filter (fun v => G.IsBoundaryVertex v), (π - G.coneAngle ℓ v) =
       2 * π * G.eulerChar := by

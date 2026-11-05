@@ -268,7 +268,8 @@ theorem liftBelow_flip {S : Finset (ℝ × ℝ)} {T : Finset (Finset (ℝ × ℝ
   by_cases hm : ({a, b, c} : Finset (ℝ × ℝ)) ∈ flip T i j k l
   · exact ⟨a, b, c, hm, hx, le_rfl⟩
   have hD := hT.sda_ne_zero habc
-  have hold : ({a, b, c} : Finset (ℝ × ℝ)) = {i, j, k} ∨ ({a, b, c} : Finset (ℝ × ℝ)) = {i, j, l} := by
+  have hold : ({a, b, c} : Finset (ℝ × ℝ)) = {i, j, k} ∨
+      ({a, b, c} : Finset (ℝ × ℝ)) = {i, j, l} := by
     by_contra hno
     push Not at hno
     exact hm (mem_flip.2 (Or.inr (Or.inr ⟨hno.2, hno.1, habc⟩)))
