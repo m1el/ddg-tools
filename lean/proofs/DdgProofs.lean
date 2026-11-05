@@ -112,3 +112,4 @@ import DdgProofs.Laplace.Cotan
 import DdgProofs.Laplace.Kernel
 import DdgProofs.Optimization.PiecewiseAffine
 import DdgProofs.Optimization.Wolfe
+import DdgProofs.Repulsive.Curves.DualLengths

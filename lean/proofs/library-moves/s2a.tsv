@@ -14,6 +14,7 @@
 #   Solver -> Laplace/Kernel: Solver.mulVec_eq_of_sum_eq, Solver.sum_eq_zero_of_mulVec_eq
 #   Newton -> Optimization/PiecewiseAffine: IsPiecewiseAffine, newton_stageI_exact, newton_stageII_exact
 #   Developability/Optimizer -> Optimization/Wolfe: Dev.weakWolfe_curvature (now stated with the real inequality c2*(g.d) < g+.d; the oracle form is the new app bridge Dev.weakWolfe_curvature_of_curvatureHolds, which stays in Developability/Optimizer)
+#   RepulsiveCurves/Basic -> Repulsive/Curves/DualLengths: RC.dualLen, RC.sum_dualLen, RC.dualLen_nonneg
 DdgProofs.Bff.Quality	DDG.Geometry.Plane
 DdgProofs.Conformal.Distortion	DDG.Conformal.Distortion
 DdgProofs.Geometry.SignedAngle	DDG.Geometry.SignedAngle
@@ -31,3 +32,5 @@ DdgProofs.Solver	DdgProofs.OptimalCones.Solver
 DdgProofs.Optimization.Wolfe	DDG.Optimization.Wolfe
 DdgProofs.Developability.Optimizer	DdgProofs.Developability.Optimizer
 DdgProofs.Geometry.RigidInvariance	DDG.Geometry.RigidInvariance
+DdgProofs.RepulsiveCurves.Basic	DDG.Geometry.Vec3
+DdgProofs.Repulsive.Curves.DualLengths	DDG.Repulsive.Curves.DualLengths
