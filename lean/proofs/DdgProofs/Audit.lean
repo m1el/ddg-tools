@@ -1007,6 +1007,20 @@ open DdgProofs
 #print axioms Delaunay.Planar.exists_delaunay_of_triangulation
 #print axioms Delaunay.Planar.isDelaunay_triangle
 #print axioms Delaunay.Planar.isLocallyDelaunay_dist2_iff
+-- Delaunay layer 4: finiteness of bounded-length triangulations, unconditional termination
+-- (DdgProofs/Delaunay/Surface/*.lean)
+#print axioms Delaunay.Surface.Overlay.exists_word_le
+#print axioms Delaunay.Surface.Overlay.flip
+#print axioms Delaunay.MetricGluing.boundedLengthFinite
+#print axioms Delaunay.MetricGluing.reach_finite
+#print axioms Delaunay.MetricGluing.acc
+#print axioms Delaunay.MetricGluing.exists_delaunay
+#print axioms Delaunay.MetricGluing.flip_algorithm'
+#print axioms Delaunay.MetricGluing.loop_acc'
+#print axioms Delaunay.Surface.Word.finite_length_le
+#print axioms Delaunay.MetricGluing.wellFounded_delaunayFlip
+#print axioms Delaunay.MetricGluing.not_exists_infinite_flips'
+#print axioms Delaunay.MetricGluing.flips_length_le'
 #print axioms Intrinsic.sum_normalized_interior
 #print axioms Intrinsic.sum_normalized_boundary
 #print axioms Intrinsic.angleScale_flat
