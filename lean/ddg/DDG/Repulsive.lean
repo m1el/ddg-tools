@@ -21,21 +21,34 @@ import DDG.Repulsive.Surfaces.Precond
 import DDG.Repulsive.Surfaces.Saddle
 
 /-!
-# Repulsive Curves (Yu, Schumacher, Crane, ACM TOG 40(2), 2021)
+# DDG.Repulsive: tangent-point energies of curves and surfaces
 
-Machine-checked derivations of the formulas of `crates/ddg-repulsive-curves` (contract
-`crates/ddg-repulsive-curves/SPEC.md`, formula ids `rc-…`, §12). The smooth theory and the
-convergence and error bounds are cited in `lean/proofs/CITED.md`, section "Repulsive Curves".
-All theorems are in `namespace DDG.RC`.
--/
+**Scope.** Machine-checked derivations of the formulas of Repulsive Curves and Repulsive Surfaces:
+the discrete tangent-point energies and their exact differentials along any motion, the fractional
+Sobolev inner products, saddle-point systems, constraints and penalties, Barnes–Hut and the
+multigrid hierarchy. Curves are in namespace `DDG.RC`, surfaces in `DDG.RS`; vectors and the
+curve-motion calculus are `DDG.Geometry.Vec3`. The smooth theory (Blatt's lemma, the order of the
+operators), the error bounds of Barnes–Hut and of the block cluster tree and all convergence
+statements are cited, not proved (`lean/proofs/CITED.md`).
 
-/-!
-# Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 40(6), 2021)
+**Main results.**
+* `Curves/Kernel`, `KernelGradient`, `Energy`: the kernel `k^α_β` (paper Eq. 3), the discrete
+  energy (Eq. 17–18) and its differential (`hasDerivAt_pairEnergy`, `energyGrad`), invariances.
+* `Curves/Gram`: assembly and positive semidefiniteness of the Sobolev–Slobodeckij Gram matrices
+  (`gramB_posSemidef`). `Saddle`: saddle systems, the projector and the scaling of the direction.
+* `Curves/Constraints`, `Penalties`, `DualLengths`; `Hierarchy`, `BarnesHutAdjoint`,
+  `Multigrid` (the black/white coarsening rule `no_adjacent_whites`, prolongation).
+* `Surfaces/*`: the same for surfaces: kernel, energy and its gradient
+  (`energy_gradient_identities`), the operators of the inner product (`Metric`), the fractional
+  preconditioner order (`precond_order`), saddle systems and the Schur complement, constraints,
+  penalties, the Barnes–Hut energy (`bh_energy_split`).
 
-Machine-checked derivations of the formulas of `crates/ddg-repulsive-surfaces` (contract
-`crates/ddg-repulsive-surfaces/SPEC.md`, formula ids `rs-…`, §12). The smooth theory, the
-approximation properties and the convergence of the optimizers are cited in
-`lean/proofs/CITED.md`, section "Repulsive Surfaces". All theorems are in
-`namespace DDG.RS`; vectors, norms and the curve-motion calculus come from the curves
-package (`DDG.RC`).
+**Sources.** C. Yu, H. Schumacher, K. Crane, *Repulsive Curves*, ACM TOG 40(2), 2021;
+C. Yu, K. Brakensiek, H. Schumacher, K. Crane, *Repulsive Surfaces*, ACM TOG 40(6), Article 268,
+2021. The Rust crates were developed with the authors' MIT-licensed implementations
+(`repulsive-curves`, `repulsive-surfaces`) as reference (see the crate READMEs); the Lean statements
+are written from the papers' text and the contracts in `crates/ddg-repulsive-curves/SPEC.md` and
+`crates/ddg-repulsive-surfaces/SPEC.md`.
+
+**Depends on:** `DDG.Geometry` (vectors, closest points and conservative advancement live there).
 -/

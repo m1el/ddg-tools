@@ -29,8 +29,30 @@ import DDG.NormalCoords.SplitAtCrossing
 import DDG.NormalCoords.SplitEdge
 
 /-!
-# Integer Coordinates for Intrinsic Geometry Processing (Gillespie, Sharp, Crane 2021)
+# DDG.NormalCoords: normal (integer) coordinates for intrinsic triangulations
 
-Tiers A, B, B′ and C (`Complex/`, the complex model; `Frames/`, the input-aligned frames) of `crates/ddg-integer-coords/SPEC.md` §9.2. The face model and how tier C extends
-it: `DDG/NormalCoords/DESIGN.md`. Cited results: `CITED.md`, section "Integer Coordinates".
+**Scope.** The combinatorial and arithmetic core of integer-coordinate intrinsic triangulations:
+a triangulation is stored as, per edge, the number of crossings with the input mesh, with no
+floating-point geometry. Statements are over `ℤ` and `ℕ`. The face model and how the complex model
+extends it are in `DDG/NormalCoords/DESIGN.md`.
+
+**Main results (tiers A, B, B′, C).**
+* `Formulas`: the integer formulas, defined natively (corner coordinates, emanating counts, face
+  validity, Eq. 1–4, 6, trace step).
+* `FaceModel`, `Chords`, `FaceSplit`, `SplitEdge`, `SplitAtCrossing`, `Recover`: the face model
+  (`FaceModel.Valid`, structure theorem `Valid.eq_canon`), chords of a convex polygon cross iff
+  their ends interleave, splitting a face or a crossed edge, positions of an inserted vertex.
+* `Flip`: the quadrilateral model and Eq. 3 (`flip_count`, `flipNormal_flipNormal`).
+* `Complex/*`: the complex model `Cx` (faces glued along sides), the flip of a complex
+  (`Complex.Flip.flip_valid`), tracing terminates (`Valid.trace_terminates`), labels and
+  roundabouts (Alg. 3, 4), merging the two halves of a split edge, extraction of an input edge.
+* `Frames/*`: input-aligned frames at input and inserted vertices.
+
+**Sources.** M. Gillespie, N. Sharp, K. Crane, *Integer Coordinates for Intrinsic Geometry
+Processing*, ACM TOG 40(6), 2021, Sec. 2.3–3.7, Eq. 1–6, App. A, D and its supplement, written
+from the paper's text; N. Sharp, Y. Soliman, K. Crane, *Navigating Intrinsic Triangulations*,
+ACM TOG 2019. Where a reference implementation was consulted for choices the paper leaves open,
+it was the authors' MIT-licensed geometry-central (see `crates/ddg-integer-coords/README.md`).
+
+**Depends on:** `DDG.Intrinsic` (and, through it, `DDG.Geometry`).
 -/
