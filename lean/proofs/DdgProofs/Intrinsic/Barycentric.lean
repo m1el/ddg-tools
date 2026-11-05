@@ -1,5 +1,5 @@
 import DdgProofs.Intrinsic.Diamond
-import DdgProofs.Cuts.Crossing
+import DdgProofs.Geometry.Barycentric
 
 /-!
 # Intrinsic triangulations: barycentric coordinates, distances to the corners, the circumcentre
@@ -10,24 +10,24 @@ Sec. 3.3.2, Sec. 4.2, Alg. 6, 7, 8.
 A triangle with the sides `ℓ₀₁, ℓ₁₂, ℓ₂₀` is laid out as `v₀ = (0, 0)`, `v₁ = (ℓ₀₁, 0)`,
 `v₂ = apexK ℓ₀₁ ℓ₂₀ ℓ₁₂` (`DdgProofs/Intrinsic/Diamond.lean`).
 
-* **`it-barycentric-coordinates`** — the oracle's `barycentric` of a plane triangle of nonzero
+* **`it-barycentric-coordinates`** — `barycentric` of a plane triangle of nonzero
   area: the three ratios of signed areas sum to one, reproduce the point, and are the only
   numbers that do (`barycentric_sum`, `barycentric_reproduces`, `barycentric_unique`); the form
   of the Rust code (normalized by the sum of the three areas) is the same
   (`barycentric_eq_normalized`). `pointFromDistances` returns the point from its distances to
   the three corners (`pointFromDistances_eq_self`).
-* **`it-point-distances`** — the oracle's `cornerDistances` are the plane distances of the
+* **`it-point-distances`** — `cornerDistances` are the plane distances of the
   point `b₁ v₁ + b₂ v₂` to the corners (`cornerDistances_eq`), and for `b₀ + b₁ + b₂ = 1` they
-  are the oracle's `baryLength` of the three sides and the coordinate differences: the formula
+  are `baryLength` of the three sides and the coordinate differences: the formula
   of the paper's Alg. 6, by the theorem of `cut-barycentric-length`
   (`cornerDistances_eq_baryLength`). On a side (`b₂ = 0`) the distances to its two ends are
-  `ℓ₀₁ b₁` and `ℓ₀₁ b₀`, the oracle's `edgeSplitLengths`, and they sum to `ℓ₀₁`
+  `ℓ₀₁ b₁` and `ℓ₀₁ b₀`, `edgeSplitLengths`, and they sum to `ℓ₀₁`
   (`edgeSplitLengths_eq_cornerDistances`, `edgeSplitLengths_sum`); for the vertex at
   `(1 − t)·tail + t·head` they are `t ℓ` and `(1 − t) ℓ` (`edgeSplitLengths_param`, SPEC N17).
   With `b_i` the weight of `i`, the distance from `i` is `ℓ_ij b_j`: the paper's Alg. 8 prints
   `ℓ_ip ← ℓ_ij b_i`, which contradicts its Alg. 6 (`alg6_distance_on_edge`,
   `alg8_as_printed_differs`).
-* **`it-circumcenter`** — the oracle's `circumcenterBary`: the weights sum to `16 A²`, the
+* **`it-circumcenter`** — `circumcenterBary`: the weights sum to `16 A²`, the
   coordinates to one (`circumWeight_sum`, `circumcenterBary_sum`); the point has the distance
   `a₀a₁a₂/(4A)` to all three corners (`circumcenter_equidistant`); the coordinate of a corner
   is negative exactly when the angle there is obtuse, zero exactly when it is right, and at
@@ -35,7 +35,9 @@ A triangle with the sides `ℓ₀₁, ℓ₁₂, ℓ₂₀` is laid out as `v₀
   `circumcenterBary_pos_of_neg`); the circumradius is `a₀/(2 sin θ₀)` and exceeds `a₀` when
   `θ₀ < 30°` (`circumradius_eq_div_sin`, `circumradius_gt_of_angle_lt`).
 
-Own definition: `layoutPoint` (the point `b₁ v₁ + b₂ v₂` of the layout).
+Definitions: the closed forms of the Rust code on `ℝ` (`signedArea2`, `barycentric`,
+`pointFromDistances`, `planeDistance`, `cornerDistances`, `edgeSplitLengths`, `circumWeight`,
+`circumcenterBary`) and `layoutPoint` (the point `b₁ v₁ + b₂ v₂` of the layout).
 -/
 
 noncomputable section
@@ -44,20 +46,68 @@ namespace DDG
 
 namespace Intrinsic
 
-open scoped DDG.Oracle
 open Real
+
+/-! ## The formulas -/
+
+/-- Twice the signed area of the triangle `a b c`. -/
+def signedArea2 (ax ay bx bY cx cy : ℝ) : ℝ := (bx - ax) * (cy - ay) - (cx - ax) * (bY - ay)
+
+/-- Barycentric coordinates of `p` in the triangle `a b c` of a layout: ratios of signed
+areas. -/
+def barycentric (ax ay bx bY cx cy px py : ℝ) : ℝ × ℝ × ℝ :=
+  (signedArea2 px py bx bY cx cy / signedArea2 ax ay bx bY cx cy,
+    signedArea2 ax ay px py cx cy / signedArea2 ax ay bx bY cx cy,
+    signedArea2 ax ay bx bY px py / signedArea2 ax ay bx bY cx cy)
+
+/-- Position of a point from its distances `r_a, r_b, r_c` to the three corners of the triangle
+laid out with `a = (0,0)`, `b = (ℓ_ab, 0)` and `c` above: `x = (ℓ_ab² + r_a² − r_b²)/2ℓ_ab`,
+`y = (c_x² + c_y² + r_a² − r_c² − 2 c_x x)/(2 c_y)`. -/
+def pointFromDistances (lab lbc lca ra rb rc : ℝ) : ℝ × ℝ :=
+  ((lab * lab + ra * ra - rb * rb) / (2 * lab),
+    (diamondX lab lca lbc * diamondX lab lca lbc + diamondH lab lca lbc * diamondH lab lca lbc +
+        ra * ra - rc * rc -
+        2 * diamondX lab lca lbc * ((lab * lab + ra * ra - rb * rb) / (2 * lab))) /
+      (2 * diamondH lab lca lbc))
+
+/-- Euclidean distance of two points of a layout. -/
+def planeDistance (px py qx qy : ℝ) : ℝ := √((px - qx) * (px - qx) + (py - qy) * (py - qy))
+
+/-- Distances `d_k = |Σ_j b_j v_j − v_k|` of the point with barycentric coordinates
+`(b_0, b_1, b_2)` to the corners of the triangle `(ℓ_01, ℓ_12, ℓ_20)` laid out with
+`v_0 = (0,0)`, `v_1 = (ℓ_01, 0)`, `v_2` above. -/
+def cornerDistances (l01 l12 l20 _b0 b1 b2 : ℝ) : ℝ × ℝ × ℝ :=
+  (planeDistance (b1 * l01 + b2 * diamondX l01 l20 l12) (b2 * diamondH l01 l20 l12) 0 0,
+    planeDistance (b1 * l01 + b2 * diamondX l01 l20 l12) (b2 * diamondH l01 l20 l12) l01 0,
+    planeDistance (b1 * l01 + b2 * diamondX l01 l20 l12) (b2 * diamondH l01 l20 l12)
+      (diamondX l01 l20 l12) (diamondH l01 l20 l12))
+
+/-- Lengths of the two halves of an edge `ij` split at the point with barycentric coordinates
+`(b_i, b_j)`: `ℓ_ip = ℓ_ij b_j`, `ℓ_jp = ℓ_ij b_i`. -/
+def edgeSplitLengths (lij bi bj : ℝ) : ℝ × ℝ := (lij * bj, lij * bi)
+
+/-- Unnormalized barycentric weight of the circumcenter at the corner opposite the side `a_k`,
+the other sides being `a_{k+1}, a_{k+2}`: `a_k² (a_{k+1}² + a_{k+2}² − a_k²)`. -/
+def circumWeight (ak ak1 ak2 : ℝ) : ℝ := ak * ak * (ak1 * ak1 + ak2 * ak2 - ak * ak)
+
+/-- Barycentric coordinates of the circumcenter of the triangle whose sides opposite the corners
+`0, 1, 2` are `a_0, a_1, a_2`. -/
+def circumcenterBary (a0 a1 a2 : ℝ) : ℝ × ℝ × ℝ :=
+  (circumWeight a0 a1 a2 / (circumWeight a0 a1 a2 + circumWeight a1 a2 a0 + circumWeight a2 a0 a1),
+    circumWeight a1 a2 a0 / (circumWeight a0 a1 a2 + circumWeight a1 a2 a0 + circumWeight a2 a0 a1),
+    circumWeight a2 a0 a1 / (circumWeight a0 a1 a2 + circumWeight a1 a2 a0 + circumWeight a2 a0 a1))
 
 /-! ## Barycentric coordinates in a plane triangle -/
 
 theorem signedArea2_eq_sda (a b c : ℝ × ℝ) :
-    Ddg.signedArea2 a.1 a.2 b.1 b.2 c.1 c.2 = sda a b c := by
-  unfold Ddg.signedArea2 sda
+    signedArea2 a.1 a.2 b.1 b.2 c.1 c.2 = sda a b c := by
+  unfold signedArea2 sda
   ring
 
 theorem barycentric_eq (a b c p : ℝ × ℝ) :
-    Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2 =
+    barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2 =
       (sda p b c / sda a b c, sda a p c / sda a b c, sda a b p / sda a b c) := by
-  simp only [Ddg.barycentric, signedArea2_eq_sda]
+  simp only [barycentric, signedArea2_eq_sda]
 
 /-- The three triangles that a point makes with the sides add up to the whole (signed). -/
 theorem sda_split (a b c p : ℝ × ℝ) : sda p b c + sda a p c + sda a b p = sda a b c := by
@@ -68,9 +118,9 @@ theorem sda_split (a b c p : ℝ × ℝ) : sda p b c + sda a p c + sda a b p = s
 
 [formula: it-barycentric-coordinates] -/
 theorem barycentric_sum {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) (p : ℝ × ℝ) :
-    (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).1 +
-        (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.1 +
-        (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.2 = 1 := by
+    (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).1 +
+        (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.1 +
+        (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.2 = 1 := by
   rw [barycentric_eq]
   dsimp only
   rw [← add_div, ← add_div, sda_split, div_self h]
@@ -79,12 +129,12 @@ theorem barycentric_sum {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) (p : ℝ × �
 
 [formula: it-barycentric-coordinates] -/
 theorem barycentric_reproduces {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) (p : ℝ × ℝ) :
-    ((Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).1 * a.1 +
-        (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.1 * b.1 +
-        (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.2 * c.1,
-      (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).1 * a.2 +
-        (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.1 * b.2 +
-        (Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.2 * c.2) = p := by
+    ((barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).1 * a.1 +
+        (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.1 * b.1 +
+        (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.2 * c.1,
+      (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).1 * a.2 +
+        (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.1 * b.2 +
+        (barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2).2.2 * c.2) = p := by
   have k1 : sda p b c * a.1 + sda a p c * b.1 + sda a b p * c.1 = p.1 * sda a b c := by
     unfold sda
     ring
@@ -101,11 +151,11 @@ theorem barycentric_reproduces {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) (p : �
       mul_div_assoc, div_self h, mul_one]
 
 /-- **They are the only such numbers**: if `u + v + w = 1` and `u a + v b + w c = p` then
-`(u, v, w)` are the oracle's coordinates. -/
+`(u, v, w)` are the coordinates `barycentric`. -/
 theorem barycentric_unique {a b c p : ℝ × ℝ} (h : sda a b c ≠ 0) {u v w : ℝ}
     (hs : u + v + w = 1) (hx : u * a.1 + v * b.1 + w * c.1 = p.1)
     (hy : u * a.2 + v * b.2 + w * c.2 = p.2) :
-    Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2 = (u, v, w) := by
+    barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2 = (u, v, w) := by
   have hw : w = 1 - u - v := by linarith
   have e0 : sda p b c = u * sda a b c := by
     unfold sda
@@ -123,12 +173,12 @@ theorem barycentric_unique {a b c p : ℝ × ℝ} (h : sda a b c ≠ 0) {u v w :
     mul_one, mul_one, mul_one]
 
 /-- The form of the Rust code: the three areas `[p, b, c]`, `[p, c, a]`, `[p, a, b]` divided
-by their sum. In exact arithmetic it is the oracle's. -/
+by their sum. In exact arithmetic it is `barycentric`. -/
 theorem barycentric_eq_normalized (a b c p : ℝ × ℝ) :
     (sda p b c / (sda p b c + sda p c a + sda p a b),
         sda p c a / (sda p b c + sda p c a + sda p a b),
         sda p a b / (sda p b c + sda p c a + sda p a b)) =
-      Ddg.barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2 := by
+      barycentric a.1 a.2 b.1 b.2 c.1 c.2 p.1 p.2 := by
   have e1 : sda p c a = sda a p c := by
     unfold sda
     ring
@@ -138,11 +188,11 @@ theorem barycentric_eq_normalized (a b c p : ℝ × ℝ) :
   rw [barycentric_eq, e1, e2, sda_split]
 
 /-- **A point from its distances to the three corners**: in the layout of the triangle
-`(ℓ_ab, ℓ_bc, ℓ_ca)` the oracle's `pointFromDistances` of the distances of a point `p` is `p`.
+`(ℓ_ab, ℓ_bc, ℓ_ca)`, `pointFromDistances` of the distances of a point `p` is `p`.
 
 [formula: it-barycentric-coordinates] -/
 theorem pointFromDistances_eq_self {lab lbc lca : ℝ} (h : IsTriangle lab lbc lca) (p : ℝ × ℝ) :
-    Ddg.pointFromDistances lab lbc lca (dist2 (0, 0) p) (dist2 (lab, 0) p)
+    pointFromDistances lab lbc lca (dist2 (0, 0) p) (dist2 (lab, 0) p)
       (dist2 (apexK lab lca lbc) p) = p := by
   have hl := h.pos_a
   obtain ⟨hcy, -, -, -, -, -, -⟩ := diamond_isometric h.swap h.swap
@@ -155,42 +205,42 @@ theorem pointFromDistances_eq_self {lab lbc lca : ℝ} (h : IsTriangle lab lbc l
     dsimp only
     ring
   have hrc : dist2 (apexK lab lca lbc) p ^ 2 =
-      (p.1 - Ddg.diamondX lab lca lbc) ^ 2 + (p.2 - Ddg.diamondH lab lca lbc) ^ 2 := by
+      (p.1 - diamondX lab lca lbc) ^ 2 + (p.2 - diamondH lab lca lbc) ^ 2 := by
     rw [dist2_sq']
     rfl
   have hx : (lab * lab + dist2 (0, 0) p * dist2 (0, 0) p -
       dist2 (lab, 0) p * dist2 (lab, 0) p) / (2 * lab) = p.1 := by
     rw [div_eq_iff (by positivity)]
     linear_combination hra - hrb
-  have hy : (Ddg.diamondX lab lca lbc * Ddg.diamondX lab lca lbc +
-      Ddg.diamondH lab lca lbc * Ddg.diamondH lab lca lbc +
+  have hy : (diamondX lab lca lbc * diamondX lab lca lbc +
+      diamondH lab lca lbc * diamondH lab lca lbc +
       dist2 (0, 0) p * dist2 (0, 0) p -
       dist2 (apexK lab lca lbc) p * dist2 (apexK lab lca lbc) p -
-      2 * Ddg.diamondX lab lca lbc * ((lab * lab + dist2 (0, 0) p * dist2 (0, 0) p -
+      2 * diamondX lab lca lbc * ((lab * lab + dist2 (0, 0) p * dist2 (0, 0) p -
         dist2 (lab, 0) p * dist2 (lab, 0) p) / (2 * lab))) /
-      (2 * Ddg.diamondH lab lca lbc) = p.2 := by
+      (2 * diamondH lab lca lbc) = p.2 := by
     rw [hx, div_eq_iff (by positivity)]
     linear_combination hra - hrc
-  simp only [Ddg.pointFromDistances, Oracle.two_eq]
+  simp only [pointFromDistances]
   exact Prod.ext hx hy
 
 /-! ## Distances of a point to the corners -/
 
 /-- The point with the barycentric coordinates `(·, b₁, b₂)` in the layout: `b₁ v₁ + b₂ v₂`. -/
 def layoutPoint (l01 l12 l20 b1 b2 : ℝ) : ℝ × ℝ :=
-  (b1 * l01 + b2 * Ddg.diamondX l01 l20 l12, b2 * Ddg.diamondH l01 l20 l12)
+  (b1 * l01 + b2 * diamondX l01 l20 l12, b2 * diamondH l01 l20 l12)
 
-/-- **The oracle's `cornerDistances` are the plane distances of the point to the three corners
+/-- **`cornerDistances` are the plane distances of the point to the three corners
 of the layout.** (They do not depend on `b₀`.)
 
 [formula: it-point-distances] -/
 theorem cornerDistances_eq (l01 l12 l20 b0 b1 b2 : ℝ) :
-    Ddg.cornerDistances l01 l12 l20 b0 b1 b2 =
+    cornerDistances l01 l12 l20 b0 b1 b2 =
       (dist2 (0, 0) (layoutPoint l01 l12 l20 b1 b2),
         dist2 (l01, 0) (layoutPoint l01 l12 l20 b1 b2),
         dist2 (apexK l01 l20 l12) (layoutPoint l01 l12 l20 b1 b2)) := by
   unfold dist2 layoutPoint apexK
-  simp only [Ddg.cornerDistances, Ddg.planeDistance, Oracle.sqrt_eq, Oracle.zero_eq]
+  simp only [cornerDistances, planeDistance]
   refine Prod.ext ?_ (Prod.ext ?_ ?_) <;>
   · dsimp only
     congr 1
@@ -206,13 +256,13 @@ theorem dist2_eq_dist_toC (p q : ℝ × ℝ) : dist2 p q = dist (toC p) (toC q) 
 
 /-- **The barycentric length formula in the plane**, from the theorem of
 `cut-barycentric-length` (`baryLength_eq_dist`): for plane points `v₀, v₁, v₂` and coordinates
-`x`, `y` with sum one, the distance of `Σ y_k v_k` and `Σ x_k v_k` is the oracle's `baryLength`
+`x`, `y` with sum one, the distance of `Σ y_k v_k` and `Σ x_k v_k` is `baryLength`
 of the three distances and `x − y`. -/
 theorem dist2_bary_eq_baryLength (v0 v1 v2 : ℝ × ℝ) {x0 x1 x2 y0 y1 y2 : ℝ}
     (hx : x0 + x1 + x2 = 1) (hy : y0 + y1 + y2 = 1) :
     dist2 (y0 * v0.1 + y1 * v1.1 + y2 * v2.1, y0 * v0.2 + y1 * v1.2 + y2 * v2.2)
         (x0 * v0.1 + x1 * v1.1 + x2 * v2.1, x0 * v0.2 + x1 * v1.2 + x2 * v2.2) =
-      Ddg.baryLength (dist2 v0 v1) (dist2 v1 v2) (dist2 v2 v0) (x0 - y0) (x1 - y1) (x2 - y2) := by
+      baryLength (dist2 v0 v1) (dist2 v1 v2) (dist2 v2 v0) (x0 - y0) (x1 - y1) (x2 - y2) := by
   have key := Cuts.baryLength_eq_dist (toC v0) (toC v1) (toC v2) hx hy
   rw [dist2_eq_dist_toC v0 v1, dist2_eq_dist_toC v1 v2, dist2_eq_dist_toC v2 v0, key,
     dist2_eq_dist_toC, dist_comm]
@@ -220,15 +270,15 @@ theorem dist2_bary_eq_baryLength (v0 v1 v2 : ℝ × ℝ) {x0 x1 x2 y0 y1 y2 : �
   · apply Complex.ext <;> simp [toC]
 
 /-- **The distances to the corners are the formula of the paper's Alg. 6**: for a triangle and
-`b₀ + b₁ + b₂ = 1`, the oracle's `cornerDistances` are its `baryLength` (of
+`b₀ + b₁ + b₂ = 1`, `cornerDistances` are `baryLength` (of
 `cut-barycentric-length`) for the differences `b − e_k`.
 
 [formula: it-point-distances] -/
 theorem cornerDistances_eq_baryLength {l01 l12 l20 : ℝ} (h : IsTriangle l01 l12 l20)
     {b0 b1 b2 : ℝ} (hb : b0 + b1 + b2 = 1) :
-    Ddg.cornerDistances l01 l12 l20 b0 b1 b2 =
-      (Ddg.baryLength l01 l12 l20 (b0 - 1) b1 b2, Ddg.baryLength l01 l12 l20 b0 (b1 - 1) b2,
-        Ddg.baryLength l01 l12 l20 b0 b1 (b2 - 1)) := by
+    cornerDistances l01 l12 l20 b0 b1 b2 =
+      (baryLength l01 l12 l20 (b0 - 1) b1 b2, baryLength l01 l12 l20 b0 (b1 - 1) b2,
+        baryLength l01 l12 l20 b0 b1 (b2 - 1)) := by
   obtain ⟨-, -, e1, e2, e3, -, -⟩ := diamond_isometric h.swap h.swap
   have e2' : dist2 (apexK l01 l20 l12) (0, 0) = l20 := by rw [dist2_comm]; exact e2
   have k0 := dist2_bary_eq_baryLength (0, 0) (l01, 0) (apexK l01 l20 l12) hb
@@ -264,13 +314,13 @@ theorem cornerDistances_eq_baryLength {l01 l12 l20 : ℝ} (h : IsTriangle l01 l1
 /-! ## A point on a side: the lengths of an edge split -/
 
 theorem edgeSplitLengths_eq (lij bi bj : ℝ) :
-    Ddg.edgeSplitLengths lij bi bj = (lij * bj, lij * bi) := rfl
+    edgeSplitLengths lij bi bj = (lij * bj, lij * bi) := rfl
 
 /-- **The two lengths of an edge split sum to the length of the edge** (`b_i + b_j = 1`).
 
 [formula: it-point-distances] -/
 theorem edgeSplitLengths_sum {bi bj : ℝ} (h : bi + bj = 1) (lij : ℝ) :
-    (Ddg.edgeSplitLengths lij bi bj).1 + (Ddg.edgeSplitLengths lij bi bj).2 = lij := by
+    (edgeSplitLengths lij bi bj).1 + (edgeSplitLengths lij bi bj).2 = lij := by
   rw [edgeSplitLengths_eq]
   dsimp only
   rw [← mul_add, add_comm, h, mul_one]
@@ -309,13 +359,13 @@ theorem dist2_lerp_head (tail head : ℝ × ℝ) {t : ℝ} (ht : t ≤ 1) :
     _ = (1 - t) * dist2 tail head := sqrt_sq hy
 
 /-- **The convention of an edge split** (SPEC N17): the vertex at `(1 − t)·tail + t·head`,
-`0 ≤ t ≤ 1`, has the barycentric weights `(b_tail, b_head) = (1 − t, t)`; the oracle's
+`0 ≤ t ≤ 1`, has the barycentric weights `(b_tail, b_head) = (1 − t, t)`;
 `edgeSplitLengths ℓ (1 − t) t` is `(t ℓ, (1 − t) ℓ)`, the plane distances of the point from the
 tail and from the head. So the distance from the end `i` is `ℓ_ij b_j`.
 
 [formula: it-point-distances] -/
 theorem edgeSplitLengths_param (tail head : ℝ × ℝ) {t : ℝ} (h0 : 0 ≤ t) (h1 : t ≤ 1) :
-    Ddg.edgeSplitLengths (dist2 tail head) (1 - t) t =
+    edgeSplitLengths (dist2 tail head) (1 - t) t =
       (dist2 tail ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2),
         dist2 head ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2)) := by
   rw [edgeSplitLengths_eq, dist2_lerp_tail tail head h0, dist2_lerp_head tail head h1,
@@ -326,8 +376,8 @@ barycentric weights `(b_i, b_j, 0)` is `ℓ_ij b_j` (`b_i + b_j = 1`, `ℓ_ij, b
 of the *other* end times the length. -/
 theorem alg6_distance_on_edge {lij : ℝ} (hl : 0 ≤ lij) {bi bj : ℝ} (hb : bi + bj = 1)
     (hj : 0 ≤ bj) (ljk lki : ℝ) :
-    Ddg.baryLength lij ljk lki (bi - 1) bj 0 = lij * bj := by
-  have e : Ddg.baryLength2 lij ljk lki (bi - 1) bj 0 = (lij * bj) ^ 2 := by
+    baryLength lij ljk lki (bi - 1) bj 0 = lij * bj := by
+  have e : baryLength2 lij ljk lki (bi - 1) bj 0 = (lij * bj) ^ 2 := by
     rw [Cuts.baryLength2_eq, show bi - 1 = -bj by linarith]
     ring
   rw [Cuts.baryLength_eq, e, max_eq_right (sq_nonneg _), sqrt_sq (mul_nonneg hl hj)]
@@ -335,21 +385,21 @@ theorem alg6_distance_on_edge {lij : ℝ} (hl : 0 ≤ lij) {bi bj : ℝ} (hb : b
 /-- … and from the corner `j` it is `ℓ_ij b_i`. -/
 theorem alg6_distance_on_edge' {lij : ℝ} (hl : 0 ≤ lij) {bi bj : ℝ} (hb : bi + bj = 1)
     (hi : 0 ≤ bi) (ljk lki : ℝ) :
-    Ddg.baryLength lij ljk lki bi (bj - 1) 0 = lij * bi := by
-  have e : Ddg.baryLength2 lij ljk lki bi (bj - 1) 0 = (lij * bi) ^ 2 := by
+    baryLength lij ljk lki bi (bj - 1) 0 = lij * bi := by
+  have e : baryLength2 lij ljk lki bi (bj - 1) 0 = (lij * bi) ^ 2 := by
     rw [Cuts.baryLength2_eq, show bj - 1 = -bi by linarith]
     ring
   rw [Cuts.baryLength_eq, e, max_eq_right (sq_nonneg _), sqrt_sq (mul_nonneg hl hi)]
 
-/-- **The oracle's `edgeSplitLengths` are the distances of the point on the side to its two
+/-- **`edgeSplitLengths` are the distances of the point on the side to its two
 ends**: `cornerDistances` with `b₂ = 0` gives `ℓ₀₁ b₁` from corner `0` and `ℓ₀₁ b₀` from corner
 `1`.
 
 [formula: it-point-distances] -/
 theorem edgeSplitLengths_eq_cornerDistances {l01 l12 l20 : ℝ} (h : IsTriangle l01 l12 l20)
     {b0 b1 : ℝ} (hb : b0 + b1 = 1) (h0 : 0 ≤ b0) (h1 : 0 ≤ b1) :
-    (Ddg.cornerDistances l01 l12 l20 b0 b1 0).1 = (Ddg.edgeSplitLengths l01 b0 b1).1 ∧
-      (Ddg.cornerDistances l01 l12 l20 b0 b1 0).2.1 = (Ddg.edgeSplitLengths l01 b0 b1).2 := by
+    (cornerDistances l01 l12 l20 b0 b1 0).1 = (edgeSplitLengths l01 b0 b1).1 ∧
+      (cornerDistances l01 l12 l20 b0 b1 0).2.1 = (edgeSplitLengths l01 b0 b1).2 := by
   rw [cornerDistances_eq_baryLength h (by linarith : b0 + b1 + 0 = 1), edgeSplitLengths_eq]
   exact ⟨alg6_distance_on_edge h.pos_a.le hb h1 _ _, alg6_distance_on_edge' h.pos_a.le hb h0 _ _⟩
 
@@ -357,7 +407,7 @@ theorem edgeSplitLengths_eq_cornerDistances {l01 l12 l20 : ℝ} (h : IsTriangle 
 `(b_i, b_j) = (3/4, 1/4)` on an edge of length `1`, Alg. 6 gives the distance `1/4 = ℓ_ij b_j`
 from `i`; Alg. 8, line 4, prints `ℓ_ip ← ℓ_ij b_i = 3/4`. -/
 theorem alg8_as_printed_differs (ljk lki : ℝ) :
-    Ddg.baryLength 1 ljk lki ((3 / 4 : ℝ) - 1) (1 / 4) 0 = 1 / 4 ∧ (1 : ℝ) * (3 / 4) ≠ 1 / 4 := by
+    baryLength 1 ljk lki ((3 / 4 : ℝ) - 1) (1 / 4) 0 = 1 / 4 ∧ (1 : ℝ) * (3 / 4) ≠ 1 / 4 := by
   refine ⟨?_, by norm_num⟩
   rw [alg6_distance_on_edge zero_le_one (by norm_num) (by norm_num)]
   norm_num
@@ -368,17 +418,17 @@ theorem alg8_as_printed_differs (ljk lki : ℝ) :
 `cornerAngle a₀ a₁ a₂`. The layout has `ℓ₀₁ = a₂`, `ℓ₁₂ = a₀`, `ℓ₂₀ = a₁`. -/
 
 theorem circumWeight_eq (ak ak1 ak2 : ℝ) :
-    Ddg.circumWeight ak ak1 ak2 = ak * ak * (ak1 * ak1 + ak2 * ak2 - ak * ak) := rfl
+    circumWeight ak ak1 ak2 = ak * ak * (ak1 * ak1 + ak2 * ak2 - ak * ak) := rfl
 
 /-- The sum of the three weights of the circumcentre. -/
 def circumSum (a0 a1 a2 : ℝ) : ℝ :=
-  Ddg.circumWeight a0 a1 a2 + Ddg.circumWeight a1 a2 a0 + Ddg.circumWeight a2 a0 a1
+  circumWeight a0 a1 a2 + circumWeight a1 a2 a0 + circumWeight a2 a0 a1
 
 theorem circumcenterBary_eq (a0 a1 a2 : ℝ) :
-    Ddg.circumcenterBary a0 a1 a2 =
-      (Ddg.circumWeight a0 a1 a2 / circumSum a0 a1 a2,
-        Ddg.circumWeight a1 a2 a0 / circumSum a0 a1 a2,
-        Ddg.circumWeight a2 a0 a1 / circumSum a0 a1 a2) := rfl
+    circumcenterBary a0 a1 a2 =
+      (circumWeight a0 a1 a2 / circumSum a0 a1 a2,
+        circumWeight a1 a2 a0 / circumSum a0 a1 a2,
+        circumWeight a2 a0 a1 / circumSum a0 a1 a2) := rfl
 
 /-- **The weights sum to `16 A²`** (so the normalization divides by a positive number). -/
 theorem circumWeight_sum {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
@@ -397,8 +447,8 @@ theorem circumSum_pos {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) : 0 < circumSum
 
 [formula: it-circumcenter] -/
 theorem circumcenterBary_sum {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
-    (Ddg.circumcenterBary a0 a1 a2).1 + (Ddg.circumcenterBary a0 a1 a2).2.1 +
-      (Ddg.circumcenterBary a0 a1 a2).2.2 = 1 := by
+    (circumcenterBary a0 a1 a2).1 + (circumcenterBary a0 a1 a2).2.1 +
+      (circumcenterBary a0 a1 a2).2.2 = 1 := by
   rw [circumcenterBary_eq]
   dsimp only
   rw [← add_div, ← add_div]
@@ -415,7 +465,7 @@ theorem cos_neg_iff {x : ℝ} (h0 : 0 < x) (hπ : x < π) : cos x < 0 ↔ π / 2
 
 /-- The weight of a corner is negative exactly when its angle is obtuse. -/
 theorem circumWeight_neg_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
-    Ddg.circumWeight a0 a1 a2 < 0 ↔ π / 2 < cornerAngle a0 a1 a2 := by
+    circumWeight a0 a1 a2 < 0 ↔ π / 2 < cornerAngle a0 a1 a2 := by
   have ha := h.pos_a
   have hb := h.pos_b
   have hc := h.pos_c
@@ -431,7 +481,7 @@ theorem circumWeight_neg_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
 
 /-- The weight of a corner vanishes exactly when its angle is a right angle. -/
 theorem circumWeight_eq_zero_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
-    Ddg.circumWeight a0 a1 a2 = 0 ↔ cornerAngle a0 a1 a2 = π / 2 := by
+    circumWeight a0 a1 a2 = 0 ↔ cornerAngle a0 a1 a2 = π / 2 := by
   have ha := h.pos_a
   have hb := h.pos_b
   have hc := h.pos_c
@@ -465,9 +515,9 @@ refinement relies on this).
 
 [formula: it-circumcenter] -/
 theorem circumcenterBary_neg_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
-    ((Ddg.circumcenterBary a0 a1 a2).1 < 0 ↔ π / 2 < cornerAngle a0 a1 a2) ∧
-      ((Ddg.circumcenterBary a0 a1 a2).2.1 < 0 ↔ π / 2 < cornerAngle a1 a2 a0) ∧
-      ((Ddg.circumcenterBary a0 a1 a2).2.2 < 0 ↔ π / 2 < cornerAngle a2 a0 a1) := by
+    ((circumcenterBary a0 a1 a2).1 < 0 ↔ π / 2 < cornerAngle a0 a1 a2) ∧
+      ((circumcenterBary a0 a1 a2).2.1 < 0 ↔ π / 2 < cornerAngle a1 a2 a0) ∧
+      ((circumcenterBary a0 a1 a2).2.2 < 0 ↔ π / 2 < cornerAngle a2 a0 a1) := by
   have hs := circumSum_pos h
   rw [circumcenterBary_eq]
   dsimp only
@@ -478,9 +528,9 @@ theorem circumcenterBary_neg_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
 /-- … and zero exactly when that angle is a right angle (the circumcentre is on the opposite
 side). -/
 theorem circumcenterBary_eq_zero_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
-    ((Ddg.circumcenterBary a0 a1 a2).1 = 0 ↔ cornerAngle a0 a1 a2 = π / 2) ∧
-      ((Ddg.circumcenterBary a0 a1 a2).2.1 = 0 ↔ cornerAngle a1 a2 a0 = π / 2) ∧
-      ((Ddg.circumcenterBary a0 a1 a2).2.2 = 0 ↔ cornerAngle a2 a0 a1 = π / 2) := by
+    ((circumcenterBary a0 a1 a2).1 = 0 ↔ cornerAngle a0 a1 a2 = π / 2) ∧
+      ((circumcenterBary a0 a1 a2).2.1 = 0 ↔ cornerAngle a1 a2 a0 = π / 2) ∧
+      ((circumcenterBary a0 a1 a2).2.2 = 0 ↔ cornerAngle a2 a0 a1 = π / 2) := by
   have hs := (circumSum_pos h).ne'
   rw [circumcenterBary_eq]
   dsimp only
@@ -496,8 +546,8 @@ theorem circumcenterBary_eq_zero_iff {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) 
 /-- **At most one coordinate is negative**: if the coordinate of corner `0` is negative the
 other two are positive (a triangle has at most one obtuse angle). -/
 theorem circumcenterBary_pos_of_neg {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2)
-    (hneg : (Ddg.circumcenterBary a0 a1 a2).1 < 0) :
-    0 < (Ddg.circumcenterBary a0 a1 a2).2.1 ∧ 0 < (Ddg.circumcenterBary a0 a1 a2).2.2 := by
+    (hneg : (circumcenterBary a0 a1 a2).1 < 0) :
+    0 < (circumcenterBary a0 a1 a2).2.1 ∧ 0 < (circumcenterBary a0 a1 a2).2.2 := by
   have ha := h.pos_a
   have hb := h.pos_b
   have hc := h.pos_c
@@ -544,13 +594,13 @@ theorem circum_aux2 {S P x y z w0 w1 w2 β0 β1 β2 : ℝ} (hS : S ≠ 0) (h0 : 
   ring
 
 /-- **The point with these coordinates is equidistant from the three corners**: in the layout
-of the triangle (`ℓ₀₁ = a₂`, `ℓ₁₂ = a₀`, `ℓ₂₀ = a₁`) the oracle's `cornerDistances` of the
-oracle's `circumcenterBary` are all the circumradius `a₀a₁a₂/(4A)`.
+of the triangle (`ℓ₀₁ = a₂`, `ℓ₁₂ = a₀`, `ℓ₂₀ = a₁`) `cornerDistances` of
+`circumcenterBary` are all the circumradius `a₀a₁a₂/(4A)`.
 
 [formula: it-circumcenter] -/
 theorem circumcenter_equidistant {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
-    Ddg.cornerDistances a2 a0 a1 (Ddg.circumcenterBary a0 a1 a2).1
-        (Ddg.circumcenterBary a0 a1 a2).2.1 (Ddg.circumcenterBary a0 a1 a2).2.2 =
+    cornerDistances a2 a0 a1 (circumcenterBary a0 a1 a2).1
+        (circumcenterBary a0 a1 a2).2.1 (circumcenterBary a0 a1 a2).2.2 =
       (a0 * a1 * a2 / (4 * triArea a0 a1 a2), a0 * a1 * a2 / (4 * triArea a0 a1 a2),
         a0 * a1 * a2 / (4 * triArea a0 a1 a2)) := by
   have ha := h.pos_a

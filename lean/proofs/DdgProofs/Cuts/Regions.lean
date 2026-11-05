@@ -133,12 +133,13 @@ theorem isRegion_two_one_iff (φ : ℝ) : IsRegion ![φ, -φ] (1 : Fin 2) ↔ 0 
 
 /-! ## Crossings between two regions (SPEC §8.2, paper Eq. 31) -/
 
-/-- The oracle's `crossingParamRegions` is `crossingParam` of the two differences. -/
+/-- The oracle's `crossingParamRegions` is the level-crossing parameter of the two
+differences. -/
 theorem crossingParamRegions_eq (a b c d : ℝ) :
-    Ddg.crossingParamRegions a b c d = Ddg.crossingParam (a - b) (c - d) := rfl
+    Ddg.crossingParamRegions a b c d = levelCrossingParam (a - b) (c - d) := rfl
 
 /-- The crossing parameter does not change when both values are negated. -/
-theorem crossingParam_neg (a b : ℝ) : Ddg.crossingParam (-a) (-b) = Ddg.crossingParam a b := by
+theorem crossingParam_neg (a b : ℝ) : levelCrossingParam (-a) (-b) = levelCrossingParam a b := by
   rw [crossingParam_eq, crossingParam_eq]
   have : -a - -b = -(a - b) := by ring
   rw [this, neg_div_neg_eq]
@@ -207,11 +208,11 @@ theorem crossingParamRegions_two (φa φb : ℝ) :
     Ddg.crossingParamRegions φa (-φa) φb (-φb) = Ddg.crossingParam φa φb ∧
       Ddg.crossingParamRegions (-φa) φa (-φb) φb = Ddg.crossingParam φa φb := by
   constructor
-  · rw [crossingParamRegions_eq, crossingParam_eq, crossingParam_eq]
+  · rw [crossingParamRegions_eq, Oracle.crossingParam_eq, crossingParam_eq, crossingParam_eq]
     have e1 : φa - -φa = 2 * φa := by ring
     have e2 : φa - -φa - (φb - -φb) = 2 * (φa - φb) := by ring
     rw [e2, e1, mul_div_mul_left _ _ (two_ne_zero)]
-  · rw [crossingParamRegions_eq, crossingParam_eq, crossingParam_eq]
+  · rw [crossingParamRegions_eq, Oracle.crossingParam_eq, crossingParam_eq, crossingParam_eq]
     have e1 : -φa - φa = -2 * φa := by ring
     have e2 : -φa - φa - (-φb - φb) = -2 * (φa - φb) := by ring
     rw [e2, e1, mul_div_mul_left _ _ (by norm_num : (-2 : ℝ) ≠ 0)]

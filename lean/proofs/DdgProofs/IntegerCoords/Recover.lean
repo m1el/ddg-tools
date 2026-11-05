@@ -1,4 +1,4 @@
-import DdgProofs.Cuts.Crossing
+import DdgProofs.Geometry.Barycentric
 import Mathlib.Algebra.BigOperators.Fin
 
 /-!
@@ -99,7 +99,7 @@ theorem tangent_length_sq (Pi Pj Pk : E) {wi wj wk : ℝ} (h : wi + wj + wk = 0)
     ‖wi • Pi + wj • Pj + wk • Pk‖ ^ 2 =
       -(‖Pi - Pj‖ ^ 2 * wi * wj) - ‖Pj - Pk‖ ^ 2 * wj * wk - ‖Pk - Pi‖ ^ 2 * wk * wi := by
   rw [← Cuts.baryLength2_eq_norm_sq Pi Pj Pk h]
-  unfold Ddg.baryLength2
+  unfold baryLength2
   ring
 
 /-- **The lengths of a face split** (paper Sec. 3.3): the new vertex `m` with coordinates `v`

@@ -8,7 +8,8 @@ import DdgProofs.IntegerCoords.VertexRemoval
 its insets; Gillespie, Sharp, Crane 2021, App. D, Thm. D.1.
 
 Plane points are pairs of reals; `dist2`, `sda` (twice the signed area) are those of
-`DdgProofs/Bff/Quality.lean`, `Ddg.barycentric` the oracle's (`it-barycentric-coordinates`).
+`DdgProofs/Bff/Quality.lean`, `Intrinsic.barycentric` the barycentric coordinates of
+`DdgProofs/Intrinsic/Barycentric.lean` (`it-barycentric-coordinates`).
 `polar r t = (r cos t, r sin t)`. The removed vertex `i` is laid out at the origin, its first
 neighbour on the positive `x`-axis, the others at the angles accumulated from the corner angles
 at `i` computed from the lengths (law of cosines).
@@ -44,7 +45,6 @@ namespace DDG
 namespace IntrinsicSimplification
 
 open Real Finset
-open scoped DDG.Oracle
 
 /-! ## Plane layouts -/
 
@@ -158,7 +158,7 @@ theorem degreeThree_barycentric (h1 : IsTriangle ab ra rb) (h2 : IsTriangle bc r
     let C := layoutC ra rb rc ab bc
     let S := triArea bc rb rc + triArea ca rc ra + triArea ab ra rb
     sda A B C = 2 * S ∧ 0 < S ∧
-      Ddg.barycentric A.1 A.2 B.1 B.2 C.1 C.2 0 0 =
+      Intrinsic.barycentric A.1 A.2 B.1 B.2 C.1 C.2 0 0 =
         (triArea bc rb rc / S, triArea ca rc ra / S, triArea ab ra rb / S) ∧
       0 < triArea bc rb rc / S ∧ 0 < triArea ca rc ra / S ∧ 0 < triArea ab ra rb / S := by
   intro A B C S
@@ -222,7 +222,7 @@ theorem boundaryMerge (h1 : IsTriangle ab ra rb) (h2 : IsTriangle ca rc ra)
       ((rc / (rb + rc)) * B.1 + (rb / (rb + rc)) * C.1,
         (rc / (rb + rc)) * B.2 + (rb / (rb + rc)) * C.2) = ((0 : ℝ), (0 : ℝ)) ∧
       0 < sda A B C ∧
-      Ddg.barycentric A.1 A.2 B.1 B.2 C.1 C.2 0 0 = (0, rc / (rb + rc), rb / (rb + rc)) := by
+      Intrinsic.barycentric A.1 A.2 B.1 B.2 C.1 C.2 0 0 = (0, rc / (rb + rc), rb / (rb + rc)) := by
   intro A B C
   have hb := h1.pos_c
   have hc := h2.pos_b

@@ -20,9 +20,9 @@ the integrals are those of `DdgProofs/TriangleIntegral/Fem.lean` and `Tiling.lea
   Holst (Lemma 4.1 with `d = 2`, the star's part) `S(x) = Σ_k (|x|² + |p_k|² + |p_{k+1}|²) |T_k| / 3`
   has the derivative `(2/3) Σ_k (|T_k| x − |T_k| c_k)` (Eq. 4.5; `hasFDerivAt_odtEnergy`), with
   `|T_k| c_k` the polynomial `circumVec`, which divided by `|T_k|` is equidistant from the three
-  corners (`circumVec_equidistant`) and in the frame of a triangle is the oracle's
+  corners (`circumVec_equidistant`) and in the frame of a triangle is
   `weightedCircumcenter` (`circumVec_layout`). `S` is exactly quadratic, with Hessian
-  `(2/3) |ω| I` (Lemma 4.3; `odtEnergy_add`); hence the update of Eq. 4.13, the oracle's
+  `(2/3) |ω| I` (Lemma 4.3; `odtEnergy_add`); hence the update of Eq. 4.13,
   `odtDisplacement` of `w = Σ_k |T_k| (c_k − x) = −(3/2) ∇S` by the area `|ω|` of the star,
   changes the energy by exactly `−(3 |∇S|²/(4|ω|)) α (2 − α)`: a descent step for every
   `0 < α < 2`, the minimum of `S` for `α = 1` (`odtEnergy_step`, `odtEnergy_step_le`).
@@ -60,25 +60,36 @@ namespace DDG
 
 namespace Intrinsic
 
-open scoped DDG.Oracle
 open Real Finset
 
 /-! ## `it-odt-update`: the barycentre and the displacement -/
 
+/-- The area `A` of the triangle `abc` times the vector from `a` to its barycentre, in the frame
+of `a` with `b = (ℓ_ab, 0)` and `c = (c_x, h)` above: `(A (ℓ_ab + c_x)/3, A h/3)`,
+`c_x = diamondX ℓ_ab ℓ_ac ℓ_bc`, `h = 2A/ℓ_ab`. -/
+def weightedBarycenter (lab lac lbc A : ℝ) : ℝ × ℝ :=
+  (A * (lab + diamondX lab lac lbc) / 3, A * (2 * A / lab) / 3)
+
+/-- The update of the optimal Delaunay triangulation at a vertex (Chen and Holst 2011,
+Eq. 4.13): the sum `w = Σ_T |T| (c_T − x)` over the triangles of the star, divided by the area
+`total` of the star and scaled by the step `step`. -/
+def odtDisplacement (w : ℝ × ℝ) (total step : ℝ) : ℝ × ℝ :=
+  (step * w.1 / total, step * w.2 / total)
+
 /-- **The weighted barycentre** is `A (a + b + c)/3` with `a = 0`, `b = (ℓ_ab, 0)` and
-`c = (c_x, 2A/ℓ_ab)`, `c_x` the oracle's `diamondX` (the frame of the circumcentre).
+`c = (c_x, 2A/ℓ_ab)`, `c_x = diamondX ℓ_ab ℓ_ac ℓ_bc` (the frame of the circumcentre).
 
 [formula: it-odt-update] -/
 theorem weightedBarycenter_eq (lab lac lbc A : ℝ) :
-    Ddg.weightedBarycenter lab lac lbc A =
-      A • ((1 / 3 : ℝ) • ((0, 0) + (lab, 0) + (Ddg.diamondX lab lac lbc, 2 * A / lab))) := by
-  simp only [Ddg.weightedBarycenter, Oracle.two_eq, Oracle.three_eq, Prod.smul_mk, Prod.mk_add_mk,
+    weightedBarycenter lab lac lbc A =
+      A • ((1 / 3 : ℝ) • ((0, 0) + (lab, 0) + (diamondX lab lac lbc, 2 * A / lab))) := by
+  simp only [weightedBarycenter, Prod.smul_mk, Prod.mk_add_mk,
     smul_eq_mul]
   ext <;> dsimp only <;> ring
 
 theorem odtDisplacement_eq (w : ℝ × ℝ) (total step : ℝ) :
-    Ddg.odtDisplacement w total step = (step / total) • w := by
-  simp only [Ddg.odtDisplacement, Prod.smul_def, smul_eq_mul]
+    odtDisplacement w total step = (step / total) • w := by
+  simp only [odtDisplacement, Prod.smul_def, smul_eq_mul]
   ext <;> dsimp only <;> ring
 
 /-! ## `it-odt-update`: the circumcentre of a triangle of the star, without division -/
@@ -129,14 +140,14 @@ theorem circumVec_equidistant {x b c : ℝ × ℝ} (hT : sda x b c ≠ 0) :
     linear_combination (-2 * (x.1 - c.1)) * h1 + (-2 * (x.2 - c.2)) * h2 +
       ((x.1 ^ 2 + x.2 ^ 2 - c.1 ^ 2 - c.2 ^ 2) / 2) * hTd
 
-/-- **In the frame of a triangle it is the oracle's `weightedCircumcenter`**: with `x = 0`,
+/-- **In the frame of a triangle it is `weightedCircumcenter`**: with `x = 0`,
 `b = (ℓ_ab, 0)`, `c = (c_x, h)`, `c_x = (ℓ_ab² + ℓ_ac² − ℓ_bc²)/2ℓ_ab`, `|c| = ℓ_ac` and
 `A = ℓ_ab h / 2`.
 
 [formula: it-odt-update] -/
 theorem circumVec_layout {lab lac lbc cx h : ℝ} (hab : lab ≠ 0)
     (hcx : cx = (lab ^ 2 + lac ^ 2 - lbc ^ 2) / (2 * lab)) (hc : cx ^ 2 + h ^ 2 = lac ^ 2) :
-    circumVec (0, 0) (lab, 0) (cx, h) = Ddg.weightedCircumcenter lab lac lbc (lab * h / 2) := by
+    circumVec (0, 0) (lab, 0) (cx, h) = weightedCircumcenter lab lac lbc (lab * h / 2) := by
   have hcx' : cx * (2 * lab) = lab ^ 2 + lac ^ 2 - lbc ^ 2 := by rw [hcx]; field_simp
   rw [weightedCircumcenter_eq]
   ext
@@ -329,7 +340,7 @@ theorem odtEnergy_add {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) (x v :
 [formula: it-odt-update] -/
 theorem odtDisplacement_eq_gradient (p : ℕ → ℝ × ℝ) (n : ℕ) (x : ℝ × ℝ) (step : ℝ) :
     let w := ∑ k ∈ range n, (circumVec x (p k) (p (k + 1)) - (sda x (p k) (p (k + 1)) / 2) • x)
-    Ddg.odtDisplacement w (starArea p n x) step =
+    odtDisplacement w (starArea p n x) step =
       (-(3 * step / (2 * starArea p n x))) • odtGradient p n x := by
   intro w
   rw [odtDisplacement_eq]
@@ -350,7 +361,7 @@ star of nonzero area): moving `x` by `odtDisplacement w |ω| α`, `w = Σ_k |T_k
 theorem odtEnergy_step {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) (x : ℝ × ℝ)
     (hω : starArea p n x ≠ 0) (step : ℝ) :
     let w := ∑ k ∈ range n, (circumVec x (p k) (p (k + 1)) - (sda x (p k) (p (k + 1)) / 2) • x)
-    odtEnergy p n (x + Ddg.odtDisplacement w (starArea p n x) step) =
+    odtEnergy p n (x + odtDisplacement w (starArea p n x) step) =
       odtEnergy p n x -
         3 * nsq (odtGradient p n x) / (4 * starArea p n x) * (step * (2 - step)) := by
   intro w
@@ -367,8 +378,8 @@ theorem odtEnergy_step {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) (x : 
 theorem odtEnergy_step_le {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) (x : ℝ × ℝ)
     (hω : 0 < starArea p n x) {step : ℝ} (h0 : 0 ≤ step) (h2 : step ≤ 2) :
     let w := ∑ k ∈ range n, (circumVec x (p k) (p (k + 1)) - (sda x (p k) (p (k + 1)) / 2) • x)
-    odtEnergy p n (x + Ddg.odtDisplacement w (starArea p n x) step) ≤ odtEnergy p n x ∧
-      ∀ y, odtEnergy p n (x + Ddg.odtDisplacement w (starArea p n x) 1) ≤ odtEnergy p n y := by
+    odtEnergy p n (x + odtDisplacement w (starArea p n x) step) ≤ odtEnergy p n x ∧
+      ∀ y, odtEnergy p n (x + odtDisplacement w (starArea p n x) 1) ≤ odtEnergy p n y := by
   intro w
   have hn : 0 ≤ nsq (odtGradient p n x) := by unfold nsq; positivity
   refine ⟨?_, fun y => ?_⟩
@@ -538,7 +549,6 @@ end ChenHolst
 section Odt
 
 open Intrinsic
-open scoped DDG.Oracle
 
 variable {ι : Type*} {s : Finset ι} {q : ι → Fin 3 → ℝ × ℝ} {Ω : Set (ℝ × ℝ)}
 
@@ -673,7 +683,7 @@ for every position `y` whose fan tiles `Ω` with them.
 theorem odt_error_step_le {κ : Type*} {n : ℕ} {t : Finset κ} {r : κ → Fin 3 → ℝ × ℝ}
     {q : ℕ → ℝ × ℝ} (hq : q n = q 0) {x x' : ℝ × ℝ} (hω : 0 < starArea q n x)
     {step : ℝ} (h0 : 0 ≤ step) (h2 : step ≤ 2)
-    (hx' : x' = x + Ddg.odtDisplacement
+    (hx' : x' = x + odtDisplacement
       (∑ k ∈ Finset.range n, (circumVec x (q k) (q (k + 1)) - (sda x (q k) (q (k + 1)) / 2) • x))
       (starArea q n x) step)
     (hpos : ∀ k < n, 0 < sda x (q k) (q (k + 1)))

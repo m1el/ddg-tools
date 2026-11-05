@@ -11,7 +11,7 @@ Sec. 4.2.1 of the preprint (barycentres at the boundary).
 Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area) and `sqDist2`, `dist2` of
 `DdgProofs/Bff/Quality.lean`.
 
-* **`it-move-length`** — the oracle's `movedLength l r (cos α) (sin α)` is the paper's law of
+* **`it-move-length`** — `movedLength l r (cos α) (sin α)` is the paper's law of
   cosines `√(r² + ℓ² − 2 r ℓ cos α)` (`movedLength_eq_law_of_cosines`) and the distance between
   the moved end `r (cos φ, sin φ)` and the far end `ℓ (cos ψ, sin ψ)` when `α = ψ − φ`
   (`movedLength_eq_dist2`).
@@ -21,13 +21,14 @@ Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area) and `sqDist
   (`sum_sda_closed_link`): moving the vertex keeps the area of its star.
 * **`it-circumcenter-vector`** — `weightedCircumcenter ℓ_ab ℓ_ac ℓ_bc A / A` is equidistant
   from `a = 0`, `b = (ℓ_ab, 0)` and `c = (c_x, h)` (`weightedCircumcenter_equidistant`), also
-  stated with `A` the Heron area of the three lengths and `c` the oracle's apex
+  stated with `A` the Heron area of the three lengths and `c` the apex `apexK`
   (`weightedCircumcenter_equidistant_heron`).
 
 The optimal Delaunay triangulation update (`it-odt-update`: the barycentre, the circumcentre
 vector `circumVec`, the star energy and the step of Eq. 4.13) is in `DdgProofs/Delaunay/ODT.lean`.
 
-Own definitions: none (the plane helpers `rot`, `nsq`, `toDual` are in
+Definitions (the closed forms of the Rust code, on `ℝ`): `movedLength`, `movedDoubleArea`,
+`weightedCircumcenter` (the plane helpers `rot`, `nsq`, `toDual` are in
 `DdgProofs/Geometry/PlaneLemmas.lean`).
 -/
 
@@ -37,15 +38,19 @@ namespace DDG
 
 namespace Intrinsic
 
-open scoped DDG.Oracle
 open Real Finset
 
 /-! ## `it-move-length` -/
 
+/-- Length of the edge `ij` after its end `i` moves by a vector of length `r` that makes the
+angle `α` with the edge, given by `cosA = cos α` and `sinA = sin α`:
+`ℓ' = √((ℓ − r cos α)² + (r sin α)²)`. -/
+def movedLength (l r cosA sinA : ℝ) : ℝ :=
+  √((l - r * cosA) * (l - r * cosA) + (r * sinA) * (r * sinA))
+
 theorem movedLength_eq (l r c s : ℝ) :
-    Ddg.movedLength l r c s = √((l - r * c) ^ 2 + (r * s) ^ 2) := by
-  unfold Ddg.movedLength
-  simp only [Oracle.sqrt_eq]
+    movedLength l r c s = √((l - r * c) ^ 2 + (r * s) ^ 2) := by
+  unfold movedLength
   congr 1
   ring
 
@@ -54,7 +59,7 @@ theorem movedLength_eq (l r c s : ℝ) :
 
 [formula: it-move-length] -/
 theorem movedLength_eq_law_of_cosines (l r α : ℝ) :
-    Ddg.movedLength l r (cos α) (sin α) = √(r ^ 2 + l ^ 2 - 2 * r * l * cos α) := by
+    movedLength l r (cos α) (sin α) = √(r ^ 2 + l ^ 2 - 2 * r * l * cos α) := by
   rw [movedLength_eq]
   congr 1
   linear_combination r ^ 2 * sin_sq_add_cos_sq α
@@ -65,7 +70,7 @@ angle from the motion to the edge) the new length is their distance.
 
 [formula: it-move-length] -/
 theorem movedLength_eq_dist2 (l r φ ψ : ℝ) :
-    Ddg.movedLength l r (cos (ψ - φ)) (sin (ψ - φ)) =
+    movedLength l r (cos (ψ - φ)) (sin (ψ - φ)) =
       dist2 (r * cos φ, r * sin φ) (l * cos ψ, l * sin ψ) := by
   rw [movedLength_eq]
   unfold dist2
@@ -75,21 +80,26 @@ theorem movedLength_eq_dist2 (l r φ ψ : ℝ) :
   linear_combination (r ^ 2 * (sin φ ^ 2 + cos φ ^ 2) - l ^ 2) * sin_sq_add_cos_sq ψ
 
 /-- The length does not change for a zero motion. -/
-theorem movedLength_zero {l : ℝ} (hl : 0 ≤ l) (c s : ℝ) : Ddg.movedLength l 0 c s = l := by
+theorem movedLength_zero {l : ℝ} (hl : 0 ≤ l) (c s : ℝ) : movedLength l 0 c s = l := by
   rw [movedLength_eq]
   simp [sqrt_sq hl]
 
 /-! ## `it-move-area` -/
 
+/-- Twice the signed area of a triangle of the star of a vertex after the vertex (at the origin)
+moves by `v`: `2A − v × d`, `A2 = 2A` twice the area before and `d = k − j` the side of the
+link. -/
+def movedDoubleArea (A2 : ℝ) (v d : ℝ × ℝ) : ℝ := A2 - (v.1 * d.2 - v.2 * d.1)
+
 theorem movedDoubleArea_eq (A2 : ℝ) (v d : ℝ × ℝ) :
-    Ddg.movedDoubleArea A2 v d = A2 - (v.1 * d.2 - v.2 * d.1) := rfl
+    movedDoubleArea A2 v d = A2 - (v.1 * d.2 - v.2 * d.1) := rfl
 
 /-- **The doubled signed area after the move**: for the triangle `(0, j, k)` of the star, the
 vertex at the origin moved to `v`, `sda v j k = movedDoubleArea (sda 0 j k) v (k − j)`.
 
 [formula: it-move-area] -/
 theorem movedDoubleArea_eq_sda (v j k : ℝ × ℝ) :
-    sda v j k = Ddg.movedDoubleArea (sda (0, 0) j k) v (k - j) := by
+    sda v j k = movedDoubleArea (sda (0, 0) j k) v (k - j) := by
   rw [movedDoubleArea_eq]
   unfold sda
   simp only [Prod.fst_sub, Prod.snd_sub]
@@ -119,11 +129,15 @@ theorem sum_sda_closed_link {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) 
 
 /-! ## `it-circumcenter-vector` -/
 
+/-- The area `A` of the triangle `abc` times the vector from `a` to its circumcentre, in the
+frame of `a` with `b = (ℓ_ab, 0)` and `c` above: `(A ℓ_ab/2, ℓ_ab (ℓ_ac² + ℓ_bc² − ℓ_ab²)/8)`. -/
+def weightedCircumcenter (lab lac lbc A : ℝ) : ℝ × ℝ :=
+  (A * lab / 2, lab * (lac * lac + lbc * lbc - lab * lab) / 8)
+
 theorem weightedCircumcenter_eq (lab lac lbc A : ℝ) :
-    Ddg.weightedCircumcenter lab lac lbc A =
+    weightedCircumcenter lab lac lbc A =
       (A * lab / 2, lab * (lac * lac + lbc * lbc - lab * lab) / 8) := by
-  have e8 : (@OfNat.ofNat ℝ 8 Ddg.instOfNatScalar) = (8 : ℝ) := by rw [Oracle.ofNat_eq]
-  simp only [Ddg.weightedCircumcenter, Oracle.two_eq, e8]
+  rfl
 
 /-- **The weighted circumcentre divided by the area is the circumcentre**: in the frame of `a`
 with `b = (ℓ_ab, 0)` and `c = (c_x, h)`, `c_x = (ℓ_ab² + ℓ_ac² − ℓ_bc²)/2ℓ_ab`, `h = 2A/ℓ_ab`,
@@ -134,8 +148,8 @@ squared distance from `a = 0`, `b` and `c`.
 theorem weightedCircumcenter_equidistant {lab lac lbc A cx h : ℝ} (hA : A ≠ 0) (hab : lab ≠ 0)
     (hcx : cx = (lab ^ 2 + lac ^ 2 - lbc ^ 2) / (2 * lab)) (hh : h = 2 * A / lab)
     (hc : cx ^ 2 + h ^ 2 = lac ^ 2) :
-    let o : ℝ × ℝ := ((Ddg.weightedCircumcenter lab lac lbc A).1 / A,
-      (Ddg.weightedCircumcenter lab lac lbc A).2 / A)
+    let o : ℝ × ℝ := ((weightedCircumcenter lab lac lbc A).1 / A,
+      (weightedCircumcenter lab lac lbc A).2 / A)
     sqDist2 (0, 0) o = sqDist2 (lab, 0) o ∧ sqDist2 (0, 0) o = sqDist2 (cx, h) o := by
   intro o
   have o1 : o.1 = lab / 2 := by
@@ -162,22 +176,22 @@ theorem weightedCircumcenter_equidistant {lab lac lbc A cx h : ℝ} (hA : A ≠ 
     linear_combination (-1 : ℝ) * hc + hcx' / 2 + 2 * key2
 
 /-- **The same with the Heron area**: for a triangle with the sides `ℓ_ab, ℓ_ac, ℓ_bc` (strict
-triangle inequalities) and `A = triArea`, `c` the oracle's apex
+triangle inequalities) and `A = triArea`, `c` the apex
 `(diamondX ℓ_ab ℓ_ac ℓ_bc, diamondH ℓ_ab ℓ_ac ℓ_bc)`, the point
 `weightedCircumcenter ℓ_ab ℓ_ac ℓ_bc A / A` is equidistant from `0`, `(ℓ_ab, 0)` and `c`.
 
 [formula: it-circumcenter-vector] -/
 theorem weightedCircumcenter_equidistant_heron {lab lac lbc : ℝ} (ht : IsTriangle lab lac lbc) :
     let A := triArea lab lac lbc
-    let o : ℝ × ℝ := ((Ddg.weightedCircumcenter lab lac lbc A).1 / A,
-      (Ddg.weightedCircumcenter lab lac lbc A).2 / A)
+    let o : ℝ × ℝ := ((weightedCircumcenter lab lac lbc A).1 / A,
+      (weightedCircumcenter lab lac lbc A).2 / A)
     sqDist2 (0, 0) o = sqDist2 (lab, 0) o ∧
-      sqDist2 (0, 0) o = sqDist2 (Ddg.diamondX lab lac lbc, Ddg.diamondH lab lac lbc) o := by
+      sqDist2 (0, 0) o = sqDist2 (diamondX lab lac lbc, diamondH lab lac lbc) o := by
   intro A o
   have hab : 0 < lab := by linarith [ht.lt_b, ht.lt_c]
   have hA : 0 < A := triArea_pos ht
   obtain ⟨-, -, -, hb, -, -, -⟩ := diamond_isometric ht ht
-  have hc : Ddg.diamondX lab lac lbc ^ 2 + Ddg.diamondH lab lac lbc ^ 2 = lac ^ 2 := by
+  have hc : diamondX lab lac lbc ^ 2 + diamondH lab lac lbc ^ 2 = lac ^ 2 := by
     have h0 := dist2_sq' (0, 0) (apexK lab lac lbc)
     rw [hb] at h0
     rw [h0]

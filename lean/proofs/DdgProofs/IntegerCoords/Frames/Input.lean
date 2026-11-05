@@ -70,7 +70,6 @@ namespace DDG.IntegerCoords
 namespace Frames
 
 open Real
-open scoped DDG.Oracle
 
 /-- The star of an input vertex as the signposts see it: the input corner angles counter-clockwise
 from the reference halfedge, and whether the vertex is on the boundary. -/
@@ -86,7 +85,7 @@ variable (S : Star)
 def Θ : ℝ := S.θs.sum
 
 /-- `s = 2π/Θ` (`π/Θ` on the boundary), the oracle's (and the Rust) `angle_scale`. -/
-def scale : ℝ := Ddg.angleScale S.bdry S.Θ
+def scale : ℝ := Intrinsic.angleScale S.bdry S.Θ
 
 /-- Input corner `j`. -/
 def θ (j : ℕ) : ℝ := S.θs.getD j 0
@@ -163,7 +162,7 @@ theorem frameAngle_full_turn (h : S.Ok) (hb : S.bdry = false) :
 corners before it (`it-signpost-update`), for every outgoing input halfedge `j < deg`.
 [formula: ic-input-aligned-frame] -/
 theorem inSign_eq_fold (h : S.Ok) {j : ℕ} (hj : j < S.θs.length) :
-    S.inSign j = (S.θs.take j).foldl (fun φ θ => Ddg.signpostUpdate S.bdry φ θ S.Θ) 0 := by
+    S.inSign j = (S.θs.take j).foldl (fun φ θ => Intrinsic.signpostUpdate S.bdry φ θ S.Θ) 0 := by
   cases hb : S.bdry
   · have hlt := pre_lt h hj
     have hΘ := h.Θ_pos

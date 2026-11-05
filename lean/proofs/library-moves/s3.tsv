@@ -1,0 +1,53 @@
+# Library step S3 (de-oracle Intrinsic): native ℝ definitions, app bridges, modules created.
+#
+# Modules created (app):
+#   DdgProofs.Oracle.Geometry  bridges Ddg.{crossingParam,baryLength2,baryLength,det3,subTriangleArea,
+#                              baryInner,cotFromInner} = DDG.* (Geometry/Barycentric)
+#   DdgProofs.Oracle.Intrinsic (existed; rewritten) bridges Ddg.foo = DDG.Intrinsic.foo for the 32
+#                              intrinsic formulas, all in namespace DDG.Oracle
+#
+# Native definitions introduced (39). Oracle name -> native name; all keep the oracle's short name
+# except the level-crossing parameter (DDG.crossingParam is already the segment crossing of
+# Bff.Quality / Geometry.SegmentCrossing):
+#   Intrinsic/Diamond.lean (DDG.Intrinsic): diamondX diamondH flippedLength flippedLengthFromLengths
+#     flipArea1 flipArea2 flipConvex unfoldApex
+#   Delaunay/Local.lean (DDG.Intrinsic): delaunayExcess delaunayHolds cotanWeight cotanWeightFromLengths
+#     oppositeAngles
+#   Intrinsic/Signpost.lean (DDG.Intrinsic): angleScale reduceFullTurn signpostUpdate
+#   Intrinsic/Trace.lean (DDG.Intrinsic): axisCrossingT axisCrossingX apexAboveAxis
+#   Intrinsic/Barycentric.lean (DDG.Intrinsic): signedArea2 barycentric pointFromDistances planeDistance
+#     cornerDistances edgeSplitLengths circumWeight circumcenterBary
+#   Intrinsic/Move.lean (DDG.Intrinsic): movedLength movedDoubleArea weightedCircumcenter
+#   Delaunay/ODT.lean (DDG.Intrinsic): weightedBarycenter odtDisplacement
+#   Geometry/Barycentric.lean (DDG): levelCrossingParam baryLength2 baryLength det3 subTriangleArea
+#     baryInner cotFromInner
+#
+# Theorems moved Cuts/Crossing.lean (app) -> Geometry/Barycentric.lean (library), names unchanged
+# (DDG.Cuts.*, restated on the native definitions): crossingParam_eq interp_crossingParam
+#   interp_eq_zero_iff crossingParam_mem_Ico crossingParam_mem_Ioc crossingParam_mem_Icc baryLength2_eq
+#   baryLength_eq baryLength2_eq_norm_sq baryLength_eq_norm baryLength_eq_dist baryLength2_nonneg det3_eq
+#   subTriangleArea_eq heronPoly_baryLength2 subTriangleArea_eq_triArea triArea_bary_points baryInner_eq
+#   baryInner_self baryInner_eq_inner cotFromInner_eq_cornerCot cutFace_det_sum_pc cutFace_det_sum_bq
+# (Cuts/Crossing.lean keeps clampCrossing_*, crossingMoved_eq_true_iff, abs_clampCrossing_sub_le.)
+#
+# Library theorems keep their names and are restated on the native definitions; the `_eq` lemmas
+# that unfolded the oracle's definitions are now native unfolding lemmas of the same name
+# (DDG.Intrinsic.diamondX_eq, ..., DDG.Cuts.baryLength2_eq, ...). Changed statements:
+#   DDG.Intrinsic.oppositeAngles_eq has no IsTriangle hypotheses any more (rfl); the oracle
+#   version is DDG.Oracle.oppositeAngles_eq (hk hl).
+#   DDG.Cuts.crossingParamRegions_eq (app, Cuts/Regions) now ends in DDG.levelCrossingParam;
+#   DDG.Cuts.crossingParam_neg is about DDG.levelCrossingParam.
+#
+# Renamed declarations (the old oracle bridges of Oracle/Intrinsic.lean; the old names now hold
+# the native unfolding lemmas). Section for S4's rename map: old <TAB> new
+DDG.Intrinsic.delaunayExcess_eq	DDG.Oracle.delaunayExcess_eq
+DDG.Intrinsic.delaunayHolds_iff	DDG.Oracle.delaunayHolds_eq
+DDG.Intrinsic.cotanWeight_eq	DDG.Oracle.cotanWeight_eq
+DDG.Intrinsic.cotanWeightFromLengths_eq	DDG.Oracle.cotanWeightFromLengths_eq
+DDG.Intrinsic.oppositeAngles_eq	DDG.Oracle.oppositeAngles_eq
+#
+# Native definitions to rename in S4 (§4: Cuts.baryLength* -> DDG.*): none, they are DDG.* already;
+# the moved theorems DDG.Cuts.* above are renamed to DDG.* in S4.
+#
+# Module moves: none in S3 (current <TAB> final module for the new app module):
+DdgProofs.Oracle.Geometry	DdgProofs.Oracle.Geometry

@@ -452,7 +452,7 @@ theorem hopfLaxTriangle_isLeast_intrinsic {lij lik ljk : ℝ} (h : IsTriangle li
     rw [← dist_eq_norm, ← dist_eq_norm, ← dist_eq_norm, hij, hjk, dist_comm xk xi, hik] at hb
     have e2 : (1 : ℝ) • xi + (-lam) • xj + (-(1 - lam)) • xk =
         xi - (lam • xj + (1 - lam) • xk) := by module
-    rw [hb, e2]
+    rw [Oracle.baryLength_eq, hb, e2]
   rw [e]
   exact key
 
