@@ -8,6 +8,8 @@ import DdgProofs.Closed
 import DdgProofs.Components
 import DdgProofs.Solver
 import DdgProofs.Triangle
+import DdgProofs.Geometry.PlaneLemmas
+import DdgProofs.Geometry.Barycentric
 import DdgProofs.Cotan
 import DdgProofs.GaussBonnet
 import DdgProofs.Yamabe
@@ -18,6 +20,7 @@ import DdgProofs.Oracle.Regularized
 import DdgProofs.Oracle.Unbounded
 import DdgProofs.Oracle.Mesh
 import DdgProofs.Oracle.NormalCoords
+import DdgProofs.Oracle.Intrinsic
 import DdgProofs.Bff.Laplace
 import DdgProofs.Bff.Cut
 import DdgProofs.Bff.Curve
@@ -42,7 +45,7 @@ import DdgProofs.ConeFeedback
 import DdgProofs.Cuts.VertexLimit
 import DdgProofs.Cuts.Stop
 import DdgProofs.Intrinsic.Diamond
-import DdgProofs.Intrinsic.Delaunay
+import DdgProofs.Intrinsic.FlipAngles
 import DdgProofs.Delaunay.Local
 import DdgProofs.Delaunay.Rippa
 import DdgProofs.Delaunay.Potential
@@ -79,6 +82,7 @@ import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric
 import DdgProofs.Intrinsic.Move
+import DdgProofs.Delaunay.ODT
 import DdgProofs.IntrinsicApps.HeatFem
 import DdgProofs.Intrinsic.AppsAmrVector
 import DdgProofs.Developability.Vec

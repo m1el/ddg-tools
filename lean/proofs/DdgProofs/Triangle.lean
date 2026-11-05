@@ -17,7 +17,10 @@ the sides `b` and `c`.
 * the three corner angles sum to `π` (`cornerAngle_add_cornerAngle_add_cornerAngle`);
 * for points of a Euclidean space these are the angle and the area of the triangle
   (`angle_eq_cornerAngle`, `half_mul_sin_angle_eq_triArea`);
-* behaviour under uniform scaling (`cornerAngle_smul`, `cornerCot_smul`, `triArea_smul`).
+* behaviour under uniform scaling (`cornerAngle_smul`, `cornerCot_smul`, `triArea_smul`);
+* symmetry in the two sides adjacent to the corner (`IsTriangle.swap`,
+  `Intrinsic.cornerAngle_swap`), and the strict triangle inequalities from a positive Heron
+  product (`Intrinsic.isTriangle_of_heron_pos`).
 -/
 
 noncomputable section
@@ -43,6 +46,10 @@ theorem pos_c (h : IsTriangle a b c) : 0 < c := by linarith [h.lt_a, h.lt_b]
 
 /-- Cyclic relabelling. -/
 theorem rotate (h : IsTriangle a b c) : IsTriangle b c a := ⟨h.lt_b, h.lt_c, h.lt_a⟩
+
+/-- The triangle inequalities do not depend on the order of the last two sides. -/
+theorem swap (h : IsTriangle a b c) : IsTriangle a c b :=
+  ⟨by linarith [h.lt_a], by linarith [h.lt_c], by linarith [h.lt_b]⟩
 
 /-- The side lengths `3, 4, 5` form a triangle: the hypothesis is satisfiable. -/
 example : IsTriangle 3 4 5 := ⟨by norm_num, by norm_num, by norm_num⟩
@@ -272,6 +279,52 @@ theorem cornerCot_smul {s : ℝ} (hs : s ≠ 0) (a b c : ℝ) :
   field_simp
 
 end
+
+/-! ## Recognizing a triangle; the corner angle is symmetric in the adjacent sides -/
+
+namespace Intrinsic
+
+/-- Nonnegative numbers whose Heron product is positive satisfy the strict triangle
+inequalities. -/
+theorem isTriangle_of_heron_pos {x y z : ℝ} (hx : 0 ≤ x) (hy : 0 ≤ y) (hz : 0 ≤ z)
+    (hP : 0 < (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y)) : IsTriangle x y z := by
+  have hS : 0 ≤ x + y + z := by linarith
+  refine ⟨?_, ?_, ?_⟩
+  · by_contra hcon
+    have h1 : y - x + z ≤ 0 := by linarith
+    have h2 : 0 ≤ x - y + z := by linarith
+    have h3 : 0 ≤ x - z + y := by linarith
+    have : (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y) =
+        (y - x + z) * ((x + y + z) * (x - y + z) * (x - z + y)) := by ring
+    rw [this] at hP
+    have := mul_nonpos_of_nonpos_of_nonneg h1 (mul_nonneg (mul_nonneg hS h2) h3)
+    linarith
+  · by_contra hcon
+    have h1 : x - y + z ≤ 0 := by linarith
+    have h2 : 0 ≤ y - x + z := by linarith
+    have h3 : 0 ≤ x - z + y := by linarith
+    have : (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y) =
+        (x - y + z) * ((x + y + z) * (y - x + z) * (x - z + y)) := by ring
+    rw [this] at hP
+    have := mul_nonpos_of_nonpos_of_nonneg h1 (mul_nonneg (mul_nonneg hS h2) h3)
+    linarith
+  · by_contra hcon
+    have h1 : x - z + y ≤ 0 := by linarith
+    have h2 : 0 ≤ y - x + z := by linarith
+    have h3 : 0 ≤ x - y + z := by linarith
+    have : (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y) =
+        (x - z + y) * ((x + y + z) * (y - x + z) * (x - y + z)) := by ring
+    rw [this] at hP
+    have := mul_nonpos_of_nonpos_of_nonneg h1 (mul_nonneg (mul_nonneg hS h2) h3)
+    linarith
+
+/-- The corner angle does not depend on the order of the two adjacent sides. -/
+theorem cornerAngle_swap (a b c : ℝ) : cornerAngle a c b = cornerAngle a b c := by
+  unfold cornerAngle
+  congr 1
+  ring
+
+end Intrinsic
 
 /-! ## Link with Euclidean geometry (Mathlib) -/
 

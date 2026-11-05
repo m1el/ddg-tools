@@ -1,0 +1,106 @@
+# Library step S2b (intrinsic / FEM / Delaunay splits): modules created or to be moved.
+# Columns: current module <TAB> final module. Declarations keep their full names in S2.
+#
+# Removed module: DdgProofs.Intrinsic.Delaunay (split into the three pieces below; no file left).
+#
+# Declarations moved (old file -> new file):
+#   Intrinsic/Diamond.lean -> Triangle.lean: DDG.IsTriangle.swap, DDG.Intrinsic.isTriangle_of_heron_pos
+#   Intrinsic/Delaunay.lean -> Triangle.lean: DDG.Intrinsic.cornerAngle_swap
+#   Intrinsic/Diamond.lean -> Geometry/PlaneLemmas.lean: DDG.Intrinsic.dist2_comm, dist2_nonneg,
+#     dist2_sq', dist2_pos_of_sda_ne, isTriangle_of_sda_ne, two_mul_triArea_dist2
+#   Intrinsic/Delaunay.lean -> Intrinsic/FlipAngles.lean (git mv; the rest cut out):
+#     DDG.Intrinsic.quad_angle_sum, flip_angle_i, flip_angle_j, flip_convex, flip_angle_sums
+#   Intrinsic/Delaunay.lean -> Delaunay/Local.lean (criterion, section in namespace DDG.Intrinsic):
+#     DDG.Intrinsic.cot_add_cot, sin_nonneg_iff_le_pi, div_nonneg_iff_of_pos, cotanWeight_eq_sin_div,
+#     cotanWeight_nonneg_iff, cotanWeight_pos_iff, cotanWeight_eq_zero_iff, half_cotanWeight_sign,
+#     cotanWeightFromLengths_eq_cot, delaunay_iff_cotanWeight_nonneg,
+#     angle_sum_le_pi_iff_cotanWeight_nonneg, pi_lt_angle_sum_iff_cotanWeight_neg,
+#     delaunay_of_same_triangle, diamondConvex_of_pi_le, diamondConvex_of_not_delaunay,
+#     diamondConvex_of_cotanWeight_neg, flip_delaunayExcess, flip_of_not_delaunay, flip_of_tie,
+#     offDiag_eq_neg_half_cotanWeight, cotanWeight_eq_neg_two_mul_offDiag, offDiag_nonpos_iff
+#   Intrinsic/Delaunay.lean -> Oracle/Intrinsic.lean (app, oracle bridges):
+#     DDG.Intrinsic.delaunayExcess_eq, delaunayHolds_iff, cotanWeight_eq, cotanWeightFromLengths_eq,
+#     oppositeAngles_eq, delaunayExcess_eq'
+#   Intrinsic/Move.lean -> Geometry/PlaneLemmas.lean: DDG.Intrinsic.rot, nsq, toDual, toDual_apply
+#   Intrinsic/Move.lean -> Delaunay/ODT.lean (section `it-odt-update`): DDG.Intrinsic.weightedBarycenter_eq,
+#     odtDisplacement_eq, circumVec, circumVec_fst, circumVec_snd, circumVec_equidistant,
+#     circumVec_layout, odtEnergy, odtGradient, starArea, triGrad, hasFDerivAt_triTerm, forceF,
+#     triGrad_split, sum_link_sides, sum_triGrad, hasFDerivAt_odtEnergy, hasDerivAt_odtEnergy_line,
+#     starArea_indep, triTerm_add, odtEnergy_add, odtDisplacement_eq_gradient, odtEnergy_step,
+#     odtEnergy_step_le
+#   TriangleIntegral/Fem.lean -> Delaunay/ODT.lean (section `it-odt-interpolation-error`):
+#     DDG.TriangleIntegral.odtInterp, odtInterp_sub, nsq_le_odtInterp, continuous_odtInterp,
+#     continuous_nsq, integral_odt_error_eq_sides, integral_abs_odt_error, odtEnergy_eq_sum_integral,
+#     odtEnergy_eq_sum_error_add
+#     (bary_nonneg_of_mem and measurableSet_triangle of that section stay in Fem.lean: FEM and
+#     Bff.ConformalEnergy use them)
+#   TriangleIntegral/Tiling.lean -> Delaunay/ODT.lean (section Odt, `it-odt-energy`):
+#     DDG.TriangleIntegral.integrableOn_odt_error, IsTiling.integral_abs_odt_error_eq_sum,
+#     IsTiling.integral_abs_odt_error, IsTiling.integral_abs_odt_error_eq_sides, starAreaOf,
+#     sum_corners_eq_sum_vertices, IsTiling.integral_abs_odt_error_vertices, fan, fan_term,
+#     odt_error_star, odt_error_sub, odt_error_step_le
+#   Cuts/Crossing.lean -> Geometry/Barycentric.lean (the oracle-free part only):
+#     DDG.Cuts.norm_sq_sum_smul_of_sum_eq_zero, heronPoly, triArea_eq_sqrt_heronPoly
+#     (baryLength*, baryInner*, subTriangleArea*, det3_eq, cotFromInner_eq_cornerCot, cutFace_det_*
+#     are stated about the oracle's Ddg.* and stay in Cuts/Crossing.lean until the S3 de-oracling)
+DdgProofs.Geometry.PlaneLemmas	DDG.Geometry.PlaneLemmas
+DdgProofs.Intrinsic.FlipAngles	DDG.Intrinsic.FlipAngles
+DdgProofs.Oracle.Intrinsic	DdgProofs.Oracle.Intrinsic
+DdgProofs.Delaunay.ODT	DDG.Delaunay.ODT
+DdgProofs.Geometry.Barycentric	DDG.Geometry.Barycentric
+#
+# The other modules of the S2b scope, with their final names from the module map (LIBRARY-PLAN.md §2),
+# for step S4. App modules that keep their path (Cuts.Crossing, IS.{Operators,Oracle,Transport,Wrap})
+# and the aggregators (TriangleIntegral, IntrinsicSimplification) are not listed.
+DdgProofs.Triangle	DDG.Geometry.Triangle
+DdgProofs.Intrinsic.AppsAmrVector	DDG.VectorFields.Holonomy
+DdgProofs.Intrinsic.Barycentric	DDG.Intrinsic.Barycentric
+DdgProofs.Intrinsic.Diamond	DDG.Intrinsic.Diamond
+DdgProofs.Intrinsic.Move	DDG.Intrinsic.Move
+DdgProofs.Intrinsic.Signpost	DDG.Intrinsic.Signpost
+DdgProofs.Intrinsic.SingularityIndex	DDG.VectorFields.PoincareHopf
+DdgProofs.Intrinsic.Trace	DDG.Intrinsic.Trace
+DdgProofs.IntrinsicApps.HeatFem	DDG.FEM.Heat
+DdgProofs.TriangleIntegral.Basic	DDG.FEM.TriangleIntegral
+DdgProofs.TriangleIntegral.BetaExp	DDG.FEM.BetaExp
+DdgProofs.TriangleIntegral.Fem	DDG.FEM.Elements
+DdgProofs.TriangleIntegral.Flux	DDG.FEM.Flux
+DdgProofs.TriangleIntegral.Tiling	DDG.FEM.Tiling
+DdgProofs.IntrinsicSimplification.Curvature	DDG.Conformal.CETM.Curvature
+DdgProofs.IntrinsicSimplification.Flatten	DDG.Conformal.CETM.Flatten
+DdgProofs.IntrinsicSimplification.Interpolation	DDG.Conformal.CETM.Interpolation
+DdgProofs.IntrinsicSimplification.Monotone	DDG.Conformal.CETM.Monotone
+DdgProofs.IntrinsicSimplification.Removal	DDG.Intrinsic.FlatVertexRemoval
+DdgProofs.IntrinsicSimplification.Wasserstein	DDG.Optimization.Wasserstein
+DdgProofs.Delaunay.BoundaryFan	DDG.Delaunay.BoundaryFan
+DdgProofs.Delaunay.Complex	DDG.Mesh.Gluing
+DdgProofs.Delaunay.Encroachment	DDG.Delaunay.Planar.Encroachment
+DdgProofs.Delaunay.Flip	DDG.Mesh.GluingFlip
+DdgProofs.Delaunay.FlipQueue	DDG.Delaunay.FlipQueue
+DdgProofs.Delaunay.FromTriMesh	DDG.Delaunay.FromTriMesh
+DdgProofs.Delaunay.Local	DDG.Delaunay.Local
+DdgProofs.Delaunay.Metric	DDG.Delaunay.Metric
+DdgProofs.Delaunay.PlanarBasic	DDG.Delaunay.Planar.Basic
+DdgProofs.Delaunay.PlanarBridge	DDG.Delaunay.PlanarBridge
+DdgProofs.Delaunay.PlanarExistence	DDG.Delaunay.Planar.Existence
+DdgProofs.Delaunay.PlanarFlip	DDG.Delaunay.Planar.Flip
+DdgProofs.Delaunay.PlanarFlipCount	DDG.Delaunay.Planar.FlipCount
+DdgProofs.Delaunay.PlanarInsertion	DDG.Delaunay.Planar.Insertion
+DdgProofs.Delaunay.PlanarLemma	DDG.Delaunay.Planar.Lemma
+DdgProofs.Delaunay.PlanarTermination	DDG.Delaunay.Planar.Termination
+DdgProofs.Delaunay.PlanarUniqueness	DDG.Delaunay.Planar.Uniqueness
+DdgProofs.Delaunay.Potential	DDG.Delaunay.Potential
+DdgProofs.Delaunay.Rippa	DDG.Delaunay.Rippa
+DdgProofs.Delaunay.Surface.Angle	DDG.Delaunay.Surface.Angle
+DdgProofs.Delaunay.Surface.Count	DDG.Delaunay.Surface.Count
+DdgProofs.Delaunay.Surface.Fan	DDG.Delaunay.Surface.Fan
+DdgProofs.Delaunay.Surface.Finite	DDG.Delaunay.Surface.Finite
+DdgProofs.Delaunay.Surface.FlipEdge	DDG.Delaunay.Surface.FlipEdge
+DdgProofs.Delaunay.Surface.FlipFace	DDG.Delaunay.Surface.FlipFace
+DdgProofs.Delaunay.Surface.Layout	DDG.Delaunay.Surface.Layout
+DdgProofs.Delaunay.Surface.Overlay	DDG.Delaunay.Surface.Overlay
+DdgProofs.Delaunay.Surface.Plane	DDG.Delaunay.Surface.Plane
+DdgProofs.Delaunay.Surface.Quad	DDG.Delaunay.Surface.Quad
+DdgProofs.Delaunay.Surface.Relayout	DDG.Delaunay.Surface.Relayout
+DdgProofs.Delaunay.Surface.Segment	DDG.Delaunay.Surface.Segment
+DdgProofs.Delaunay.Termination	DDG.Delaunay.Termination

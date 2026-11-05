@@ -2,7 +2,7 @@ import DdgProofs.TriangleIntegral.Basic
 import DdgProofs.Cotan
 import DdgProofs.Cuts.Weighted
 import DdgProofs.IntrinsicApps.HeatFem
-import DdgProofs.Intrinsic.Move
+import DdgProofs.Geometry.PlaneLemmas
 
 /-!
 # Finite element integrals over a triangle
@@ -32,10 +32,6 @@ functions of the corners and `A = area p` the Heron area of the Euclidean side l
   `2∫_T |∂̄f|² = ½(∫|∇a|² + ∫|∇b|²) − ½ sda(f(p₀), f(p₁), f(p₂))` for `f = a + ib` linear
   (`integral_dbarSq`), zero iff `f` satisfies the Cauchy–Riemann equations
   (`integral_dbarSq_eq_zero_iff`).
-* **`it-odt-interpolation-error`** — Chen–Holst Lemma 4.1 on one triangle, for `u = |x|²`:
-  `∫_T |u_I − u| = (A/3) Σ|pᵢ|² − ∫_T |x|² = (A/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)`
-  (`integral_abs_odt_error`, `integral_odt_error_eq_sides`), and the star energy `odtEnergy` of
-  `Intrinsic/Move.lean` is `Σ_k ∫_{T_k} u_I` (`odtEnergy_eq_sum_integral`).
 * **`app-amr-element-norms`** — for linear `R`: `‖R‖²_T = (A/6)(Σ rᵢ² + Σ_{i<j} rᵢ rⱼ)` and
   `‖R − R̄‖²_T = ‖R‖²_T − A R̄²`, `R̄` the corner mean (`integral_amr_sq`, `integral_amr_osc`), as
   `amr::estimate` evaluates them.
@@ -440,30 +436,7 @@ theorem integral_dbarSq_eq_zero_iff (hD : D p ≠ 0) (ua ub : Fin 3 → ℝ) :
     rw [h1, h2]
     ring
 
-/-! ## `it-odt-interpolation-error`: Chen–Holst Lemma 4.1 on a triangle -/
-
-open Intrinsic in
-/-- The linear interpolant of `u(x) = |x|²`. -/
-def odtInterp (p : Fin 3 → ℝ × ℝ) : ℝ × ℝ → ℝ := interp p fun i => nsq (p i)
-
-open Intrinsic in
-/-- `u_I − u = Σ_{i<j} λᵢ λⱼ |pᵢ − pⱼ|²` for `u = |x|²` (everywhere in the plane). -/
-theorem odtInterp_sub (hD : D p ≠ 0) (x : ℝ × ℝ) :
-    odtInterp p x - nsq x = bary p 0 x * bary p 1 x * sqDist2 (p 0) (p 1) +
-      bary p 1 x * bary p 2 x * sqDist2 (p 1) (p 2) + bary p 2 x * bary p 0 x * sqDist2 (p 2) (p 0) := by
-  have hsum := sum_bary x hD
-  have hx := sum_bary_smul x hD
-  have hx1 := congrArg Prod.fst hx
-  have hx2 := congrArg Prod.snd hx
-  simp only [Prod.fst_add, Prod.snd_add, Prod.smul_fst, Prod.smul_snd, smul_eq_mul] at hx1 hx2
-  simp only [odtInterp, interp, Fin.sum_univ_three, nsq, sqDist2]
-  set l0 := bary p 0 x
-  set l1 := bary p 1 x
-  set l2 := bary p 2 x
-  rw [← hx1, ← hx2]
-  linear_combination (-(l0 * ((p 0).1 ^ 2 + (p 0).2 ^ 2) + l1 * ((p 1).1 ^ 2 + (p 1).2 ^ 2) +
-    l2 * ((p 2).1 ^ 2 + (p 2).2 ^ 2)) +
-    (l0 * (p 0).1 + l1 * (p 1).1 + l2 * (p 2).1) * (0 : ℝ)) * hsum
+/-! ## The hat functions are nonnegative on the triangle; the triangle is measurable -/
 
 theorem bary_nonneg_of_mem (hD : D p ≠ 0) {x : ℝ × ℝ} (hx : x ∈ triangle p) (i : Fin 3) :
     0 ≤ bary p i x := by
@@ -473,103 +446,8 @@ theorem bary_nonneg_of_mem (hD : D p ≠ 0) {x : ℝ × ℝ} (hx : x ∈ triangl
   · show 0 ≤ bary p 1 _; rw [bary_triMap_one hD]; exact h1
   · show 0 ≤ bary p 2 _; rw [bary_triMap_two hD]; exact h2
 
-open Intrinsic in
-/-- **The interpolant of the convex `|x|²` lies above it on the triangle.** -/
-theorem nsq_le_odtInterp (hD : D p ≠ 0) {x : ℝ × ℝ} (hx : x ∈ triangle p) : nsq x ≤ odtInterp p x := by
-  have h := odtInterp_sub hD x
-  have := bary_nonneg_of_mem hD hx
-  have h0 := this 0
-  have h1 := this 1
-  have h2 := this 2
-  have := sqDist2_nonneg (p 0) (p 1)
-  have := sqDist2_nonneg (p 1) (p 2)
-  have := sqDist2_nonneg (p 2) (p 0)
-  have : 0 ≤ odtInterp p x - nsq x := by rw [h]; positivity
-  linarith
-
 theorem measurableSet_triangle (p : Fin 3 → ℝ × ℝ) : MeasurableSet (triangle p) :=
   (isCompact_triangle p).isClosed.measurableSet
-
-theorem continuous_odtInterp (p : Fin 3 → ℝ × ℝ) : Continuous (odtInterp p) :=
-  continuous_interp p _
-
-theorem continuous_nsq : Continuous Intrinsic.nsq := by
-  unfold Intrinsic.nsq; fun_prop
-
-open Intrinsic in
-/-- **The interpolation error of `|x|²` on a triangle** in closed form:
-`∫_T |u_I − u| = (A/12)(ℓ₁₂² + ℓ₂₀² + ℓ₀₁²)`.
-
-[formula: it-odt-interpolation-error] -/
-theorem integral_odt_error_eq_sides (hD : D p ≠ 0) :
-    ∫ x in triangle p, |odtInterp p x - nsq x| =
-      area p / 12 * (sideLen p 0 ^ 2 + sideLen p 1 ^ 2 + sideLen p 2 ^ 2) := by
-  rw [setIntegral_congr_fun (measurableSet_triangle p) (fun x hx =>
-    abs_of_nonneg (sub_nonneg.2 (nsq_le_odtInterp hD hx)))]
-  simp_rw [odtInterp_sub hD]
-  have hi : ∀ (i j : Fin 3) (c : ℝ), Integrable (fun x => bary p i x * bary p j x * c)
-      (volume.restrict (triangle p)) := fun i j c =>
-    integrableOn_triangle p (((continuous_bary p i).mul (continuous_bary p j)).mul continuous_const)
-  rw [integral_add ?_ (hi 2 0 _), integral_add (hi 0 1 _) (hi 1 2 _),
-    integral_mul_const, integral_mul_const, integral_mul_const, integral_bary_mul_bary hD,
-    integral_bary_mul_bary hD, integral_bary_mul_bary hD, sideLen_zero, sideLen_one, sideLen_two,
-    dist2_sq, dist2_sq, dist2_sq]
-  · simp only [Fin.isValue, Fin.reduceEq, ite_false]
-    rw [show sqDist2 (p 2) (p 0) = sqDist2 (p 0) (p 2) by unfold sqDist2; ring]
-    ring
-  · exact (hi 0 1 _).add (hi 1 2 _)
-
-open Intrinsic in
-/-- **Chen–Holst Lemma 4.1 on one triangle** (`d = 2`, uniform density): for `u(x) = |x|²` and its
-linear interpolant `u_I`, `∫_T |u_I − u| = (1/3) Σᵢ |pᵢ|² |T| − ∫_T |x|²`.
-
-[formula: it-odt-interpolation-error] -/
-theorem integral_abs_odt_error (hD : D p ≠ 0) :
-    ∫ x in triangle p, |odtInterp p x - nsq x| =
-      (nsq (p 0) + nsq (p 1) + nsq (p 2)) * area p / 3 - ∫ x in triangle p, nsq x := by
-  rw [setIntegral_congr_fun (measurableSet_triangle p) (fun x hx =>
-    abs_of_nonneg (sub_nonneg.2 (nsq_le_odtInterp hD hx))),
-    integral_sub (integrableOn_triangle p (continuous_odtInterp p))
-      (integrableOn_triangle p continuous_nsq), odtInterp, integral_interp hD]
-  ring
-
-open Intrinsic in
-/-- **The star energy of `Intrinsic/Move.lean` is the integral of the interpolant**: with
-counter-clockwise triangles `T_k = (x, p_k, p_{k+1})`, `odtEnergy p n x = Σ_k ∫_{T_k} u_I`; with
-`integral_abs_odt_error` this is Lemma 4.1 for the star, `Σ_k ∫_{T_k} |u_I − u| + Σ_k ∫_{T_k} |y|²`.
-
-[formula: it-odt-interpolation-error] -/
-theorem odtEnergy_eq_sum_integral (q : ℕ → ℝ × ℝ) (n : ℕ) (x : ℝ × ℝ)
-    (hpos : ∀ k < n, 0 < sda x (q k) (q (k + 1))) :
-    odtEnergy q n x = ∑ k ∈ Finset.range n, ∫ y in triangle ![x, q k, q (k + 1)],
-      odtInterp ![x, q k, q (k + 1)] y := by
-  unfold odtEnergy
-  refine Finset.sum_congr rfl fun k hk => ?_
-  have h := hpos k (Finset.mem_range.1 hk)
-  have hD : D ![x, q k, q (k + 1)] = sda x (q k) (q (k + 1)) := rfl
-  rw [odtInterp, integral_interp (by rw [hD]; exact h.ne'),
-    show area ![x, q k, q (k + 1)] = |D ![x, q k, q (k + 1)]| / 2 by
-      rw [abs_D_eq_two_mul_area]; ring, hD, abs_of_pos h]
-  simp only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two, Matrix.head_cons,
-    Matrix.tail_cons]
-  ring
-
-open Intrinsic in
-/-- **Lemma 4.1 for a star** (as a sum over its triangles): `S(x) = Σ_k ∫_{T_k} |u_I − u| +
-Σ_k ∫_{T_k} |y|²`, so on a fixed tiling of the star region `S` and the interpolation error differ by
-a constant. -/
-theorem odtEnergy_eq_sum_error_add (q : ℕ → ℝ × ℝ) (n : ℕ) (x : ℝ × ℝ)
-    (hpos : ∀ k < n, 0 < sda x (q k) (q (k + 1))) :
-    odtEnergy q n x = ∑ k ∈ Finset.range n, ((∫ y in triangle ![x, q k, q (k + 1)],
-      |odtInterp ![x, q k, q (k + 1)] y - nsq y|) + ∫ y in triangle ![x, q k, q (k + 1)], nsq y) := by
-  rw [odtEnergy_eq_sum_integral q n x hpos]
-  refine Finset.sum_congr rfl fun k hk => ?_
-  have h := hpos k (Finset.mem_range.1 hk)
-  have hD : D ![x, q k, q (k + 1)] ≠ 0 := h.ne'
-  rw [integral_abs_odt_error hD, odtInterp, integral_interp hD]
-  simp only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two, Matrix.head_cons,
-    Matrix.tail_cons]
-  ring
 
 /-! ## `app-amr-element-norms`: the element norms of the residual estimator -/
 
