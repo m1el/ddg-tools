@@ -11,6 +11,8 @@
 #   Cotan -> Cotan (kept as Mesh/TriMesh): TriMesh, la lb lc, cotA-C, angleA-C, area, Valid, scale, angleA/B/C_scale
 #   Cotan -> Laplace/Cotan: cotEnergy, cotan_formula, faceEnergy, cotOpp, offDiag, laplacian*, Adj, Connected, mass, vertexArea, totalArea*, laplacian_scale, mass_scale
 #   GaussBonnet -> Laplace/Cotan: TriMesh.sum_cone_eq_two_pi_eulerChar
+#   Solver -> Laplace/Kernel: Solver.mulVec_eq_of_sum_eq, Solver.sum_eq_zero_of_mulVec_eq
+#   Newton -> Optimization/PiecewiseAffine: IsPiecewiseAffine, newton_stageI_exact, newton_stageII_exact
 DdgProofs.Bff.Quality	DDG.Geometry.Plane
 DdgProofs.Conformal.Distortion	DDG.Conformal.Distortion
 DdgProofs.Geometry.SignedAngle	DDG.Geometry.SignedAngle
@@ -21,3 +23,7 @@ DdgProofs.Evaluated	DDG.Geometry.Stable
 DdgProofs.Core.Fields	DdgProofs.Core.Fields
 DdgProofs.Cotan	DDG.Mesh.TriMesh
 DdgProofs.Laplace.Cotan	DDG.Laplace.Cotan
+DdgProofs.Laplace.Kernel	DDG.Laplace.Kernel
+DdgProofs.Optimization.PiecewiseAffine	DDG.Optimization.PiecewiseAffine
+DdgProofs.Newton	DDG.OptimalCones.Newton
+DdgProofs.Solver	DdgProofs.OptimalCones.Solver

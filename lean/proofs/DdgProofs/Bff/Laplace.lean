@@ -1,5 +1,5 @@
 import DdgProofs.Yamabe
-import DdgProofs.Solver
+import DdgProofs.Laplace.Kernel
 import DdgProofs.Bff.Curve
 import DdgProofs.Laplace.Cotan
 

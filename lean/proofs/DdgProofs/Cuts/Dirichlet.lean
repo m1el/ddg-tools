@@ -1,5 +1,5 @@
-import DdgProofs.Cuts.Weighted
-import DdgProofs.Solver
+import DdgProofs.Oracle.Scalar
+import DdgProofs.Laplace.Kernel
 import DdgProofs.Laplace.Cotan
 
 /-!
