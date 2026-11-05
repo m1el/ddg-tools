@@ -28,6 +28,11 @@ These come first because they may be bugs or wrong statements, independent of wh
    was not checked.
 4. **`app-vector-singularity-index` interval mismatch**: CITED says ω ∈ (−π, π), the code uses (−π, π]; an edge at
    exactly π breaks the twin cancellation, so the index sum needs a "no edge at π" hypothesis.
+   **Status (2026-11-05): confirmed, proved, Rust behaviour unchanged (reported).** `Intrinsic/SingularityIndex.lean`:
+   `Σ_f index = nχ + #{edges with ω = π}` exactly (`sum_faceIndex`, `sum_round_faceIndex`), `= nχ` without ties
+   (`sum_faceIndex_of_ne_pi`). In f64 `tests/vector_pi_tie.rs` (ignored) puts one exact tie `u_j = −r_h u_i` on each
+   halfedge of icosphere(1): `index_sum = 3 ≠ 2` for 25 of 240 (the twin's ω is ±π by the sign of a rounding error).
+   Only hand-made fields hit it; CITED entry moved to the machine-checked note with the (−π, π] wording.
 5. **`rc-ncg`** convergence claim needs strong Wolfe conditions; the crate's Armijo-only search does not provide them.
 
 ## Ranked candidates (value to library correctness × feasibility)
@@ -72,8 +77,9 @@ These come first because they may be bugs or wrong statements, independent of wh
   - `app-vector-fem-connection-laplacian`: **partial**, new id `fem-area-coordinate-rule` (rule + the exponential
     slice formula that `monomial_integral` evaluates, tagged in Rust); the gauge model, Eq. 17 and `beta_exp` stay cited.
   - `cut-weighted-fem-stiffness`: **done, CITED entry removed** (per triangle and `Σ_f ∫ a∇u·∇w = uᵀL_ā w`).
-  - `bff-conformal-energy`: **partial**, per-triangle identity and the Cauchy–Riemann characterization as
-    `bff-conformal-energy-triangle`; the sum to the loop area (needs face orientation on `TriMesh`) stays cited.
+  - `bff-conformal-energy`: **done, CITED entry removed** (2026-11-05): face orientation added
+    (`DdgProofs/Orientation.lean`, `TriMesh.Oriented`, twins, boundary halfedges); shoelace over the mesh and
+    `2Σ_f∫|∂̄f|² = ½(aᵀLa + bᵀLb) − 𝒜(a, b)` in `Bff/ConformalEnergy.lean`; per triangle `bff-conformal-energy-triangle`.
   - `it-odt-energy`: **partial**, Lemma 4.1 per triangle and for a star as `it-odt-interpolation-error`
     (also `∫_T|u_I − u| = (A/12)Σℓ²`); the tiling of `Ω` and Thm 2.3 stay cited.
     **Update (2026-11-05): done** with `TriangleIntegral/Tiling.lean` (additivity over `IsTiling`, null
@@ -104,6 +110,7 @@ solvers). The "Out of scope" section has nothing in reach.
   no Courant–Fischer.
 * `dev-flip-manifold`: `GaussBonnet.lean` models faces, edges, edge degree and χ, enough for χ and degree ≤ 2 under a flip.
 * `app-vector-singularity-index`: Gauss–Bonnet is proved (`gauss_bonnet_closed`); the gap is an orientation hypothesis on `TriMesh`.
+  **Status (2026-11-05): closed** (orientation added; see finding 4).
 * `rc-near-cos-series`: "binomial series with real exponents only in pieces" is stale.
 * `rc-distance-gradient`: Mathlib has no projection map onto convex sets, only existence and the characterization.
 * `rc-accd`, `rc-ncg`, `discrete-minimizer-existence`: see findings 2, 5, 3.

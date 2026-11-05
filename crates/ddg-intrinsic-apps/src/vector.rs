@@ -470,7 +470,9 @@ pub struct Singularity {
 pub struct Singularities {
     /// Every face with a non-zero index, ascending.
     pub faces: Vec<Singularity>,
-    /// The sum of all indices (units of `1/n`); on a closed surface `n χ` (Poincaré–Hopf).
+    /// The sum of all indices (units of `1/n`); on a closed surface `n χ` (Poincaré–Hopf), plus
+    /// one for every edge whose transported values are exactly opposite (`ω = π` on both of its
+    /// halfedges, which happens only for such ties; `tests/vector_pi_tie.rs`).
     pub index_sum: i64,
     /// Faces left out because the field vanishes at one of their corners.
     pub n_skipped: usize,
@@ -480,7 +482,8 @@ pub struct Singularities {
 
 /// The index of every face (GODF Eq. 19, with the face holonomy of [`face_holonomy`]):
 /// `(ω_ij + ω_jk + ω_ki + n Ω_ijk) / 2π`, where `ω_ij ∈ (−π, π]` is the angle with
-/// `u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|`.
+/// `u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|`. In exact arithmetic `index_sum = nχ + #{edges with
+/// ω_ij = π}` on a closed surface: at a tie the twin also gets `+π` instead of `−π`.
 ///
 /// [formula: app-vector-singularity-index]
 ///

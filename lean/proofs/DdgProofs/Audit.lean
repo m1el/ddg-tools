@@ -1476,3 +1476,20 @@ open DdgProofs
 #print axioms TriangleIntegral.dot_grad_sideNormal
 #print axioms TriangleIntegral.side_flux_eq
 #print axioms TriangleIntegral.side_flux_add_twin
+
+-- oriented meshes (DdgProofs/Orientation.lean), bff-conformal-energy, app-vector-singularity-index
+#print axioms TriMesh.twin_twin
+#print axioms TriMesh.not_hasTwin_iff
+#print axioms TriMesh.hasTwin_of_closed
+#print axioms TriMesh.sum_halfedge_antisymm
+#print axioms TriMesh.sum_sda_eq_two_mul_loopSignedArea
+#print axioms TriMesh.exists_isLayout_pos
+#print axioms TriMesh.two_mul_sum_integral_dbarSq
+#print axioms TriMesh.loopConformalEnergy_eq_zero_iff
+#print axioms TriMesh.omega_twin
+#print axioms TriMesh.sum_transportAngle
+#print axioms TriMesh.faceIndex_isInt
+#print axioms TriMesh.sum_faceHolonomy
+#print axioms TriMesh.sum_faceIndex
+#print axioms TriMesh.sum_round_faceIndex
+#print axioms TriMesh.sum_faceIndex_of_ne_pi

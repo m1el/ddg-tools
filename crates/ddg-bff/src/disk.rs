@@ -634,8 +634,11 @@ impl<'a> DiskBff<'a> {
     /// with `A` the signed area of the image of the boundary, over `b` gives
     /// `(L b)_j = ½ (a_i − a_k)` at a boundary vertex `j` with predecessor `i` and successor
     /// `k` along the boundary (surface on the left), and `(L b)_j = 0` in the interior.
+    /// On an oriented mesh with counter-clockwise faces, `E_C = 2 Σ_f ∫ |∂̄f|²` for `f = a + ib`
+    /// linear on every face (`A` = the sum of the signed image areas of the faces).
     ///
     /// [formula: bff-hilbert-transform]
+    /// [formula: bff-conformal-energy]
     fn hilbert_transform(&self, a: &[f64]) -> Vec<f64> {
         let n_boundary = self.boundary.len();
         let mut rhs = vec![0.0; a.len()];

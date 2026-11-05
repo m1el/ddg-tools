@@ -346,32 +346,6 @@ centering Jacobian. Cited:
   modelling assumption of BFF (its Sec. 4.2, "one does not obtain exact target curvatures if `u`
   values are used to rescale edge lengths").
 
-### [formula: bff-conformal-energy] Conformal energy and harmonic conjugation
-
-- **Statement.** The least-squares conformal energy of `f = a + ib` is the Dirichlet energy
-  minus the signed area of the image, `E_C(a, b) = ½(aᵀAa + bᵀAb) − 𝒜(a, b)` (BFF Eq. 15 is twice
-  this, with `aᵀUb = −𝒜(a, b)` of its Eq. 16); it vanishes exactly
-  for (discrete) conformal maps, and for fixed `a` its minimizer `b` is the "most conjugate"
-  harmonic function.
-- **Reference.** BFF Sec. 4.3.3, Eqs. 15–17; Hutchinson, *Computing conformal maps and minimal
-  surfaces* (1991); Lévy, Petitjean, Ray, Maillot, *Least squares conformal maps*, ACM TOG 21(3),
-  2002; Mullen, Tong, Alliez, Desbrun, *Spectral conformal parameterization*, SGP 2008, Sec. 2.2.
-- **Why not formalized.** Proved per triangle (`DdgProofs/TriangleIntegral/Fem.lean`,
-  `[formula: bff-conformal-energy-triangle]`): on a counter-clockwise layout of a face and for
-  linear `f = a + ib`, `2∫_T |∂̄f|² = ½(∫_T|∇a|² + ∫_T|∇b|²) − ½ sda(f(p₀), f(p₁), f(p₂))`, the
-  Dirichlet energies being the face's cotan energies, and it is zero iff `f` satisfies the
-  Cauchy–Riemann equations on `T`. Not formalized: that the image areas of all faces sum to the
-  signed area `𝒜(a, b)` of the boundary polygon (it needs a consistent orientation of the faces,
-  which `TriMesh` does not record), so the identity of `E_C` with `2∫|∂̄f|²` over the mesh is not
-  stated as one theorem.
-- **Does correctness depend on it?** No. Proved: the Neumann data `h_j = ½(a_{j−1} − a_{j+1})`
-  is the gradient of the area of the boundary polygon with respect to `b`, it sums to zero, and a
-  solution of `A b = h` minimizes `½ bᵀAb − 𝒜(a, b)` (`[formula: bff-hilbert-transform]`). The
-  quality of the result is measured (`[formula: quasi-conformal-error]`), not assumed. Sign: BFF
-  Sec. 4.3.3 solves `A b = −Uᵀa` with `(Uᵀa)_j = ½(a_{j+1} − a_{j−1})` (its Eq. 17 calls this
-  `h_j`), so the right-hand side is `½(a_{j−1} − a_{j+1})`, as in the code; its Alg. 6 writes
-  `A b = h` with the same `h`, which matches only for the opposite direction of the boundary walk.
-
 ### [formula: bff-disk-uniformization] Flattening to a round disk
 
 - **Statement.** A conformal map of a disk-like surface onto the unit disk exists
@@ -1145,7 +1119,13 @@ authors' pages give.
 (the transport angles around a face add up to `Σ (s − 1) θ` modulo full turns; the corner terms
 at an interior vertex add up to its angle defect), `app-vector-fd-connection-laplacian` (one
 edge's contribution to `u* L u` is `w |u_j − r u_i|²`; the entries are Hermitian),
-`app-amr-map-distortion` (singular values from the conformal and anticonformal parts). Not
+`app-amr-map-distortion` (singular values from the conformal and anticonformal parts);
+`app-vector-singularity-index` (`DdgProofs/Intrinsic/SingularityIndex.lean`, GODF Sec. 6.1.3,
+Eq. 19, App. B): with `ω_ij ∈ (−π, π]` (the range of `arg`/`atan2` the code uses) and
+`u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|`, on a closed valid oriented mesh with signpost frames
+every face index `(ω_ij + ω_jk + ω_ki + nΩ_ijk)/2π` is an integer, and the indices add up to
+`nχ + #{edges with ω_ij = π}` — both halfedges of such an edge get `+π`, so the twin terms do not
+cancel; the sum is `nχ` (discrete Poincaré–Hopf) only when no `ω` is exactly `π`. Not
 machine-checked: the entries below, and everything about rounding and the solvers.
 
 ### [formula: app-vector-transport] Transport of tangent vectors along an edge
@@ -1187,18 +1167,6 @@ machine-checked: the entries below, and everything about rounding and the solver
   and that the integrands of SPEC N43 are those of the model.
 - **What depends on it.** `ConnectionLaplacian::FiniteElement`: the smoothest direction fields
   and the energies of the README's Fig. 21 table.
-
-### [formula: app-vector-singularity-index] The index of a face
-
-- **Statement.** For a field `u` of unit `n`-vectors, `ω_ij ∈ (−π, π)` with
-  `u_j = e^{iω_ij} r_ij u_i`; the index of face `ijk` is `(ω_ij + ω_jk + ω_ki + Ω_ijk)/2π`, an
-  integer; the sum over a closed surface is `nχ` (discrete Poincaré–Hopf).
-- **Reference.** GODF Sec. 6.1.3, Eq. 19, and App. B.
-- **Why not formalized.** The sum over a closed surface needs the combinatorics of the mesh
-  (each interior edge's `ω` cancels with its twin's) and Gauss–Bonnet; with the unwrapped `Ω`
-  of SPEC N43 the sum is `Σ_f Ω_f / 2π = nχ`, and the per-face part is
-  `app-vector-face-holonomy`.
-- **What depends on it.** `vector::singularities` and the index sums of the README.
 
 ### [formula: app-vector-maximum-principle] The vector maximum principle on an intrinsic Delaunay triangulation
 

@@ -1,5 +1,5 @@
 //! The index sum of `singularities` when a transported field difference is exactly `π`
-//! (`[formula: app-vector-singularity-index]`, lean/proofs `Apps.sum_faceIndex`).
+//! (id `app-vector-singularity-index`; lean/proofs `TriMesh.sum_faceIndex`).
 //!
 //! With `ω ∈ (−π, π]` both halfedges of an edge get `ω = +π` when `u_j = −r_ij u_i` exactly
 //! (in exact arithmetic), so the twin terms do not cancel and the sum is `nχ + #(such edges)`.
@@ -14,7 +14,7 @@ use ddg_intrinsic_apps::vector::*;
 /// `u_j = −r_h u_i`, which puts `ω_h` at exactly `π` (the quotient is `(−|r|², +0)`).
 /// Counts the halfedges for which the reported index sum differs from `nχ = 2`.
 #[test]
-#[ignore = "documents the ω = π tie of `singularities`; see lean/proofs CITED app-vector-singularity-index"]
+#[ignore = "documents the ω = π tie of `singularities`; lean/proofs TriMesh.sum_faceIndex: index_sum = nχ + #ties"]
 fn an_exact_pi_tie_changes_the_index_sum() {
     let shape = icosphere(1);
     let tri = shape.triangulation();
