@@ -58,8 +58,9 @@ themselves allowed), with an edge-length metric (`DdgProofs/Delaunay/Metric.lean
   are only finitely many geodesic triangulations with bounded edge lengths" on a compact
   piecewise flat surface (B–S, proof of Thm. 15 / Prop. 12; Indermitte et al., proof of Thm. 1,
   in the form "the potential takes values in a discrete set"), which rests on the geometry of
-  geodesics on the cone surface and is **cited** (`CITED.md`, `it-delaunay-flip-termination`;
-  layer 4). It implies the finiteness of the reachable set (`reach_finite_of_boundedLengthFinite`):
+  geodesics on the cone surface and was cited in layer 3; **layer 4 proves it for every
+  `MetricGluing`** (`Surface/Finite.lean`, `MetricGluing.boundedLengthFinite`, which also gives
+  the unconditional `acc`, `exists_delaunay`, `flip_algorithm'`). It implies the finiteness of the reachable set (`reach_finite_of_boundedLengthFinite`):
   along Delaunay flips the harmonic index does not increase and the area is constant, and an edge
   of length `ℓ` in a face of area `A` has `ℓ² ≤ H_face · A ≤ H · A_total`.
 

@@ -31,7 +31,8 @@ algorithm of `DdgProofs/Delaunay/Termination.lean` with three differences:
 ## Main results
 
 * `loop_acc`: if the states reachable from the start by Delaunay flips are finitely many
-  (`Termination.lean`; the literature's hypothesis `BoundedLengthFinite` gives it), **every run of
+  (`Termination.lean`; the literature's hypothesis `BoundedLengthFinite` gives it, and
+  `Surface/Finite.lean` proves that hypothesis: see `loop_acc'` there), **every run of
   the loop is finite**, whatever the order (lexicographic in the rank of the state and the queue
   size). Without the cap (`FlipLimit::Unlimited`) the Rust loop therefore exits, after at most
   `|reach s₀| − 1` flips (`MetricGluing.flips_length_le`: the flips of a run are a Delaunay flip

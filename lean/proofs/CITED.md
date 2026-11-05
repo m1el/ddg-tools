@@ -802,7 +802,19 @@ an earlier version with another title, were read).
   Delaunay triangulation (`exists_delaunay`, `planar-delaunay-existence`),
   `DdgProofs/Delaunay/Planar{Insertion,Existence}.lean`. The hypothesis of
   `exists_delaunay_of_triangulation` is discharged.
-- **Why not formalized.** It is a global statement about all geodesic triangulations of a
+- **Proved, surface case: existence (2026-11-05, layer 4).** For every metric triangulation
+  `s` (`MetricGluing`: closed or with boundary, any gluing), a Delaunay triangulation with the
+  **original vertex set** is reachable by Delaunay flips (`MetricGluing.exists_delaunay`, and
+  `flip_algorithm'` with the invariants χ, boundary, area, cone angles), `Delaunay/Surface/Finite.lean`
+  (`it-delaunay-existence-uniqueness`; Indermitte et al. Thm. 1, B–S Thm. 15; termination as in
+  `it-delaunay-flip-termination`). Delaunay ⟺ every interior edge locally Delaunay is the layer-3 definition
+  (B–S Prop. 10 is the definition here; the empty-immersed-disk form is not modelled on a surface).
+- **Still cited: the surface case of uniqueness.** Uniqueness of the Delaunay tessellation, and that
+  two Delaunay triangulations of a surface differ only in edges with `θ_k + θ_l = π` (B–S, Prop. 4,
+  Sec. 2); the empty immersed disks of B–S Definitions 2–3; the reduction of boundary surfaces to
+  closed ones by caps. Layer 4's overlay route does not give them (they need empty immersed disks
+  or connectivity of the flip graph of all geodesic triangulations with a given vertex set).
+- **Why the rest is not formalized.** It is a global statement about all geodesic triangulations of a
   surface; neither piecewise flat surfaces nor immersed disks are in Mathlib.
 - **What depends on it.** That the result of Delaunay flipping is *the* Delaunay triangulation up
   to ties, independent of the order of the queue (SPEC §5 item 4, N6: tested, the ties are
@@ -858,7 +870,7 @@ an earlier version with another title, were read).
   many steps (`wellFounded_flipStep`, `flip_sequence_length_le`, `planar-flip-termination`), and it
   ends in a locally Delaunay — by Delaunay's lemma (`delaunay_lemma`, `delaunay-lemma`) a
   Delaunay — triangulation (`exists_flips_to_delaunay`). Planar only; the surface statement and
-  its finiteness hypothesis below are unchanged.
+  its finiteness hypothesis below were unchanged by it (the surface finiteness is now proved, layer 4).
 - **Proved, planar `O(n²)` bound (2026-11-05).** Every sequence of Delaunay flips from a
   triangulation of `S` has at most `C(|S|, 2)` flips (`flip_count_le`), because an edge flipped
   away never reappears (`flipped_edge_not_mem`): the lifted surface goes down with every flip
@@ -883,12 +895,21 @@ an earlier version with another title, were read).
   area is constant, B–S's argument). The Rust queue loop with its tolerance is proved to make only
   Delaunay flips, to terminate under the same hypothesis in any order, and, when it exits without
   the cap, to leave every interior edge passing its test (`MetricGluing.loop_result`).
-- **Still cited: the finiteness.** That on a compact piecewise flat surface there are, for every
-  `L`, only finitely many geodesic triangulations with the given vertices and all edges at most
-  `L` long (B–S, proof of Thm. 15; Indermitte et al., proof of Thm. 1: the potential "takes values
-  in a discrete set"). It is about all geodesics on the cone surface, which is not modelled
-  (layer 4); the theorems above take it as the explicit hypothesis `BoundedLengthFinite`. A
-  strictly decreasing real potential alone does not give termination (`1/n`).
+- **Proved, layer 4 (2026-11-05): the finiteness, and so unconditional termination on a surface.**
+  `MetricGluing.boundedLengthFinite` (the former hypothesis `BoundedLengthFinite`) is a theorem for
+  every `MetricGluing` (any closed surface or surface with boundary, with self-loops, multiple edges
+  and self-glued faces), `DdgProofs/Delaunay/Surface/*.lean` (`Finite.lean`; plan and route in
+  `Delaunay/LAYER4-PLAN.md`). The cone surface and its geodesics are not modelled: every
+  triangulation reached by flips is an *overlay* on the original one (faces laid out in the plane
+  together with the faces of `s` that cover them; a convex flip keeps this, `Overlay.flip`), every
+  edge of it is a straight chain through at most `crossBound s L` faces of `s` (`Overlay.exists_word_le`),
+  and there are finitely many such crossing words (`Word.finite_length_le`). Consequently
+  `reach_finite`, `acc` (**every sequence of Delaunay flips is finite**, from every state),
+  `wellFounded_delaunayFlip`, `not_exists_infinite_flips'`, `flips_length_le'` (at most
+  `|reach s| − 1` flips), `exists_delaunay`, `flip_algorithm'` and, for the Rust loop in any
+  order, `loop_acc'` hold without hypothesis. Only the remark that no bound in `|V|` alone exists
+  (Statement above) stays unproved; it is not a theorem used anywhere. Nothing else of this
+  entry is cited, apart from the sources and the planar `O(n²)` bound of Fortune's note.
 - **What depends on it.** That `Delaunay flipping` returns at all with `FlipLimit::Unlimited`;
   the crate has a limit on the number of flips and reports when it is reached (SPEC §4, N6; never
   reached in the recorded runs). Earlier one-diamond results (`diamondConvex_of_not_delaunay`,
