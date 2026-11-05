@@ -106,3 +106,8 @@ face is a nondegenerate triangle). Nothing else.
 ## Status log
 
 * 2026-11-05: plan written; stage 1 started.
+* 2026-11-05: stages 1–3 done and committed (`Plane`, `Segment`, `Angle`, `Quad`, `Count`, `Layout`,
+  `Overlay`, `Fan`, `Relayout`: ~4,700 lines, no sorry). Stage 4 split into `FlipFace.lean` (face
+  level, key crossing lemma) and `FlipEdge.lean` (edge level, assembly `Overlay.flip`); stage 5
+  `Finite.lean` written against them. Deviation from the table: the planar file is four files,
+  and the counting lemma got its own file.
