@@ -1,5 +1,5 @@
 import DdgProofs.Delaunay.Surface.Segment
-import DdgProofs.Intrinsic.Delaunay
+import DdgProofs.Geometry.PlaneLemmas
 
 /-!
 # Delaunay layer 4, planar toolkit: angles at a point

@@ -1,5 +1,5 @@
 import DdgProofs.Developability.Vec
-import DdgProofs.Intrinsic.Diamond
+import DdgProofs.Triangle
 
 /-!
 # Developability: classification of bad triangles for the small-angle remeshing (SPEC §5.3)

@@ -66,12 +66,6 @@ theorem delaunayExcess_eq' (θk θl : ℝ) : Ddg.delaunayExcess θk θl = (θk -
   rw [delaunayExcess_eq]
   ring
 
-/-- The corner angle does not depend on the order of the two adjacent sides. -/
-theorem cornerAngle_swap (a b c : ℝ) : cornerAngle a c b = cornerAngle a b c := by
-  unfold cornerAngle
-  congr 1
-  ring
-
 /-! ## Cotangents of two angles -/
 
 /-- `cot x + cot y = sin(x + y)/(sin x sin y)`. -/

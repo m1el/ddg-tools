@@ -1,0 +1,9 @@
+# Library step S2b (intrinsic / FEM / Delaunay splits): modules created or to be moved.
+# Columns: current module <TAB> final module. Declarations keep their full names in S2.
+#
+# Declarations moved (old file -> new file):
+#   Intrinsic/Diamond.lean -> Triangle.lean: DDG.IsTriangle.swap, DDG.Intrinsic.isTriangle_of_heron_pos
+#   Intrinsic/Delaunay.lean -> Triangle.lean: DDG.Intrinsic.cornerAngle_swap
+#   Intrinsic/Diamond.lean -> Geometry/PlaneLemmas.lean: DDG.Intrinsic.dist2_comm, dist2_nonneg,
+#     dist2_sq', dist2_pos_of_sda_ne, isTriangle_of_sda_ne, two_mul_triArea_dist2
+DdgProofs.Geometry.PlaneLemmas	DDG.Geometry.PlaneLemmas

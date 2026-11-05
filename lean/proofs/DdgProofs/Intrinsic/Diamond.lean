@@ -1,5 +1,5 @@
 import DdgProofs.Oracle.Scalar
-import DdgProofs.Bff.Quality
+import DdgProofs.Geometry.PlaneLemmas
 
 /-!
 # Intrinsic triangulations: unfolding a triangle and a diamond, the flipped edge
@@ -11,7 +11,8 @@ The diamond of an edge `ij` of length `a`: the triangles `ijk` and `jil`, with `
 `c = ℓ_jk`, `d = ℓ_il`, `e = ℓ_jl`. The *standard layout* is `i = (0, 0)`, `j = (a, 0)`,
 `k = (x_k, h_k)`, `l = (x_l, −h_l)` with `x = diamondX`, `h = diamondH`. Plane points are pairs
 `ℝ × ℝ` with the Euclidean distance `dist2` and the doubled signed area `sda` of
-`DdgProofs/Bff/Quality.lean`.
+`DdgProofs/Bff/Quality.lean`, with the plane lemmas of
+`DdgProofs/Geometry/PlaneLemmas.lean`.
 
 All tagged theorems are about the oracle's definitions (`Ddg.diamondX`, `diamondH`,
 `flippedLength`, `flippedLengthFromLengths`, `flipArea1`, `flipArea2`, `flipConvex`,
@@ -26,99 +27,6 @@ namespace Intrinsic
 
 open scoped DDG.Oracle
 open Real
-
-/-! ## Plane helpers -/
-
-theorem dist2_comm (p q : ℝ × ℝ) : dist2 p q = dist2 q p := by
-  unfold dist2
-  congr 1
-  ring
-
-theorem dist2_nonneg (p q : ℝ × ℝ) : 0 ≤ dist2 p q := sqrt_nonneg _
-
-/-- `dist2 p q ^ 2` written out. -/
-theorem dist2_sq' (p q : ℝ × ℝ) : dist2 p q ^ 2 = (q.1 - p.1) ^ 2 + (q.2 - p.2) ^ 2 :=
-  dist2_sq p q
-
-/-- A triangle of nonzero signed area has two different first corners. -/
-theorem dist2_pos_of_sda_ne {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) : 0 < dist2 a b := by
-  rcases (dist2_nonneg a b).lt_or_eq with hpos | hzero
-  · exact hpos
-  · exfalso
-    have h2 := dist2_sq' a b
-    rw [← hzero] at h2
-    have h1 : (b.1 - a.1) ^ 2 = 0 := by nlinarith [sq_nonneg (b.1 - a.1), sq_nonneg (b.2 - a.2)]
-    have h3 : (b.2 - a.2) ^ 2 = 0 := by nlinarith [sq_nonneg (b.1 - a.1), sq_nonneg (b.2 - a.2)]
-    have e1 : b.1 - a.1 = 0 := by simpa using h1
-    have e2 : b.2 - a.2 = 0 := by simpa using h3
-    apply h
-    unfold sda
-    rw [e1, e2]
-    ring
-
-/-- Nonnegative numbers whose Heron product is positive satisfy the strict triangle
-inequalities. -/
-theorem isTriangle_of_heron_pos {x y z : ℝ} (hx : 0 ≤ x) (hy : 0 ≤ y) (hz : 0 ≤ z)
-    (hP : 0 < (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y)) : IsTriangle x y z := by
-  have hS : 0 ≤ x + y + z := by linarith
-  refine ⟨?_, ?_, ?_⟩
-  · by_contra hcon
-    have h1 : y - x + z ≤ 0 := by linarith
-    have h2 : 0 ≤ x - y + z := by linarith
-    have h3 : 0 ≤ x - z + y := by linarith
-    have : (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y) =
-        (y - x + z) * ((x + y + z) * (x - y + z) * (x - z + y)) := by ring
-    rw [this] at hP
-    have := mul_nonpos_of_nonpos_of_nonneg h1 (mul_nonneg (mul_nonneg hS h2) h3)
-    linarith
-  · by_contra hcon
-    have h1 : x - y + z ≤ 0 := by linarith
-    have h2 : 0 ≤ y - x + z := by linarith
-    have h3 : 0 ≤ x - z + y := by linarith
-    have : (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y) =
-        (x - y + z) * ((x + y + z) * (y - x + z) * (x - z + y)) := by ring
-    rw [this] at hP
-    have := mul_nonpos_of_nonpos_of_nonneg h1 (mul_nonneg (mul_nonneg hS h2) h3)
-    linarith
-  · by_contra hcon
-    have h1 : x - z + y ≤ 0 := by linarith
-    have h2 : 0 ≤ y - x + z := by linarith
-    have h3 : 0 ≤ x - y + z := by linarith
-    have : (x + y + z) * (y - x + z) * (x - y + z) * (x - z + y) =
-        (x - z + y) * ((x + y + z) * (y - x + z) * (x - y + z)) := by ring
-    rw [this] at hP
-    have := mul_nonpos_of_nonpos_of_nonneg h1 (mul_nonneg (mul_nonneg hS h2) h3)
-    linarith
-
-/-- **The sides of a plane triangle of nonzero area satisfy the strict triangle
-inequalities.** -/
-theorem isTriangle_of_sda_ne {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) :
-    IsTriangle (dist2 b c) (dist2 c a) (dist2 a b) := by
-  apply isTriangle_of_heron_pos (dist2_nonneg _ _) (dist2_nonneg _ _) (dist2_nonneg _ _)
-  have key : (dist2 b c + dist2 c a + dist2 a b) * (dist2 c a - dist2 b c + dist2 a b) *
-      (dist2 b c - dist2 c a + dist2 a b) * (dist2 b c - dist2 a b + dist2 c a) =
-      (2 * sda a b c) ^ 2 := by
-    calc _ = 2 * dist2 b c ^ 2 * dist2 c a ^ 2 + 2 * dist2 c a ^ 2 * dist2 a b ^ 2 +
-          2 * dist2 a b ^ 2 * dist2 b c ^ 2 - (dist2 b c ^ 2) ^ 2 - (dist2 c a ^ 2) ^ 2 -
-          (dist2 a b ^ 2) ^ 2 := by ring
-      _ = _ := by
-        rw [dist2_sq, dist2_sq, dist2_sq]
-        linear_combination (-1 : ℝ) * sda_sq_mul_four a b c
-  rw [key]
-  positivity
-
-/-- The Heron area of the sides of a plane triangle, in the order of the oracle's diamond
-(`a = |ij|`, `b = |ik|`, `c = |jk|`), is half the absolute signed double area. -/
-theorem two_mul_triArea_dist2 (i j k : ℝ × ℝ) :
-    2 * triArea (dist2 i j) (dist2 i k) (dist2 j k) = |sda i j k| := by
-  rw [abs_sda_eq_two_mul_triArea i j k, dist2_comm k i]
-  unfold triArea
-  congr 3
-  ring
-
-/-- The triangle inequalities do not depend on the order of the last two sides. -/
-theorem _root_.DDG.IsTriangle.swap {a b c : ℝ} (h : IsTriangle a b c) : IsTriangle a c b :=
-  ⟨by linarith [h.lt_a], by linarith [h.lt_c], by linarith [h.lt_b]⟩
 
 /-! ## The oracle's definitions at `ℝ` -/
 
