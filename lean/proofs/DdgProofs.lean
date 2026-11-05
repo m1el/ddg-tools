@@ -57,6 +57,8 @@ import DdgProofs.Delaunay.PlanarFlip
 import DdgProofs.Delaunay.PlanarTermination
 import DdgProofs.Delaunay.PlanarLemma
 import DdgProofs.Delaunay.PlanarBridge
+import DdgProofs.Delaunay.PlanarInsertion
+import DdgProofs.Delaunay.PlanarExistence
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric

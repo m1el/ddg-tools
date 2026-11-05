@@ -785,6 +785,14 @@ an earlier version with another title, were read).
   triangulation, e.g. by a sweep, is a hypothesis), `DdgProofs/Delaunay/PlanarLemma.lean`
   (`delaunay-lemma`). The planar local test equals layer 1's `θ_k + θ_l ≤ π` on the Euclidean
   lengths (`isLocallyDelaunay_dist2_iff`). Not proved: uniqueness up to ties, and the surface case.
+- **Planar existence unconditional (2026-11-05).** Every finite `S ⊂ ℝ²` that is not collinear
+  (three points with `sda ≠ 0`; necessary for `S ≠ ∅`) has a triangulation
+  (`exists_triangulation`, `planar-triangulation-existence`; by induction, removing a
+  lexicographically extreme point that keeps the rest non-collinear and coning it back to the
+  visible boundary edges, `isTriangulation_insert`, `planar-triangulation-insertion`), hence a
+  Delaunay triangulation (`exists_delaunay`, `planar-delaunay-existence`),
+  `DdgProofs/Delaunay/Planar{Insertion,Existence}.lean`. The hypothesis of
+  `exists_delaunay_of_triangulation` is discharged.
 - **Why not formalized.** It is a global statement about all geodesic triangulations of a
   surface; neither piecewise flat surfaces nor immersed disks are in Mathlib.
 - **What depends on it.** That the result of Delaunay flipping is *the* Delaunay triangulation up
