@@ -208,7 +208,7 @@ open DDG
 #print axioms TriMesh.curvature_copy_eq
 #print axioms TriMesh.cut_euler_characteristic
 #print axioms TriMesh.card_edge_copies_le
--- D. Boundary First Flattening: boundary curve (Bff/Curve.lean)
+-- D. Boundary First Flattening: boundary curve (lean/ddg/DDG/Conformal/BoundaryCurve.lean)
 #print axioms boundaryCurve_succ_sub
 #print axioms norm_boundaryCurve_succ_sub
 #print axioms boundaryCurve_closingEdge_iff
@@ -239,7 +239,7 @@ open DDG
 #print axioms exists_closing_multiplier
 #print axioms closedLengths_eq_of_solutions
 #print axioms hilbertVector_minimizes_conformalEnergy_iff
--- D. Boundary First Flattening: quality measures and mollification (Bff/Quality.lean)
+-- D. Boundary First Flattening: quality measures and mollification (lean/ddg/DDG/Geometry/Plane.lean)
 #print axioms logScaleFactor_sq_mul
 #print axioms logScaleFactor_abs_det_mul
 #print axioms logScaleFactor_eq_half_log_sigma
@@ -305,7 +305,7 @@ open DDG
 #print axioms fitNorm_eq_zero_iff
 #print axioms fit_similarity_optimal
 #print axioms fit_similarity_unique
--- D. Boundary First Flattening: map to the sphere (Bff/Sphere.lean)
+-- D. Boundary First Flattening: map to the sphere (lean/ddg/DDG/Conformal/Sphere.lean)
 #print axioms invStereo_mem_sphere
 #print axioms invStereo_ne_south
 #print axioms stereo_invStereo
@@ -404,7 +404,7 @@ open DDG
 #print axioms Cuts.face_omegaCancellationFree_eq
 #print axioms Cuts.sum_face_omega
 #print axioms Cuts.sum_face_omega_closed
--- weighted Laplacian (Cuts/Weighted.lean)
+-- weighted Laplacian (lean/ddg/DDG/Laplace/Weighted.lean)
 #print axioms TriMesh.weightedLaplacian_isSymm
 #print axioms TriMesh.weightedLaplacian_mulVec_one
 #print axioms TriMesh.dotProduct_weightedLaplacian_mulVec
@@ -848,7 +848,7 @@ open DDG
 #print axioms Intrinsic.flip_of_tie
 #print axioms Intrinsic.offDiag_eq_neg_half_cotanWeight
 #print axioms Intrinsic.offDiag_nonpos_iff
--- Delaunay layer 1: one diamond (DdgProofs/Delaunay/{Local,Rippa,Potential,Encroachment}.lean)
+-- Delaunay layer 1: one diamond (lean/ddg/DDG/Delaunay/{Local,Rippa,Potential}.lean, Delaunay/Planar/Encroachment.lean)
 #print axioms Delaunay.flipLength_eq_flippedLengthFromLengths
 #print axioms Delaunay.flipLength_sq_law_of_cosines
 #print axioms Delaunay.isLocallyDelaunay_iff_cot_nonneg
@@ -898,7 +898,7 @@ open DDG
 #print axioms Delaunay.circumradius_eq_div_sin
 #print axioms Delaunay.lt_circumradius_iff
 #print axioms Delaunay.lt_circumradius_of_lt_pi_div_six
--- Delaunay layer 2: gluing data, flip, metric (DdgProofs/Delaunay/{Complex,Flip,Metric,FromTriMesh}.lean)
+-- Delaunay layer 2: gluing data, flip, metric (lean/ddg/DDG/Mesh/{Gluing,GluingFlip}.lean, Delaunay/{Metric,FromTriMesh}.lean)
 #print axioms Delaunay.Gluing.two_mul_numEdges
 #print axioms Delaunay.Gluing.two_mul_numEdges_of_closed
 #print axioms Delaunay.Gluing.IsLabeling.numVertices_eq
@@ -937,7 +937,7 @@ open DDG
 #print axioms TriMesh.toGluing_closed
 #print axioms TriMesh.isMetric_toGluing
 #print axioms TriMesh.coneAngle_toGluing
--- Delaunay layer 3: the flip algorithm on surfaces (DdgProofs/Delaunay/{Termination,FlipQueue}.lean)
+-- Delaunay layer 3: the flip algorithm on surfaces (lean/ddg/DDG/Delaunay/{Termination,FlipQueue}.lean)
 #print axioms Delaunay.Gluing.IsMetric.locallyDelaunayAt_of_same_face
 #print axioms Delaunay.Gluing.IsMetric.locallyDelaunayAt_of_not_flippable
 #print axioms Delaunay.Gluing.IsMetric.isDelaunay_iff
@@ -976,7 +976,7 @@ open DDG
 #print axioms Delaunay.MetricGluing.loop_result
 #print axioms Delaunay.MetricGluing.isDelaunay_of_angleSum_zero
 #print axioms Delaunay.MetricGluing.angleSum_le_of_not_fails
--- Delaunay triangulations of a planar point set (DdgProofs/Delaunay/Planar*.lean)
+-- Delaunay triangulations of a planar point set (lean/ddg/DDG/Delaunay/Planar/*.lean)
 #print axioms Delaunay.Planar.mem_hull3_iff
 #print axioms Delaunay.Planar.pos_of_mem_interior_hull3
 #print axioms Delaunay.Planar.power_eq_of_equidistant
@@ -1008,7 +1008,7 @@ open DDG
 #print axioms Delaunay.Planar.isDelaunay_triangle
 #print axioms Delaunay.Planar.isLocallyDelaunay_dist2_iff
 -- Delaunay layer 4: finiteness of bounded-length triangulations, unconditional termination
--- (DdgProofs/Delaunay/Surface/*.lean)
+-- (lean/ddg/DDG/Delaunay/Surface/*.lean)
 #print axioms Delaunay.Surface.Overlay.exists_word_le
 #print axioms Delaunay.Surface.Overlay.flip
 #print axioms Delaunay.MetricGluing.boundedLengthFinite
@@ -1021,7 +1021,7 @@ open DDG
 #print axioms Delaunay.MetricGluing.wellFounded_delaunayFlip
 #print axioms Delaunay.MetricGluing.not_exists_infinite_flips'
 #print axioms Delaunay.MetricGluing.flips_length_le'
--- The boundary fan on gluing data (DDG/Delaunay/BoundaryFan.lean)
+-- The boundary fan on gluing data (lean/ddg/DDG/Delaunay/BoundaryFan.lean)
 #print axioms Delaunay.Gluing.eq_of_isBoundary_of_vertexOf_eq
 #print axioms Delaunay.Gluing.eq_of_isBoundary_of_vertexOf_next_eq
 #print axioms Delaunay.Gluing.boundaryCount_le_one
@@ -1030,7 +1030,7 @@ open DDG
 #print axioms Delaunay.Gluing.boundaryCount_eq_one_iff
 #print axioms Delaunay.Gluing.boundaryCount_eq_zero_iff
 #print axioms Delaunay.Gluing.IsMetric.gauss_bonnet_boundary
--- Planar Delaunay: uniqueness and the flip count (DdgProofs/Delaunay/Planar{Uniqueness,FlipCount}.lean)
+-- Planar Delaunay: uniqueness and the flip count (lean/ddg/DDG/Delaunay/Planar/{Uniqueness,FlipCount}.lean)
 #print axioms Delaunay.Planar.liftPlane_bary
 #print axioms Delaunay.Planar.liftPlane_eq_of_eq
 #print axioms Delaunay.Planar.circleLift_eq_liftPlane_sub
@@ -1231,7 +1231,7 @@ open DDG
 #print axioms ConeFeedback.faceMean_shift
 #print axioms ConeFeedback.mismatch_shift
 #print axioms ConeFeedback.mismatch_eq_zero_of_const
--- Repulsive Curves (crates/ddg-repulsive-curves/SPEC.md; DdgProofs/RepulsiveCurves/*.lean)
+-- Repulsive Curves (crates/ddg-repulsive-curves/SPEC.md; lean/ddg/DDG/Repulsive/Curves/*.lean, DdgProofs/RepulsiveCurves/*.lean)
 #print axioms DDG.edge_quantities
 #print axioms DDG.tangent_dot_self
 #print axioms RC.sum_dualLen
@@ -1547,7 +1547,7 @@ open DDG
 #print axioms DDG.IntrinsicSimplification.Quadric.optimalPoint_solves
 #print axioms DDG.IntrinsicSimplification.Quadric.eval_segment
 #print axioms DDG.IntrinsicSimplification.Quadric.segment_min
--- Repulsive Surfaces (crates/ddg-repulsive-surfaces/SPEC.md; DdgProofs/RepulsiveSurfaces/*.lean)
+-- Repulsive Surfaces (crates/ddg-repulsive-surfaces/SPEC.md; lean/ddg/DDG/Repulsive/Surfaces/*.lean, DdgProofs/RepulsiveSurfaces/*.lean)
 #print axioms RS.hasDerivAt_totalArea
 #print axioms RS.armijo_reference
 #print axioms RS.armijo_reference_stricter
@@ -1637,7 +1637,7 @@ open DDG
 #print axioms RS.willmore_eq_matrix
 #print axioms RS.hasDerivAt_willmore
 #print axioms RS.hasDerivAt_willmore_frozen
--- integrals over a triangle (DdgProofs/FEM/)
+-- integrals over a triangle (lean/ddg/DDG/FEM/)
 #print axioms FEM.integral_pow_mul_sub_pow
 #print axioms FEM.integral_stdTri
 #print axioms FEM.det_triLin
@@ -1701,7 +1701,7 @@ open DDG
 #print axioms FEM.norm_betaExpTerm_succ_le
 #print axioms FEM.norm_tail_betaExp_le
 
--- oriented meshes (DDG/Mesh/Orientation.lean), bff-conformal-energy, app-vector-singularity-index
+-- oriented meshes (lean/ddg/DDG/Mesh/Orientation.lean), bff-conformal-energy, app-vector-singularity-index
 #print axioms TriMesh.twin_twin
 #print axioms TriMesh.not_hasTwin_iff
 #print axioms TriMesh.hasTwin_of_closed

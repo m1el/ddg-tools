@@ -66,7 +66,10 @@ blender/                   Blender extension: mesh -> UV map; cut operators (Sta
                            Make Developable, Show Developability, Developable Seams + UV; Repulsive Flow, Repulsive Surface Flow
 lean/oracle/               Lake package, no Mathlib: scalar-generic formula definitions and a Float
                            executable used as a differential-testing oracle
-lean/proofs/               Lake package on Mathlib: machine-checked derivations of the formulas the Rust code uses
+lean/ddg/                 Lake package `ddg` on Mathlib: the library `DDG` (14 parts, one Lake library each):
+                           the reusable machine-checked theory; `lean/ddg/README.md`
+lean/proofs/               Lake package on Mathlib: the app layer `DdgProofs` (oracle bridges, solver control flow,
+                           cuts, developability, audits) on top of `lean/ddg`; machine-checked derivations of the formulas
 scripts/                   helper scripts
 data/                      gitignored; `data/optimal-cones/optimal-cones-data/data/*.obj` + `*-cones.txt`;
                            `data/models/` for meshes unpacked from `/var/data/discrete-geometry/models/*.zip`
@@ -154,7 +157,7 @@ signs, the mass factor in the regularized stage), derive the answer from this pr
 ## Formula traceability
 
 Every Rust function that implements a mathematical formula carries a doc line `[formula: <kebab-id>]`.
-The matching Lean theorem in `lean/proofs` carries the same tag in its docstring. Results that are
+The matching Lean theorem in `lean/ddg` (the library) or `lean/proofs` (the app layer) carries the same tag in its docstring. Results that are
 cited rather than machine-checked (the paper's smooth theory) are listed in `lean/proofs/CITED.md`
 with the same id, an exact reference, and the reason. `scripts/check-formulas.sh` cross-checks the tags.
 
@@ -163,7 +166,7 @@ with the same id, an exact reference, and the reason. `scripts/check-formulas.sh
 1. Optimality certificate: every solve checks its own optimality conditions and duality gap.
 2. Generic convex solver on the canonical problem for small meshes (independent algorithm).
 3. Lean oracle (`lean/oracle`): independent Float implementation for differential fuzzing, plus committed golden fixtures.
-4. Lean proofs (`lean/proofs`): machine-checked derivations of the formulas.
+4. Lean proofs (`lean/ddg`, `lean/proofs`): machine-checked derivations of the formulas.
 
 For the cut flow there is no unique minimizer to certify. Its layers are: analytic solutions (sphere
 cap, flat disk), finite differences of the discrete energy against the predicted gradient, energy

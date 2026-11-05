@@ -20,7 +20,7 @@ subject to   (L u)_i = s_i − Ω̂_i     for all vertices i,   s_i ∈ feasible
 ```
 
 This is `ConeProblem V` for `L` the full cotan Laplacian (`TriMesh.boundaryProblem`), so the
-results of `DDG.Optimality` and `DDG.Closed` apply: the full Laplacian annihilates
+results of `DDG.OptimalCones.Optimality` and `DDG.OptimalCones.Closed` apply: the full Laplacian annihilates
 constants, so `u` is determined only up to an additive constant, which is optimized too.
 
 * `boundaryProblem_isMinimizer`: the optimality system is sufficient for a global minimum;

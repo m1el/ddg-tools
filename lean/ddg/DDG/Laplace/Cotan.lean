@@ -15,9 +15,9 @@ import DDG.Mesh.GaussBonnet
 * `TriMesh.sum_mass`: the lumped masses sum to the total area;
 * invariance under uniform scaling;
 * `TriMesh.sum_cone_eq_two_pi_eulerChar`: on a closed mesh, if `L u = μ − Ω` then `Σ μ = 2π χ`
-  (the corollary of discrete Gauss–Bonnet; it was in `DdgProofs.GaussBonnet`).
+  (the corollary of discrete Gauss–Bonnet; it used to be proved next to the Gauss–Bonnet theorem).
 
-The triangle mesh structure and its per-face quantities are in `DdgProofs.Cotan`.
+The triangle mesh structure and its per-face quantities are in `DDG.Mesh.TriMesh`.
 -/
 
 noncomputable section

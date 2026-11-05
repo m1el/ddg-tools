@@ -9,7 +9,7 @@ import DDG.Laplace.Cotan
 # Finite element integrals over a triangle
 
 The integrals behind the finite element matrices of the library, as Lebesgue integrals over a
-triangle `T` of the plane (`DDG/FEM/FEM.lean`), with `λᵢ = bary p i` the hat
+triangle `T` of the plane (`DDG/FEM/TriangleIntegral.lean`), with `λᵢ = bary p i` the hat
 functions of the corners and `A = area p` the Heron area of the Euclidean side lengths.
 
 * **`app-fem-galerkin-mass`** — `∫_T λᵢ λⱼ = A/6` (`i = j`) and `A/12` (`i ≠ j`)

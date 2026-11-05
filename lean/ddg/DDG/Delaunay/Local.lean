@@ -81,7 +81,7 @@ and `DDG/Intrinsic/FlipAngles.lean`. The statements of the `Delaunay` part of th
 the plane `ℝ × ℝ` with `dist2` (`DDG/Geometry/Plane.lean`);
 `flipLength_eq_flippedLengthFromLengths` relates `flipLength` to the flipped length
 `Intrinsic.flippedLengthFromLengths` of the Rust code. The section on the intrinsic criterion
-(namespace `DDG.Intrinsic`, moved here from `DdgProofs/Intrinsic/Delaunay.lean`) defines the
+(namespace `DDG.Intrinsic`, moved here from the former `Intrinsic.Delaunay` module) defines the
 closed forms of the Rust code on `ℝ` (`delaunayExcess`, `delaunayHolds`, `cotanWeight`,
 `cotanWeightFromLengths`, `oppositeAngles`); the oracle's copies are related to them by
 one-way bridges in the app layer (`Oracle/Intrinsic.lean`).
@@ -93,7 +93,7 @@ namespace DDG
 
 /-! ## The intrinsic Delaunay criterion of one diamond
 
-(Moved here from `DdgProofs/Intrinsic/Delaunay.lean` in library step S2b; the names keep the
+(Moved here from the former `Intrinsic.Delaunay` module in library step S2b; the names keep the
 `DDG.Intrinsic` namespace until step S4.)
 
 * **`it-delaunay-condition`**, **`it-cotan-weight`** — `cotanWeight` (the Rust function with
@@ -472,7 +472,7 @@ def circumcenterAbove (a b c : ℝ) : ℝ × ℝ := (a / 2, a * cornerCot a b c 
 /-- The circumcentre of `i`, `j` and `l = apexBelow a d e`: `(a/2, −(a/2) cot θ_l)`. -/
 def circumcenterBelow (a d e : ℝ) : ℝ × ℝ := (a / 2, -(a * cornerCot a d e / 2))
 
-/-! ## Bridges to `DdgProofs/Intrinsic` -/
+/-! ## Bridges to the intrinsic-triangulation formulas (`DDG/Intrinsic/*`) -/
 
 theorem apexAbove_eq (a b c : ℝ) : apexAbove a b c = Intrinsic.apexK a b c := by
   unfold apexAbove Intrinsic.apexK

@@ -4,7 +4,7 @@
 "Integer Coordinates for Intrinsic Geometry Processing", Gillespie, Sharp, Crane, ACM TOG 40(6), 2021
 ("the paper"; Supp. = its supplement). Written from the paper's text (Sec. 2.3–3.7, Supp. B), not from
 the authors' code. Everything here is exact integer arithmetic (`Int`, `Nat`); there is no rounding.
-`lean/proofs/DdgProofs/IntegerCoords/*.lean` proves theorems about these very definitions.
+`DDG/NormalCoords/*.lean` proves theorems about these very definitions.
 
 **Face convention** (the halfedge convention of the workspace, `h = 3f + k` runs from corner `k` to
 corner `k + 1`). A face has corners `0, 1, 2` and sides `0, 1, 2`; side `k` runs from corner `k` to

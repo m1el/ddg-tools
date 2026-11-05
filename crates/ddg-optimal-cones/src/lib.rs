@@ -141,7 +141,8 @@
 //! cones, how `λ` relates to theirs, and measured running times.
 //!
 //! Functions that implement a formula carry a `[formula: <id>]` line; the ids are those of
-//! `lean/proofs`, where the formula is proved or cited.
+//! `lean/ddg` (the library) and `lean/proofs` (the app layer), where the formula is proved, or
+//! `lean/proofs/CITED.md`, where it is cited.
 
 #![warn(missing_docs)]
 

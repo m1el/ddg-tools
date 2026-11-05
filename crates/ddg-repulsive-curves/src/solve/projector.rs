@@ -16,7 +16,7 @@
 //! Uses by the multigrid (WP6): Eq. 30 (`y` solves `Pᵀ Ā P y = Pᵀ a` ⇔ `x = P y` solves the
 //! saddle system with `b = 0`) and Eq. 33 (`z = C† b`, `y` from the `b = 0` system with right
 //! side `Ā z`, then `x = z − y` solves it with general `b`). Both are proved in
-//! `lean/proofs` (`rc-projected-system`, `rc-projection-transform`) and tested in
+//! `lean/ddg` (`rc-projected-system`, `rc-projection-transform`) and tested in
 //! `tests/constraints.rs`.
 
 use ddg_core::sparse::{Factorization, Method, Parallelism, SparseError, SparseMatrix, Symbolic};

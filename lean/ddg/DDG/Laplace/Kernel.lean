@@ -10,7 +10,7 @@ For a matrix `A` over a finite index type with `1ᵀA = 0` (for instance the cot
   `(A u)_{i₀} = b_{i₀}` (the dropped equation of a pinned solve on a closed mesh);
 * `Solver.sum_eq_zero_of_mulVec_eq`: conversely, `A u = b` forces `Σ b = 0`.
 
-(Moved out of `DdgProofs.Solver`; the declarations keep their names.)
+(Moved out of `DdgProofs.OptimalCones.Solver`; the declarations keep their names.)
 -/
 
 noncomputable section

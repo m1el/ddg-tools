@@ -7,7 +7,7 @@
 //! *forced* (it carries a `Point` or `Tangent(Vertex)` constraint), or an already explored
 //! neighbour is white. Closed loops with fewer than 6 vertices are not coarsened. So no two
 //! adjacent vertices are white and every white vertex has two black neighbours (proved in
-//! `lean/proofs`, `Multigrid.lean`).
+//! `lean/ddg/DDG/Repulsive/Curves/Multigrid.lean`).
 //!
 //! The coarse network has the black vertices (numbered in increasing fine index) at their fine
 //! positions (the paper's "removing white vertices"; the reference uses `J⁺γ`, D17). Its edges

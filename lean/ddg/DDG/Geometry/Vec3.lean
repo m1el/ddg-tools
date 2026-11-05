@@ -28,7 +28,7 @@ and `x_I`:
 
 with `P_T w = w − (T·w) T`.
 
-(The dual lengths `m_v` are in `DdgProofs.Repulsive.Curves.DualLengths`.)
+(The dual lengths `m_v` are in `DDG.Repulsive.Curves.DualLengths`.)
 -/
 
 noncomputable section

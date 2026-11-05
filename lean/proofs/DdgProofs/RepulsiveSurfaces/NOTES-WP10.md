@@ -25,7 +25,7 @@ from §12):
 - `Constraints.lean`: rs-area-gradient, rs-volume-gradient (factor 3 on closed fans), rs-barycenter.
 - `Penalties.lean`: rs-penalties, rs-willmore (structure; cotan/mass derivatives by FD).
 - `Step.lean`: rs-armijo-reference. `Remesh.lean`: rs-circumcenter, rs-smoothing-weights,
-  rs-delaunay-test. `Ccd.lean`: rs-ccd-advancement. `Optimize.lean`: rs-lbfgs-two-loop.
+  rs-delaunay-test. `AdvancementPairs.lean`: rs-ccd-advancement. `LBFGS.lean`: rs-lbfgs-two-loop.
 
 Cited (8, `CITED.md` § Repulsive Surfaces): rs-exponent-range, rs-differential-order,
 rs-fractional-operator, rs-preconditioner-approx, rs-aqp, rs-bcqn, rs-energy-consistency,
@@ -43,6 +43,6 @@ every declaration automatically. `scripts/check-formulas.sh --audit-all` passes.
 ## How to resume
 
 Worktree setup: symlink `lean/proofs/.lake/packages/*` to the main checkout's packages.
-`cd lean/proofs && lake build DdgProofs.RepulsiveSurfaces` (log to `runs_tmp/`), or per file
+`cd lean/proofs && lake build DdgProofs.RepulsiveSurfaces` (the library part is `cd lean/ddg && lake build DDGRepulsive`) (log to `runs_tmp/`), or per file
 `lake env lean DdgProofs/RepulsiveSurfaces/<File>.lean > ../../runs_tmp/x.log 2>&1` after building
 its imports.

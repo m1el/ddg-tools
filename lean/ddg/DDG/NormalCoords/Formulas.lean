@@ -8,7 +8,7 @@ import Mathlib.Algebra.Order.Group.Int
 ("the paper"; Supp. = its supplement). Written from the paper's text (Sec. 2.3–3.7, Supp. B), not from
 the authors' code. Everything here is exact integer arithmetic (`Int`, `Nat`); there is no rounding.
 This is the library's native copy (namespace `DDG.NormalCoords.Formulas`) of the oracle's
-`DdgOracle/NormalCoords/Formulas.lean`; the app bridge `DdgProofs/Oracle/NormalCoords.lean` proves them equal by `rfl`.
+`DdgOracle/IntegerCoords/Formulas.lean`; the app bridge `DdgProofs/Oracle/NormalCoords.lean` proves them equal by `rfl`.
 
 **Face convention** (the halfedge convention of the workspace, `h = 3f + k` runs from corner `k` to
 corner `k + 1`). A face has corners `0, 1, 2` and sides `0, 1, 2`; side `k` runs from corner `k` to
@@ -244,7 +244,7 @@ end DDG.NormalCoords.Formulas
 # Integer coordinates: arithmetic of the formulas (tier A)
 
 `crates/ddg-integer-coords/SPEC.md` §2.2–2.4, §4.2, §4.5, §9.2; the paper Sec. 2.3, 2.5, 3.2, 3.4.
-All statements are about the oracle's integer definitions (`lean/oracle/DdgOracle/NormalCoords/
+All statements are about the oracle's integer definitions (`lean/oracle/DdgOracle/IntegerCoords/
 Formulas.lean`, namespace `DDG.NormalCoords.Formulas`), i.e. about the code the oracle runs.
 
 Face convention: side `k` runs from corner `k` to corner `k + 1`; corner `k` is opposite side

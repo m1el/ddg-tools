@@ -929,7 +929,7 @@ modules of this crate.
 | `dev-angle-gradient` | Eq. 9 with `|e|²` | `geometry::backprop_face` | proved, `Basic.lean` |
 | `dev-backprop-face` | adjoint form of §2 equals the chain rule | `geometry::backprop_face` | proved, `Basic.lean` |
 | `dev-vertex-normal` | vector area; independent of `f_v` at interior `v` | `geometry::vertex_normal` | proved, `Basic.lean` |
-| `dev-gradient-invariance` | invariance ⇒ `Σg = 0`, `Σ f×g = 0`, `Σ f·g = 0` | `evaluate` (doc) | proved, `Invariance.lean` |
+| `dev-gradient-invariance` | invariance ⇒ `Σg = 0`, `Σ f×g = 0`, `Σ f·g = 0` | `evaluate` (doc) | proved, `lean/ddg/DDG/Geometry/RigidInvariance.lean` |
 | `dev-hinge-coplanar` | Theorem 3.3 | — (docs) | cited (paper's proof; embeddedness not in Mathlib) |
 | `dev-hinge-antiparallel` | Prop. A.1 | — | cited |
 | `dev-hinge-ruled` | Prop. A.2 | — | cited |

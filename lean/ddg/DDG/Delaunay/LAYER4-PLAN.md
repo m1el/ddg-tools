@@ -16,7 +16,7 @@ Three routes were compared.
   no "locally geodesic" notion without charts); the statement "an edge of a flipped triangulation
   is a geodesic of `|s|`" needs charts anyway. Far too expensive; rejected.
 * (b) *Normal coordinates / crossing sequences.* Track every edge of `t` as the sequence of edges
-  of `s` it crosses. `DdgProofs/IntegerCoords/` has the combinatorial face models and the
+  of `s` it crosses. `lean/ddg/DDG/NormalCoords/` has the combinatorial face models and the
   combinatorial flip rule, but no geometry: that the straight diagonal of the flipped diamond
   crosses the arcs as the rule predicts, and that the length is the developed distance, would
   have to be proved — and that needs to know how the edges of `s` run *inside* each face of `t`,
@@ -53,14 +53,14 @@ homotopy classes, uniqueness of geodesics. The theorem proved is literally the h
 `BoundedLengthFinite` of layer 3, for every state, closed or with boundary, with self-loops,
 multiple edges and self-glued faces allowed.
 
-## Stages (files under `DdgProofs/Delaunay/Surface/`)
+## Stages (files under `lean/ddg/DDG/Delaunay/Surface/`)
 
 | Stage | File | Content | Est. lines | Status |
 |---|---|---|---|---|
 | 1 | `Plane.lean` | `Rigid` (rotation + translation as a structure; composition, inverse, action, isometry, `sda` kept), `rigidOfSegment` (the motion taking a segment onto a congruent one; uniqueness), triangles `Fin 3 → ℝ × ℝ` with `hull`, `interior`, open sides, corners; segment–triangle lemmas (the parameters of a segment inside a triangle form a closed interval; a segment entering the interior exits through one open side, transversally; a point on an open side is neither interior nor a corner; opposite sides of a line; the open wedge between two transversal lines at a point meets any neighbourhood); the chord bound `|PQ| ≥ |vQ| sin ∠PvQ`; angle additivity for collinear points (`cornerAngle` of `Triangle.lean`, by the law of cosines and Stewart's theorem) and the run bound (a straight segment through a fan of wedges at `v` subtends `< π`) | 1400 | done |
 | 2 | `Layout.lean` | the standard layout of every face of `s`, the unfolding motion `u_e` across each interior halfedge, cells `(σ, g)` with `tri`, `hull`, `across`; `ConsistentGerm`, `BoundaryGerm` and their transport by rigid motions; words, `devLength`, finiteness of words of bounded length (`Λ_L`), the constants `α_min`, `ℓ_min`, `N s L` | 600 | done |
 | 3 | `Overlay.lean` | `Overlay s t` (layouts of `t`'s faces with `t`'s lengths, cells, cover, `germ_int`, `germ_edge`, `germ_bdry`, `corner`, non-junk); the identity overlay of `s` on itself; **the walk**: along every halfedge of `t` a chain of cells, each entered through an open side and left through another, and the word it defines; `devLength word = t.ℓ x`; the fan bound `word.length ≤ N s (t.ℓ x)` | 1800 | done |
-| 4 | `OverlayFlip.lean` | `Overlay.flip`: a flip of a strictly convex diamond carries an overlay to an overlay of the flipped state (the two faces laid out as one convex quadrilateral `D` by `diamond_unique`; the new faces' layouts are the two triangles of the other diagonal; cells restricted to those overlapping the new face; every invariant re-proved by planar arguments: convexity of `D`, the diagonal is crossed by any segment from one half to the other, corners of `D` are never interior to a cell) | 3000 | done |
+| 4 | `FlipFace.lean`, `FlipEdge.lean` | `Overlay.flip`: a flip of a strictly convex diamond carries an overlay to an overlay of the flipped state (the two faces laid out as one convex quadrilateral `D` by `diamond_unique`; the new faces' layouts are the two triangles of the other diagonal; cells restricted to those overlapping the new face; every invariant re-proved by planar arguments: convexity of `D`, the diagonal is crossed by any segment from one half to the other, corners of `D` are never interior to a cell) | 3000 | done |
 | 5 | `Finite.lean` | `boundedLengthFinite : ∀ s, BoundedLengthFinite s`; `reach_finite`, unconditional `acc`, `flip_algorithm`, `exists_delaunay`, FlipQueue's `loop_acc`/`loop_result` without hypothesis | 300 | done |
 | 6 | docs | `DdgProofs.lean`, `Audit.lean`, README rows/table, CITED trims, survey status, formula tags | — | done (2026-11-05) |
 
@@ -79,7 +79,7 @@ theorem Overlay.exists_word (O : Overlay s t) (x : Halfedge F) :
     ∃ w : Word F, w.numCross ≤ N s (t.ℓ x) ∧ devLength s w = t.ℓ x
 def Overlay.id (s : MetricGluing F) : Overlay s s
 
--- Surface/OverlayFlip.lean
+-- Surface/FlipFace.lean, Surface/FlipEdge.lean
 theorem Overlay.flip (O : Overlay s t) (h : ConvexFlip t t') : Nonempty (Overlay s t')
 
 -- Surface/Finite.lean

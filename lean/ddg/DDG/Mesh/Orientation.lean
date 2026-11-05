@@ -18,8 +18,8 @@ corner `k` to corner `k + 1` (mod 3), the numbering `3f + k` of the Rust complex
   halfedge has a twin (`hasTwin_of_closed`).
 * `sum_halfedge_antisymm`: for an antisymmetric `w`, `Σ_h w(tail h, head h)` is the sum over the
   boundary halfedges alone (the interior terms cancel in pairs). This is the telescoping behind
-  the shoelace formula of `Bff/ConformalEnergy.lean` and the Poincaré–Hopf sum of
-  `Intrinsic/SingularityIndex.lean`.
+  the shoelace formula of `DDG/Conformal/ConformalEnergy.lean` and the Poincaré–Hopf sum of
+  `DDG/VectorFields/PoincareHopf.lean`.
 
 The existing theorems (Gauss–Bonnet, the cotan Laplacian) do not use the orientation; nothing in
 `TriMesh` changes, `Oriented` is an extra hypothesis where it is needed.

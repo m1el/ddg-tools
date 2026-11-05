@@ -25,7 +25,7 @@ identity in `ℝ³`, see the end of the file).
 * `closestPtTri` (Ericson's Voronoi-region routine of `truth.rs`, with its degenerate fallback):
   `closestPtTri_isClosest`; `closestPtTriRC` (the copy in `obstacle.rs`, no guards) agrees with it
   for non-degenerate triangles (`closestPtTriRC_eq`).
-* `primDist_segSeg`, `primDist_ptTri`: these are `primDist` of `Ccd.lean` for the corner positions
+* `primDist_segSeg`, `primDist_ptTri`: these are `primDist` of `Advancement.lean` for the corner positions
   at time `τ`; `segSeg_advance_safe`, `ptTri_advance_safe`: the advancement of `ccd.rs` with the
   computed distances keeps the primitives apart (with corner speeds measured relative to any
   common velocity, `primDist_sub_common`).
@@ -1390,7 +1390,7 @@ theorem closestPtTriRC_eq (hN : 0 < tN a b c) : closestPtTriRC p a b c = closest
 
 end Voronoi
 
-/-! ## The distances are `primDist` of `Ccd.lean`; safety of the advancement -/
+/-! ## The distances are `primDist` of `Advancement.lean`; safety of the advancement -/
 
 section Prim
 

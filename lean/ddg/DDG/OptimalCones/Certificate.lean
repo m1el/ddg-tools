@@ -3,7 +3,7 @@ import DDG.OptimalCones.Duality
 /-!
 # The certificate when the data are inexact
 
-`DDG.Duality` proves the duality-gap certificate for a pair `(u, μ)` that satisfies the
+`DDG.OptimalCones.Duality` proves the duality-gap certificate for a pair `(u, μ)` that satisfies the
 state equation `L u = μ − Ω` **exactly** and a dual point that satisfies the adjoint equation and
 the dual constraints **exactly**. No computed triple `(u, φ, μ)` does. This file says what remains
 true for an **arbitrary** triple, in exact real arithmetic (rounding in *evaluating* the formulas

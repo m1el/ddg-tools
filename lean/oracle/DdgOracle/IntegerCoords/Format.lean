@@ -6,8 +6,8 @@ import DdgOracle.IntegerCoords.Formulas
 
 Specified in `README.md` ("Integer coordinates (sixth paper)"). Everything is a decimal integer; the
 outputs are compared with exact equality. Every number printed is computed by the definitions of
-`DdgOracle/IntegerCoords/Formulas.lean` (the ones `lean/proofs/DdgProofs/IntegerCoords` proves
-theorems about); this file only parses, loops and prints.
+`DdgOracle/IntegerCoords/Formulas.lean` (the ones `lean/ddg/DDG/NormalCoords` and the bridge
+`lean/proofs/DdgProofs/Oracle/NormalCoords.lean` prove theorems about); this file only parses, loops and prints.
 
 A case is `case NAME`, `task T`, task-specific lines, `end`. The output repeats `case`/`task`, gives
 `status ok` (or `status error MESSAGE` for a malformed case), the task's lines, and `end`. A line of

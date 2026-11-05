@@ -24,7 +24,7 @@ its vertex values:
 * `E_C(a, b) ≥ 0`, and `E_C(a, b) = 0` iff `f` satisfies the Cauchy–Riemann equations on every
   face (`TriMesh.loopConformalEnergy_eq_zero_iff`).
 
-The per-face identity is `[formula: bff-conformal-energy-triangle]` (`FEM/Fem.lean`).
+The per-face identity is `[formula: bff-conformal-energy-triangle]` (`FEM/Elements.lean`).
 -/
 
 noncomputable section

@@ -485,7 +485,7 @@ pub struct Singularities {
 /// opposite angles; `arg` gives that except at a tie (`u_j = −c r_ij u_i`, `c > 0`), where both
 /// get `+π` and `index_sum` would gain one per such edge. There the halfedge with the higher
 /// index takes `−π` (in floating point: whenever `|ω_ij + ω_ji| > π`, it is shifted by `2π`),
-/// so on a closed surface `index_sum = n χ` unconditionally (in exact arithmetic; lean/proofs
+/// so on a closed surface `index_sum = n χ` unconditionally (in exact arithmetic; lean/ddg
 /// `TriMesh.omegaCode_eq_omegaFixed`, `TriMesh.sum_round_faceIndexFixed`;
 /// `tests/vector_pi_tie.rs`). Away from ties the result is bit for bit that of `arg`.
 ///

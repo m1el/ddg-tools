@@ -3,8 +3,10 @@
 //! Alg. 1, the index of Supp. Alg. 3, Eq. 3 and 4 (the flip) and Eq. 6.
 //!
 //! Every function here is the Rust counterpart of a definition of the Lean oracle
-//! (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`), which `lean/proofs` proves theorems
-//! about, and is compared with it by exact integer equality (`tests/oracle.rs`).
+//! (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`), restated natively in
+//! `lean/ddg/DDG/NormalCoords/Formulas.lean` (which `lean/ddg` proves theorems about; the two are
+//! equal by `rfl`, `lean/proofs/DdgProofs/Oracle/NormalCoords.lean`), and is compared with the
+//! oracle by exact integer equality (`tests/oracle.rs`).
 //!
 //! # Face convention (SPEC §2.1, the oracle's)
 //!

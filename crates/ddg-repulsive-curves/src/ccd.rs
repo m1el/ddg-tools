@@ -252,8 +252,8 @@ pub fn point_segment_distance(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
 /// minimizer for that `t` (Ericson's re-projection). Every candidate is the distance of an actual
 /// pair of points. When the lines are not parallel and their closest points lie on both
 /// segments, the pair is that interior pair, so in exact arithmetic the result is the distance
-/// (`DDG.RC.segSegCode_eq`, `segSegDist_le`, `segSegDist_attained` in `lean/proofs`,
-/// `RepulsiveCurves/ClosestPoints.lean`; the cross-product form: `cross_formulas_segSeg`).
+/// (`DDG.RC.segSegCode_eq`, `segSegDist_le`, `segSegDist_attained` in `lean/ddg`,
+/// `lean/ddg/DDG/Geometry/ClosestPoints.lean`; the cross-product form: `cross_formulas_segSeg`).
 ///
 /// The line parameter is `s = ((p₂ − p₁) × d₂)·n / |n|²` with `n = d₁ × d₂`, which equals the
 /// closed form `(bf − ce)/(ae − b²)` (Lagrange's identity) but is well conditioned for nearly

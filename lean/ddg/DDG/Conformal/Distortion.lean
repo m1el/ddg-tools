@@ -4,7 +4,7 @@ import DDG.Geometry.Plane
 # Distortion of a triangle map: singular values, quasi-conformal error, log scale
 
 Transcriptions of the formulas of `crates/ddg-bff/src/quality.rs` into definitions on real
-numbers (same arrangement of terms), and what they compute; see `DdgProofs.Bff.Quality` for the
+numbers (same arrangement of terms), and what they compute; see `DDG.Geometry.Plane` for the
 plane primitives (`dot2`, `cross2`, `sda`, `dist2`, the reference layout).
 
 ## `quasi-conformal-error` — `singular_values`, `quasi_conformal_error`

@@ -16,7 +16,7 @@ scale factor of a given cone configuration) and `extract.rs` (merging clusters o
   the relation of each row. `isAssembledSolution_iff`: the matrix the code assembles (unknowns
   `(u, ψ)` with `ψ_i = φ_i − offset_i`, known values moved to the right-hand side, pinned rows
   replaced by the identity) has the same solutions. `newton_step_iff_isSolution`: the
-  semismooth Newton step of the residual map of `DDG.Newton` is the row system of the
+  semismooth Newton step of the residual map of `DDG.OptimalCones.Newton` is the row system of the
   current pieces. `kkt_of_isSolution`, `isMinimizer_of_isSolution`:
   a solution all of whose vertices lie on their pieces is a solution of the optimality system,
   hence a global minimizer; `isProxMinimizer_of_isSolution`: the same for the regularized

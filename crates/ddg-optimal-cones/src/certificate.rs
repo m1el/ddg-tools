@@ -21,7 +21,7 @@ use crate::problem::{BoundaryTreatment, ConeProblem, Instance};
 /// ```
 ///
 /// with `u = φ = µ = 0` on the boundary. A triple that satisfies it is a global minimizer
-/// (machine-checked: `optimality-system-sufficient` in `lean/proofs`). The first six fields
+/// (machine-checked: `optimality-system-sufficient` in `lean/ddg`). The first six fields
 /// measure how far the triple is from satisfying it.
 ///
 /// # The duality gap, and exactly what is computed
@@ -56,7 +56,7 @@ use crate::problem::{BoundaryTreatment, ConeProblem, Instance};
 ///
 /// # What this proves
 ///
-/// The statements are machine-checked in `lean/proofs` (`DDG/OptimalCones/Certificate.lean`,
+/// The statements are machine-checked in `lean/ddg` (`DDG/OptimalCones/Certificate.lean`,
 /// `DDG/OptimalCones/Duality.lean`) for exact real arithmetic; `φ̂` is dual feasible by construction.
 ///
 /// * The identity above is `objective_sub_dualObjectiveOfAdjoint`.

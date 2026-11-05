@@ -848,16 +848,16 @@ Rust functions carry `[formula: <id>]`. Each id is a Lean theorem in
 | `pat-features` | definition; invariance under translation and uniform scaling of the cloud | `features` | proved, `Features.lean` |
 | `pat-feature-invariance` | as above (for any frame rule depending only on `c`) | `features` | proved, `Features.lean` |
 | `pat-network` | architecture (Vaswani 2017; Flax `MultiHeadAttention`, `LayerNorm`) | `network` | cited |
-| `pat-output-scaling` | scaling the coefficients by `σ` makes tori and SDF scale covariant | `network` | proved, `Fitting.lean` |
-| `pat-fundamental-forms` | Monge patch `Q*`: `I = [[1+a10², a10a01],[·, 1+a01²]]`, `II = (1/A)[[2a20, a11],[·, 2a02]]` at 0 (App. C) | `fit` | proved, `Fitting.lean` |
-| `pat-mean-gauss` | `H = tr(I⁻¹II)/2`, `K = det II/det I` equal Eq. 19 | `fit` | proved, `Fitting.lean` |
-| `pat-principal-pair` | `(II − κ±I)(v1 ± disc, v2) = 0` with `κ± = H ± √(H² − K)`, `disc` as N§6.1 (polynomial identity with `disc² = Δ`) | `fit` | proved, `Fitting.lean` |
-| `pat-curvature-rayleigh` | Rayleigh quotient of a generalized eigenvector = its eigenvalue | `fit` | proved, `Fitting.lean` |
-| `pat-principal-directions` | `v±` tangent to `Q*` at 0; `v₊ ⟂_I v₋` when `κ₊ ≠ κ₋` | `fit` | proved, `Fitting.lean` |
-| `pat-surface-normal` | Eq. 21 is the unit normal of `Q*` at 0 | `fit` | proved, `Fitting.lean` |
-| `pat-torus-radii` | `R + sgn(κ₊κ₋) r = 1/|κmin|` | `fit` | proved, `Fitting.lean` |
-| `pat-torus-sign` | Eq. 22 equals "`κmax < 0 ∧ κmin ≠ 0`" | `fit` | proved, `Fitting.lean` |
-| `pat-torus-frame` | center and axis (definitions); `u` unit, `u ⟂ n*` | `fit` | proved, `Fitting.lean` |
+| `pat-output-scaling` | scaling the coefficients by `σ` makes tori and SDF scale covariant | `network` | proved, `MongeFit.lean` |
+| `pat-fundamental-forms` | Monge patch `Q*`: `I = [[1+a10², a10a01],[·, 1+a01²]]`, `II = (1/A)[[2a20, a11],[·, 2a02]]` at 0 (App. C) | `fit` | proved, `MongeFit.lean` |
+| `pat-mean-gauss` | `H = tr(I⁻¹II)/2`, `K = det II/det I` equal Eq. 19 | `fit` | proved, `MongeFit.lean` |
+| `pat-principal-pair` | `(II − κ±I)(v1 ± disc, v2) = 0` with `κ± = H ± √(H² − K)`, `disc` as N§6.1 (polynomial identity with `disc² = Δ`) | `fit` | proved, `MongeFit.lean` |
+| `pat-curvature-rayleigh` | Rayleigh quotient of a generalized eigenvector = its eigenvalue | `fit` | proved, `MongeFit.lean` |
+| `pat-principal-directions` | `v±` tangent to `Q*` at 0; `v₊ ⟂_I v₋` when `κ₊ ≠ κ₋` | `fit` | proved, `MongeFit.lean` |
+| `pat-surface-normal` | Eq. 21 is the unit normal of `Q*` at 0 | `fit` | proved, `MongeFit.lean` |
+| `pat-torus-radii` | `R + sgn(κ₊κ₋) r = 1/|κmin|` | `fit` | proved, `MongeFit.lean` |
+| `pat-torus-sign` | Eq. 22 equals "`κmax < 0 ∧ κmin ≠ 0`" | `fit` | proved, `MongeFit.lean` |
+| `pat-torus-frame` | center and axis (definitions); `u` unit, `u ⟂ n*` | `fit` | proved, `MongeFit.lean` |
 | `pat-torus-contact` | `g(Q*(0,0)) = 0`; the torus normal at `o` is `±n*`; principal curvatures of the torus at `o` are `κmin, κmax` (meridian `1/r`, parallel `1/(R + r)` with signs) | `fit` | proved (`Torus.lean`); curvature-of-torus facts proved for the parametrization |
 | `pat-fit-contact` | `Geometric` rule (center `o + n*/κmin`): `g(o) = 0`, `∇g(o) = n*`. `Reference` rule: `g(o) = 0`, `∇g(o) = sgn(κmin κmax) n*` (−1 exactly at saddles; the torus there has curvatures `(−κmax, −κmin)`, the mirror image). Needs `κmin κmax ≠ 0` | `fit` (`SignRule`) | proved, `Torus.lean` (`PAT.fit_contact`) |
 | `pat-torus-sdf` | Eq. 23 = distance to the torus surface for `R ≥ |r|` (the distance to a circle in its meridian half-plane) | `sdf` | proved for the meridian reduction, `Torus.lean`; exactness of the "circle twice" composition cited (Quilez) if the minimization is heavy |
@@ -882,11 +882,11 @@ Rust functions carry `[formula: <id>]`. Each id is a Lean theorem in
 | `pat-loss` | Eq. 27 as coded (definition) | `train` | proved (definition), `Loss.lean` |
 | `pat-adam` | Adam update (Kingma–Ba 2015) | framework | cited |
 | `pat-offset`, `pat-boolean` | offset and CSG of SDFs | `apps` | cited (Quilez; Ricci 1973) + min/max bound proved |
-| `pat-orientation-metric` | `M_i` is a norm for nonzero weights | `apps::orient` | proved, `Apps.lean` |
-| `pat-mc-interpolation` | linear edge root | `mc` | proved, `Apps.lean` |
+| `pat-orientation-metric` | `M_i` is a norm for nonzero weights | `apps::orient` | proved, `Operations.lean` |
+| `pat-mc-interpolation` | linear edge root | `mc` | proved, `Operations.lean` |
 | `pat-revolution`, `pat-extrusion`, `pat-extrusion-gradient` | Quilez revolution/extrusion and gradients | `analytic` | proved (gradients), cited (exactness) |
 | `pat-quilez-2d` | the 16 2D SDFs | `analytic` | cited (Quilez 2019) |
-| `pat2d-circle-fit`, `pat2d-circle-sdf`, `pat2d-blend` | §8.7 | `pat2d` | proved, `Pat2d.lean` |
+| `pat2d-circle-fit`, `pat2d-circle-sdf`, `pat2d-blend` | §8.7 | `pat2d` | proved, `Circle2d.lean` |
 
 ## 14. Decisions: the paper as printed, the reference, and what we do
 

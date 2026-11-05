@@ -10,7 +10,7 @@ quasi-Newton methods*, Math. Program. A 141, 2013). The paper (Sec. 4.3) names t
 
 * `weakWolfe_curvature_of_curvatureHolds` — the BFGS curvature condition `sᵀy > 0` for a step
   that satisfies the oracle's `curvatureHolds` (the statement on real vectors,
-  `Dev.weakWolfe_curvature`, is in `DdgProofs.Optimization.Wolfe`);
+  `Dev.weakWolfe_curvature`, is in `DDG.Optimization.Wolfe`);
 * `lineSearch_spec` — about the oracle's `Ddg.Dev.lineSearch` (the loop of Algorithm 2.6 with the
   limits of SPEC §4.3): an `accepted t` outcome satisfies `S(t)` and `C(t)`; a `capped t` outcome
   satisfies `S(t)`; a `weak t` outcome satisfies `S(t)` and `t > 0`.

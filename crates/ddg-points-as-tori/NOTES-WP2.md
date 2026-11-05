@@ -1,9 +1,9 @@
 # WP2 notes (Lean proofs + citations)
 
-Files: `lean/proofs/DdgProofs/PointsAsTori/*.lean`, `lean/proofs/DdgProofs/PointsAsTori.lean`,
+Files: `lean/proofs/DdgProofs/PointsAsTori/*.lean`, `lean/ddg/DDG/SDF.lean`,
 the import line in `lean/proofs/DdgProofs.lean`, section "Points as Tori" of `lean/proofs/CITED.md`.
 Namespace `DDG.PAT`; vectors `RC.V3 = Fin 3 → ℝ`, `RC.vnorm`.
-Build: `cd lean/proofs && lake build DdgProofs.PointsAsTori.<M> > runs_tmp/pat-wp2/<M>.log 2>&1`.
+Build: `cd lean/ddg && lake build DDG.SDF.<M> > runs_tmp/pat-wp2/<M>.log 2>&1`.
 
 ## Findings (to report; SPEC not edited)
 
@@ -42,7 +42,7 @@ Build: `cd lean/proofs && lake build DdgProofs.PointsAsTori.<M> > runs_tmp/pat-w
 ## Status (all done, builds, check-formulas OK)
 
 Modules: Basic, Features, Fitting, Torus, Blend, Apps, Baselines, Loss, Pat2d; root
-`DdgProofs/PointsAsTori.lean`; import line in `DdgProofs.lean`; CITED section "Points as Tori".
+`lean/ddg/DDG/SDF.lean`; import line in `DdgProofs.lean`; CITED section "Points as Tori".
 Axiom audit of the main theorems: propext, Classical.choice, Quot.sound only.
 Not proved (cited instead or left): FWN order-2 (third derivative) term and error bound;
 the WLS normal equations of the 2D circle fit; 2D blend gradient (algebra identical to 3D).

@@ -26,7 +26,7 @@ const OBJECTIVE_TOLERANCE: f64 = 1e-7;
 /// factor) would show as a difference of order one.
 const SOLUTION_TOLERANCE: f64 = 2e-3;
 /// The sharp comparison of the minimizers is quadratic growth (`optimality-system-sufficient`
-/// in `lean/proofs`): every feasible `(v, ν)` has
+/// in `lean/ddg`): every feasible `(v, ν)` has
 /// `objective(v, ν) ≥ optimum + ½ Σ wE m (v − u)²`. With the reference solution as `(v, ν)`
 /// this bounds its weighted distance from ours by the difference of the objectives, up to this
 /// slack (relative to `max(1, |objective|)`) for the reference's own infeasibility.

@@ -38,7 +38,7 @@ nonempty `B` the hypotheses hold (`TriMesh.yamabe_existsUnique`, …).
   equality only for `τ = σ` when `L_OO` is positive definite.
 
 (The block products, the Dirichlet problem and the harmonic extension are in
-`DdgProofs.Laplace.Dirichlet`; the declarations keep their names.)
+`DDG.Laplace.Dirichlet`; the declarations keep their names.)
 -/
 
 noncomputable section

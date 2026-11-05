@@ -74,7 +74,7 @@ line from the fitted `n*`) is a natural extension, not tried. The paper only cla
 API: `pat2d::{Cloud2, ClassicalFit, QuadraticPredictor, Predicted2, Quad2, fit_circles, Fit2dOptions, Pat2d, BuildOptions2, Pat2dField,
 Eval2dOptions, evaluate_grid, marching_squares, chain_segments, Raster, write_png, write_svg_contours}`.
 `[formula: pat2d-circle-fit]` on `ClassicalFit` and `fit_circles`, `pat2d-circle-sdf` on `circle_sdf`/`circle_sdf_gradient`, `pat2d-blend` on the
-blend in `Pat2dField` (`field.rs`). Conventions match `Pat2d.lean`: frame `(t, n)` with `t = (-n_y, n_x)`, `n* = (-a1 t + n)/sqrt(1+a1^2)`,
+blend in `Pat2dField` (`field.rs`). Conventions match `Circle2d.lean`: frame `(t, n)` with `t = (-n_y, n_x)`, `n* = (-a1 t + n)/sqrt(1+a1^2)`,
 `kappa = 2 a2 / (1+a1^2)^{3/2}`, centre `o + n*/kappa`, sign `+1` iff `kappa < 0`; tested: `g(o) = 0`, `grad g(o) = n*`.
 
 - **Fit.** Weighted least squares of `h` against `s` over the `k = 16` nearest points (self included), Gaussian weights

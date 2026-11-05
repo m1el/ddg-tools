@@ -689,7 +689,7 @@ Computational Geometry 38(4), 740–756, 2007 (arXiv:math/0503219, which is what
 cites as "Bobenko and Springborn 2005").
 
 **What the machine-checked part covers for intrinsic triangulations, and what it does not.**
-Machine-checked (`DdgProofs/Intrinsic/*.lean`, ids `it-*` in the README): the closed forms of
+Machine-checked (`lean/ddg/DDG/Intrinsic/*.lean`, ids `it-*` in the README): the closed forms of
 single operations in exact real arithmetic. The layout of a triangle and of the two triangles on
 an edge from their lengths is isometric and unique up to a rigid motion; the length of a flipped
 edge, in three equivalent forms, the flip back, the triangle inequalities and the area of the new
@@ -800,7 +800,7 @@ an earlier version with another title, were read).
   lexicographically extreme point that keeps the rest non-collinear and coning it back to the
   visible boundary edges, `isTriangulation_insert`, `planar-triangulation-insertion`), hence a
   Delaunay triangulation (`exists_delaunay`, `planar-delaunay-existence`),
-  `DdgProofs/Delaunay/Planar{Insertion,Existence}.lean`. The hypothesis of
+  `lean/ddg/DDG/Delaunay/Planar/{Insertion,Existence}.lean`. The hypothesis of
   `exists_delaunay_of_triangulation` is discharged.
 - **Proved, surface case: existence (2026-11-05, layer 4).** For every metric triangulation
   `s` (`MetricGluing`: closed or with boundary, any gluing), a Delaunay triangulation with the
@@ -860,7 +860,7 @@ an earlier version with another title, were read).
   surface statement above (survey of 2026-10-31; the development's source could not be fetched).
 - **Proved, planar case (2026-11-05).** For a finite point set `S ⊂ ℝ²` and triangulations of `S`
   in the point-set model (triangles with corners in `S` covering `conv S` with disjoint interiors,
-  every point of `S` in a triangle a corner of it), `DdgProofs/Delaunay/Planar*.lean`: the Lawson
+  every point of `S` in a triangle a corner of it), `lean/ddg/DDG/Delaunay/Planar/*.lean`: the Lawson
   flip of a strictly convex quadrilateral is again a triangulation of `S` (`lawson_flip`,
   `planar-lawson-flip`), an edge with the fourth corner strictly inside the circumcircle always
   has a strictly convex quadrilateral (`crossing_of_inCircumcircle`), the lifted volume
@@ -898,8 +898,8 @@ an earlier version with another title, were read).
 - **Proved, layer 4 (2026-11-05): the finiteness, and so unconditional termination on a surface.**
   `MetricGluing.boundedLengthFinite` (the former hypothesis `BoundedLengthFinite`) is a theorem for
   every `MetricGluing` (any closed surface or surface with boundary, with self-loops, multiple edges
-  and self-glued faces), `DdgProofs/Delaunay/Surface/*.lean` (`Finite.lean`; plan and route in
-  `Delaunay/LAYER4-PLAN.md`). The cone surface and its geodesics are not modelled: every
+  and self-glued faces), `lean/ddg/DDG/Delaunay/Surface/*.lean` (`Finite.lean`; plan and route in
+  `lean/ddg/DDG/Delaunay/LAYER4-PLAN.md`). The cone surface and its geodesics are not modelled: every
   triangulation reached by flips is an *overlay* on the original one (faces laid out in the plane
   together with the faces of `s` that cover them; a convex flip keeps this, `Overlay.flip`), every
   edge of it is a straight chain through at most `crossBound s L` faces of `s` (`Overlay.exists_word_le`),
@@ -1277,7 +1277,7 @@ machine-checked: the entries below, and everything about rounding and the solver
   R. L. Taylor, *The Finite Element Method*, vol. 1); its case `a + b + c = 2` is the Galerkin
   mass matrix, machine-checked as `app-fem-galerkin-mass` and used by `amr` too.
 - **Why not formalized.** The statement is about a gauge model of a line bundle that is not in
-  Mathlib. Proved instead (`DdgProofs/TriangleIntegral/`, `[formula: fem-area-coordinate-rule]`):
+  Mathlib. Proved instead (`lean/ddg/DDG/FEM/`, `[formula: fem-area-coordinate-rule]`):
   the area-coordinate rule as a Lebesgue integral over the triangle, and the slice formula that
   `monomial_integral` evaluates, `∫_T b₀^{e₀} b₁^{e₁} b₂^{e₂} e^{iΩ b_c} = 2|T| q! r!/(q + r + 1)! ·
   ∫₀¹ s^{e_c} (1 − s)^{q+r+1} e^{iΩs} ds` (`q = e_{c+1}`, `r = e_{c+2}`); and
@@ -1959,7 +1959,7 @@ equation, algorithm and appendix numbers are the paper's). The contract is
 `crates/ddg-integer-coords/SPEC.md` ("SPEC", decisions `I1`–`I26`, theorem table §9.2).
 
 **What the machine-checked part covers, and what it does not.** Machine-checked
-(`DdgProofs/IntegerCoords/*.lean`; the design of the combinatorial model is
+(`lean/ddg/DDG/NormalCoords/*.lean`; the design of the combinatorial model is
 `lean/ddg/DDG/NormalCoords/DESIGN.md`): the arithmetic of Eq. 1, 2, 6 and of crossings; the **face
 model** (one triangle of `T¹` with the pieces of the curves of `T⁰` in it, disjointness as
 non-interleaving on the boundary cycle): every valid model is the canonical pairing of Fig. 11 /
@@ -1971,7 +1971,7 @@ pair of valid faces (via a quadrilateral model whose arcs are counted by kind); 
 of its angle argument (and the failure of its strict form); chords of a convex quadrilateral and of
 a triangle cross iff their ends interleave, cevians cross; App. A's recovery of positions for any
 solution of Eq. 15; Eq. 5; Eq. 14 as the minimizer of Eq. 13 and the finite part of the mass
-identity. Tier C (`DdgProofs/IntegerCoords/Complex/`, work package WP9): the **complex model**
+identity. Tier C (`lean/ddg/DDG/NormalCoords/Complex/`, work package WP9): the **complex model**
 (faces glued by a side pairing, Δ-complexes allowed, one face model per face, crossings glued by
 `p ↦ n − 1 − p`, curves as the orbits of Alg. 1's step), `ic-trace-terminates`, and the labels
 at the input vertices with `ic-identify-edge` (Alg. 3 computes the label of the arc; the walk back
@@ -1983,7 +1983,7 @@ merged faces are valid and the Rust formula counts the merged edge's crossings, 
 at the inserted vertex as the realization has them); tier B: the split of a crossed edge
 (`ic-split-crossed-edge`) and the split exactly at a crossing (`ic-split-at-crossing`: the new edge's
 count as the arcs crossing it, the two new faces valid, the merge back); tier A: the strip intersection of Alg. 2 (`ic-strip-intersection`); and the
-input-aligned frames (`ic-input-aligned-frame`, `DdgProofs/IntegerCoords/Frames/`: for the straight
+input-aligned frames (`ic-input-aligned-frame`, `lean/ddg/DDG/NormalCoords/Frames/`: for the straight
 segment of the strip, the Rust direction is the signposts' frame angle, at input and inserted
 vertices; that the geodesic edge is that segment is `it-straightest-geodesic` with
 `ic-normal-isotopy`). All statements
@@ -2428,7 +2428,7 @@ cases where the paper's construction fails, below); the blend's shift invariance
 convexity, frozen and exact gradients (App. D) and its Laplacian; and the further ids listed in
 SPEC §13 as proved, in the files named there. **Not** machine-checked: the entries below; the
 network and everything learned; neighbor search; the clamps of D9 beyond the statements in
-`Fitting.lean`; the one-sided rules on the singular sets (D12); floating-point rounding.
+`MongeFit.lean`; the one-sided rules on the singular sets (D12); floating-point rounding.
 
 **Findings while proving (reported to the SPEC owner, SPEC not edited here).**
 1. *Saddle tori are mirrored.* With the paper's center `c = Q*(0,0) − sign(T)/|κmin| n*(0,0)` and

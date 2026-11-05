@@ -16,7 +16,7 @@ their main theorems are in `Audit.lean`.
 |---|---|
 | Vec.lean | infrastructure: coordinates, `HasDerivAt3`, `atan2` (cos/sin, range, scaling, derivative) |
 | Basic.lean | face-frame, corner-angle, area/normal/angle-gradient, backprop-face, vertex-normal |
-| Invariance.lean | gradient-invariance |
+| lean/ddg/DDG/Geometry/RigidInvariance.lean | gradient-invariance |
 | Combinatorial.lean | star-bipartitions, combinatorial-width/-gradient/-max |
 | Covariance.lean | covariance-matrix, eigenvalue-supergradient, covariance-gradient, angle-weight-retessellation |
 | MaxCovariance.lean | spherical-circumcenter, max-covariance-gradient |

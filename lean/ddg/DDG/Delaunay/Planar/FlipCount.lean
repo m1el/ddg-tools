@@ -14,7 +14,7 @@ candidate triangles.
 
 ## The proof: the lifted surface goes down
 
-Lift every triangle `t` of `T` to its lifted plane `liftPlane t` (`PlanarUniqueness.lean`; the
+Lift every triangle `t` of `T` to its lifted plane `liftPlane t` (`Uniqueness.lean`; the
 plane through the lifted corners `(v, |v|²)`). Instead of the piecewise linear lifted function on
 the hull (which would need the agreement of neighbouring planes on shared edges everywhere), the
 proof uses the relation **`LiftBelow T T'`**: for every point `x` and every triangle `t ∈ T`
@@ -35,7 +35,7 @@ higher, `liftPlane t' x ≤ liftPlane t x`. It is reflexive and transitive, and
 * **while `ij` is an edge, the surface at `y` is the lifted segment**
   (`liftPlane_eq_of_mem_edge`): `y` is a relative interior point of the edge and not a point of
   `S`, so a triangle containing `y` is one of the two triangles on the edge (the adjacency lemma
-  `eq_insert_of_mem_edge` of `PlanarLemma.lean`), and both planes take the value
+  `eq_insert_of_mem_edge` of `Lemma.lean`), and both planes take the value
   `(1 − σ)|i|² + σ|j|²` at `y`.
 
 So if `ij` were an edge again later, some triangle containing `y` would have its plane at `y`

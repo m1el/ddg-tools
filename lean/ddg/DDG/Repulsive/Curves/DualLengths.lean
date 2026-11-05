@@ -10,7 +10,7 @@ import DDG.Geometry.Vec3
 * `RC.sum_dualLen` — the dual lengths sum to the total length (`rc-dual-length`);
 * `RC.dualLen_nonneg`.
 
-(Split off `DdgProofs.RepulsiveCurves.Basic`; the declarations keep their names.)
+(Split off `DDG.Geometry.Vec3`; the declarations keep their names.)
 -/
 
 noncomputable section

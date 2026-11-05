@@ -110,7 +110,7 @@ fn classify(sites: &[Site], k: &[f64], args: &[f64], out: &mut Vec<Piece>) {
 /// On a closed mesh the cone angles must sum to `Σ Ω = 2πχ`. The left side is the sum of the
 /// cone angles that the adjoint `φ + c` asks for; it is continuous, nondecreasing and piecewise
 /// linear in `c`, so the equation is solved exactly on its breakpoints. What is proved
-/// (`lean/proofs`) is the monotonicity of the sum in `c` and that, once the sum equals `Σ Ω`, the
+/// (`lean/ddg`) is the monotonicity of the sum in `c` and that, once the sum equals `Σ Ω`, the
 /// system pinned at the constant is the full optimality system. (For a regularized problem, `c`
 /// is the null direction of the Laplacian, and this choice of `c` is expected to be the
 /// minimizer of the dual objective along the constants, since the derivative along the
@@ -321,7 +321,7 @@ impl DualSlope<'_> {
 /// step was built with, pieces being closed at their kinks ([`Site::piece`]). Then the affine
 /// formula of each piece gives the true regularized cone angle at the new point, so the new
 /// iterate solves the regularized optimality system exactly. This is `newton_stageI_exact` of
-/// `lean/proofs` (any classifier whose pieces are affine; the paper's strict classifier is
+/// `lean/ddg` (any classifier whose pieces are affine; the paper's strict classifier is
 /// the instance `paper_stageI_stopping_rule`), applied to this crate's classifier.
 ///
 /// [formula: newton-stopping-rule]
@@ -519,7 +519,7 @@ pub(crate) fn adjoint_constant_interval(sites: &[Site], phi: &[f64], mu: &[f64])
 ///
 /// **Stopping test.** As in [`solve_regularized`], with the pieces of `φ + µ` and closed at
 /// their kinks: a step that leaves every vertex on its piece yields an exact zero of `F`
-/// (`newton_stageII_exact` of `lean/proofs` for this crate's classifier; the oracle's
+/// (`newton_stageII_exact` of `lean/ddg` for this crate's classifier; the oracle's
 /// `Fimp_eq_zero_of_Fpiece_eq_zero` is the same statement for the oracle's classifier). A
 /// vertex that lands exactly on a kink between "no cone" and "cone" is classified as a cone
 /// here, which the previous piece "no cone" does not equal; such a tie costs one more step, or

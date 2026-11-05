@@ -8,8 +8,8 @@ given by `len`. The per-face quantities (side lengths `la lb lc`, cotangents `co
 `angleA`–`angleC`, `area`), the hypothesis `TriMesh.Valid` (three distinct vertices, strict
 triangle inequalities) and uniform scaling (`TriMesh.scale`, `angle*_scale`).
 
-(This module was the first part of `DdgProofs.Cotan`; the cotan formula, the assembled cotan
-Laplacian and the lumped mass are in `DdgProofs.Laplace.Cotan`.)
+(This module was the first part of the former `Cotan` module; the cotan formula, the assembled cotan
+Laplacian and the lumped mass are in `DDG.Laplace.Cotan`.)
 -/
 
 noncomputable section

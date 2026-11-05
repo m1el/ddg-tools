@@ -1114,7 +1114,7 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rc-length-schedule` | common factor keeps ratios; total target formula | `step::schedule` | proved, `Schedule.lean` |
 | `rc-subdivision-constraints` | §5.4 mapping keeps every constraint but new surface rows | `subdivide` | proved, `Schedule.lean` |
 | `rc-armijo` | finite termination for a descent direction | `step::line_search` | cited (Nocedal & Wright §3.1 and Alg. 3.1; Boyd & Vandenberghe Alg. 9.2) |
-| `rc-ccd-advancement` | Lipschitz lower bound ⇒ no contact before the advanced time | `ccd` | proved, `Ccd.lean` |
+| `rc-ccd-advancement` | Lipschitz lower bound ⇒ no contact before the advanced time | `ccd` | proved, `Advancement.lean` |
 | `rc-accd` | additive CCD algorithm | `ccd` | cited (Li, Kaufman, Jiang 2021) |
 | `rc-isotopy` | a CCD-free piecewise linear path of embeddings is an isotopy | `step` (doc) | cited (paper Sec. 5.4; standard) |
 | `rc-bvh-lumped` | `L_N, x̄_N, T̂_N`; parent = mass-weighted combination of children | `spatial::bvh` | proved, `Hierarchy.lean` |
@@ -1335,7 +1335,7 @@ by WP14. A package that needs a change outside its files reports it instead.
 | WP5 | block cluster tree, hierarchical `Ā` product | `src/spatial/bct.rs`, `src/metric/hierarchical.rs`, `tests/bct.rs` | WP4, WP2 | Opus |
 | WP6 | multigrid: coarsening, levels with constraints, V-cycle, FMG, FCG fallback, Eq. 30/33 solver | `src/multigrid/{mod,coarsen,vcycle}.rs`, `tests/multigrid.rs` | WP5, WP2 | Opus |
 | WP7 | penalties, obstacles (triangle BVH, point–triangle distance), implicit surfaces, vector fields | `src/penalties/{mod,length,field,surface,hencky}.rs`, `src/obstacle.rs`, `src/surfaces.rs`, `tests/penalties.rs` | WP1, WP4 (BVH) | Sonnet |
-| WP8 | Lean proofs + CITED | `lean/proofs/DdgProofs/RepulsiveCurves/*.lean`, `lean/proofs/DdgProofs/RepulsiveCurves.lean`, one import line in `lean/proofs/DdgProofs.lean`, a section in `lean/proofs/CITED.md` | SPEC | Opus |
+| WP8 | Lean proofs + CITED | `lean/proofs/DdgProofs/RepulsiveCurves/*.lean`, `lean/ddg/DDG/Repulsive.lean`, one import line in `lean/proofs/DdgProofs.lean`, a section in `lean/proofs/CITED.md` | SPEC | Opus |
 | WP9 | Lean oracle + fixtures; Rust differential test | `lean/oracle/DdgOracle/RepulsiveCurves.lean`, `lean/oracle/DdgOracle/RepulsiveCurves/*.lean`, dispatch lines in `lean/oracle/Main.lean`, `lean/oracle/fixtures/rc/`, `tests/oracle.rs` | SPEC; Rust test after WP3 | Sonnet |
 | WP10 | Python bindings | `crates/ddg-py/src/repulsive.rs`, `crates/ddg-py/src/python/repulsive.rs`, registration lines in `crates/ddg-py/src/{lib,python}.rs`, dependency line in `crates/ddg-py/Cargo.toml`, `ddg_tools.pyi`, README section, `python-tests/test_repulsive.py` | WP3, WP7 | Sonnet |
 | WP11 | Blender operators | `blender/ddg_uv_unwrap/{repulsive_operator,repulsive_io}.py`, registration lines in `__init__.py`, `blender/tests/test_repulsive.py`, README section | WP10 | Sonnet |

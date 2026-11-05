@@ -232,7 +232,7 @@ theorem transfer_mass_tiling {ι : Type*} {s : Finset ι} {r : ι → Fin 3 → 
   split_ifs <;> ring
 
 /-- **With pieces of the orientation of `p`** (`det β > 0`, as for the faces of the overlay), the
-valuation `pieceMass` of `NormalCoords/Transfer.lean` sums to `(1 + δ_ab)/12 = pieceMass` of the
+valuation `pieceMass` of `FEM/Transfer.lean` sums to `(1 + δ_ab)/12 = pieceMass` of the
 whole triangle (`pieceMass_one`).
 
 [formula: ic-transfer-mass-integral] -/

@@ -3,7 +3,7 @@ import DDG.Geometry.Plane
 /-!
 # Planar Delaunay triangulations, part 1: triangles, circles and the lifting map in coordinates
 
-The coordinate geometry behind the planar theory of `DdgProofs/Delaunay/Planar*.lean`. Points are
+The coordinate geometry behind the planar theory of `DDG/Delaunay/Planar/*.lean`. Points are
 pairs `ℝ × ℝ` (the plane model of `DDG/FEM/Tiling.lean`); orientation is the
 signed double area `sda a b c = (b − a) × (c − a)` of `DDG/Geometry/Plane.lean`, squared
 lengths are `sqDist2`. Nothing here uses the sup metric of the type `ℝ × ℝ`.

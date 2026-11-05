@@ -29,7 +29,7 @@ whose ends interleave with the chord from rank `r` to corner `k`.
   side before m)`; in the `−1` case no arc crosses `mc` (it runs along the input edge of `A`).
   `splitSideAtCrossingR_eq_none`: `none` exactly for an invalid face or `j` out of range.
 
-The two new faces and the merge back are in `SplitAtCrossingFaces.lean`.
+The two new faces and the merge back are in `Complex/SplitAtCrossing.lean`.
 -/
 
 namespace DDG.NormalCoords

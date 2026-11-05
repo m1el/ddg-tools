@@ -12,7 +12,7 @@
 | Tests | `tests/render.rs` (CPU, 5 tests + 4 unit tests), `tests/render_gpu.rs` (CUDA) |
 | Python | `pat_render` / `points_as_tori.render` in `crates/ddg-py` (`src/points_as_tori.rs`, `src/python/points_as_tori.rs`, `ddg_tools.pyi`, class `Rendering` in `python-tests/test_points_as_tori.py`) |
 | Showcase | `showcase/points-as-tori/render/` (11 images at 1024², `render.sh`, `safety-study.txt`) |
-| Formulas | `pat-render-step` (proved: `sphere_trace_step_safe` in `Apps.lean`), `pat-render-ggx`, `pat-render-fresnel` (cited, `CITED.md`); `check-formulas.sh`: 0 missing |
+| Formulas | `pat-render-step` (proved: `sphere_trace_step_safe` in `Operations.lean`), `pat-render-ggx`, `pat-render-fresnel` (cited, `CITED.md`); `check-formulas.sh`: 0 missing |
 
 The assets are the demo's six 64x64 RGB PNGs, copied unchanged (15.9 KB in all, so no downsampling
 question arises) with `assets/LICENSE-points-as-tori-MIT.txt` and `assets/README.md`.

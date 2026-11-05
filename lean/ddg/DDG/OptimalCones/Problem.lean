@@ -12,7 +12,7 @@ subject to  (L u)_i = μ_i − Ω_i  (i ∈ I),   u_i = 0  (i ∈ B),   lo_i ≤
 
 The index type `ι` is the set of **unknowns**: the interior vertices `I` on a mesh with boundary
 (`L` is then the interior block `L_II`; the constraint `u_i = 0` on `B` has been eliminated, see
-`DDG.Cotan` for the block reduction), or all vertices on a closed mesh (`L` is the whole
+`DDG.Laplace.Cotan` for the block reduction), or all vertices on a closed mesh (`L` is the whole
 cotan Laplacian; the additive constant of `u` is then a free variable of the minimization).
 
 Sign conventions are those of `CLAUDE.md`: `L` is positive semidefinite and `u` is the true log

@@ -1159,5 +1159,5 @@ Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-d
 `it-circumcenter-vector`, `it-odt-update`; from `ddg-core`: `cotan-laplacian`, `lumped-mass`,
 `angle-defect`, `boundary-geodesic-curvature`. The lengths of an edge split are
 `it-point-distances` with the point on a side. The Lean theorems of §7 are in
-`lean/proofs/DdgProofs/Intrinsic/`, the citations in `lean/proofs/CITED.md`, and the oracle's
+`lean/ddg/DDG/Intrinsic/`, the citations in `lean/proofs/CITED.md`, and the oracle's
 single operations are replayed by `tests/oracle.rs`.

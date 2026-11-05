@@ -74,7 +74,7 @@ the angle bound through the export at spikes (SPEC N15: on thin tubes and handle
 can restore it, at vertices with a small angle sum it cannot). Benches: `benches/retriangulation.rs`
 (criterion: iDT, iDR, iODT and a sweep of moves); the tables' timings are those of the example
 programs. The sixteen `it-` ids below have machine-checked theorems in
-`lean/proofs/DdgProofs/Intrinsic/` (about the oracle's definitions in
+`lean/ddg/DDG/Intrinsic/` (about the oracle's definitions in
 `lean/oracle/DdgOracle/Formulas/Intrinsic.lean`); what is cited instead of proved (existence,
 uniqueness and termination for the Delaunay triangulation, Rippa's theorem, the planar
 refinement guarantees, straightest geodesics) is in `lean/proofs/CITED.md`. A whole tracing

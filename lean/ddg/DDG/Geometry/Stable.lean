@@ -5,7 +5,7 @@ import DDG.Geometry.Triangle
 
 `crates/ddg-core` evaluates the triangle formulas in numerically stable arrangements (Kahan's
 parenthesization with sorted sides, `atan2` of two square roots). This file proves that, in exact
-arithmetic, those arrangements are the quantities of `DDG.Triangle`:
+arithmetic, those arrangements are the quantities of `DDG.Geometry.Triangle`:
 
 * `kahanArea_of_sorted_rearrangement` — `triangle_area`: sort the sides, test
   `z − (x − y) > 0`, evaluate `¼√((x+(y+z))(z−(x−y))(z+(x−y))(x+(y−z)))`;

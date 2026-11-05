@@ -9,10 +9,10 @@ and what they compute. Plane points are pairs `ℝ × ℝ`; lengths are written 
 (`dist2`), never with the metric of the type `ℝ × ℝ` (which is the sup metric). `dot2 u v` and
 `cross2 u v` are `u·v` and `u×v`; `toC` turns a point into a complex number.
 
-(This module was the first part of `DdgProofs.Bff.Quality`; the quality measures themselves are in
-`DdgProofs.Conformal.Distortion`, `DdgProofs.Geometry.SignedAngle`,
-`DdgProofs.Geometry.SegmentCrossing`, `DdgProofs.Geometry.SimilarityFit` and
-`DdgProofs.Intrinsic.Mollification`.)
+(This module was the first part of the former `Bff.Quality` module; the quality measures themselves are in
+`DDG.Conformal.Distortion`, `DDG.Geometry.SignedAngle`,
+`DDG.Geometry.SegmentCrossing`, `DDG.Geometry.SimilarityFit` and
+`DDG.Intrinsic.Mollification`.)
 
 ## `signed-area-2d` — `signed_double_area` (`sda`)
 

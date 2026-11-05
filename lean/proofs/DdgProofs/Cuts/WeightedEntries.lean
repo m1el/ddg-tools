@@ -6,13 +6,13 @@ import DdgProofs.Oracle.Mesh
 
 `crates/ddg-variational-cuts/SPEC.md` §3.6, §3.10, D11. The oracle's `Ddg.triangleMean`,
 `Ddg.weightedOffDiag` and `Ddg.weightedDiag` are the face mean and the entries of the weighted
-cotan Laplacian `TriMesh.weightedLaplacian` of `DdgProofs.Cuts.Weighted`:
+cotan Laplacian `TriMesh.weightedLaplacian` of `DDG.Laplace.Weighted`:
 
 * `Cuts.triangleMean_eq`, `Cuts.triangleMean_nonneg`, `Cuts.triangleMean_const`;
 * `Cuts.weightedOffDiag_eq`, `Cuts.weightedDiag_eq`, `Cuts.weighted_quadratic_nonneg`: the
   oracle's entries are the entries of this matrix.
 
-(Split off `DdgProofs.Cuts.Weighted`; the declarations keep their names.)
+(Split off `DDG.Laplace.Weighted`; the declarations keep their names.)
 -/
 
 noncomputable section

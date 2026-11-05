@@ -3,7 +3,7 @@ import DDG.OptimalCones.Problem
 /-!
 # The optimality system characterizes the global minimizers
 
-For the canonical discrete problem (`DDG.Problem`):
+For the canonical discrete problem (`DDG.OptimalCones.Problem`):
 
 * **sufficiency** (`ConeProblem.KKT.isMinimizer`): any solution `(u, φ, μ)` of the optimality
   system is a global minimizer. No assumption on `L` is needed, so the statement covers the

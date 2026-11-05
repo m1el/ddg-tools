@@ -6,13 +6,13 @@ import DDG.Laplace.Cotan
 
 `crates/ddg-core` stores the curvatures as per-vertex fields that vanish on the other class of
 vertices and assembles the cotan Laplacian entrywise. This file proves that those arrangements
-are the quantities of `DDG.GaussBonnet` and `DDG.Cotan`:
+are the quantities of `DDG.Mesh.GaussBonnet` and `DDG.Laplace.Cotan`:
 
 * `TriMesh.gauss_bonnet_fields` — `angle_defects`, `boundary_geodesic_curvatures`;
 * `TriMesh.laplacian_apply_of_ne`, `TriMesh.laplacian_apply_self` — off-diagonal and diagonal
   entries of the cotan Laplacian.
 
-(The Kahan and `atan2` forms are in `DdgProofs.Evaluated`.)
+(The Kahan and `atan2` forms are in `DDG.Geometry.Stable`.)
 
 Nothing is claimed about floating-point rounding.
 -/

@@ -391,7 +391,7 @@ the dual constraints of the absent bounds: `φ_i ≤ t_i` where the upper bound 
 `−t_i ≤ φ_i` where the lower bound is absent (`|φ_i| ≤ t_i` at a vertex without bounds). Then
 `dualValueOff ũ φ` is a lower bound for the objective of every feasible point; so if
 `objective u μ − dualValueOff ũ φ ≤ gap`, the objective of `(u, μ)` is within `gap` of the optimum.
-The hypotheses are exact: see `DDG.Certificate` for what holds for inexact data.
+The hypotheses are exact: see `DDG.OptimalCones.Certificate` for what holds for inexact data.
 
 [formula: duality-gap-certificate] -/
 theorem objective_le_add_gap_off (hp : p.AdmissibleOff Lo Hi) {u μ ũ φ : ℕ → ℝ}

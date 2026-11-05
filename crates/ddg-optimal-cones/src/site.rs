@@ -88,7 +88,7 @@ impl Site {
     /// active. A sloped piece of zero width (`hi = 0` resp. `lo = 0`) does not exist. In
     /// particular a free site (`t = 0`) is active at `x = 0`, hence always.
     ///
-    /// The paper (Eq. 24) and `Site.pieceReg` of `lean/proofs` use strict inequalities at the
+    /// The paper (Eq. 24) and `Site.pieceReg` of `lean/ddg` use strict inequalities at the
     /// thresholds (`Pos = (t, t + hi/k]`), the Lean oracle's `coneState` gives both kinks to
     /// the flat pieces (`Pos = (t, t + hi/k)`). The three classifiers differ only on the
     /// kinks, where the two adjacent affine formulas have the same value; each satisfies

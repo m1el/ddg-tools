@@ -4,7 +4,7 @@ import DDG.Delaunay.Planar.Basic
 /-!
 # Planar Delaunay triangulations: the bridge to the one-diamond theory (layer 1)
 
-The planar theory (`DdgProofs/Delaunay/Planar*.lean`) is written in coordinates with the in-circle
+The planar theory (`DDG/Delaunay/Planar/*.lean`) is written in coordinates with the in-circle
 determinant; layer 1 (`DDG/Delaunay/Local.lean`) is written intrinsically, with the five
 edge lengths of a diamond. For a diamond of the plane they are the same criterion:
 

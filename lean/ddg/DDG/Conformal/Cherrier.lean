@@ -7,7 +7,7 @@ import DDG.Laplace.Cotan
 # Boundary First Flattening: the linearized curvatures, Cherrier's formula, the Hilbert transform
 
 `crates/ddg-bff` (Sawhney & Crane, *Boundary First Flattening*, ACM TOG 2017; "BFF"), on top of
-the Poisson problems of `DdgProofs.Laplace.Poisson`.
+the Poisson problems of `DDG.Laplace.Poisson`.
 
 * **`bff-exterior-angle-sum`** (BFF Proposition 1): `gauss_bonnet_conformal`: for every `u`,
   `Σ_I (Ω + L u) + Σ_B (k + L u) = 2πχ`. Hence the exterior angles `k̃ = k + (L u)_B` of the

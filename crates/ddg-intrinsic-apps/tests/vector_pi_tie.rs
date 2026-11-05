@@ -1,5 +1,5 @@
 //! The index sum of `singularities` when the transported values of an edge are exactly opposite
-//! (id `app-vector-singularity-index`; lean/proofs `TriMesh.sum_round_faceIndexFixed`).
+//! (id `app-vector-singularity-index`; lean/ddg `TriMesh.sum_round_faceIndexFixed`).
 //!
 //! With `ω ∈ (−π, π]` evaluated on both halfedges, a tie `u_j = −r_ij u_i` gives `+π` on both
 //! (in exact arithmetic; in floating point `±π` by the sign of a rounding error), so the twin

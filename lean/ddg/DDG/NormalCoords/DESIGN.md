@@ -8,17 +8,17 @@ changing them.
 
 | file | content | ids |
 |---|---|---|
-| `Formulas.lean` | arithmetic of the oracle's integer formulas (`DDG.IntegerCoords.Formulas.*`): signs, Eq. 1–2 on a face given by its arcs (`FaceParams`, `coord_eval`), validity, crossings, Eq. 3 term by term (`flipDoubled_eval`), Eq. 6 | `ic-normal-sign`, `ic-emanating`, `ic-corner-coordinates`, `ic-face-validity`, `ic-reverse-crossing`, `ic-split-edge-normal`, `ic-flip-normal` (identity) |
+| `Formulas.lean` | arithmetic of the integer formulas, defined natively on `ℤ`/`ℕ` (`DDG.NormalCoords.Formulas.*`; the app layer proves them equal to the oracle's `Ddg.IntegerCoords.*` by `rfl`, `lean/proofs/DdgProofs/Oracle/NormalCoords.lean`): signs, Eq. 1–2 on a face given by its arcs (`FaceParams`, `coord_eval`), validity, crossings, Eq. 3 term by term (`flipDoubled_eval`), Eq. 6 | `ic-normal-sign`, `ic-emanating`, `ic-corner-coordinates`, `ic-face-validity`, `ic-reverse-crossing`, `ic-split-edge-normal`, `ic-flip-normal` (identity) |
 | `FaceModel.lean` | the face model, its validity, the structure theorem, counts, decoding, the oracle's pairing, Alg. 1 | `ic-face-decoding`, `ic-corner-coordinates`, `ic-emanating`, `ic-cevians-cross` (combinatorial), `ic-trace-step` |
 | `FaceSplit.lean` | gaps, separation, the arc families, the oracle's face split (I15) | `ic-face-split-normal` |
 | `Flip.lean` | the quadrilateral model `Quad`, Eq. 3 as a count, Eq. 3 applied twice | `ic-flip-normal`, `ic-flip-involution` |
-| `VertexRemoval.lean` | Thm. D.1 (angle argument), the failure of the strict form | `ic-vertex-removal` |
+| `../Intrinsic/VertexRemoval.lean` (part Intrinsic) | Thm. D.1 (angle argument), the failure of the strict form | `ic-vertex-removal` |
 | `Chords.lean` | chords of a convex quadrilateral / of a triangle cross iff their ends interleave; cevians | `ic-chord-interleave`, `ic-cevians-cross` |
 | `Recover.lean` | App. A (Eq. 15–16), Eq. 5 | `ic-recover-barycentric`, `ic-tangent-length` |
-| `Transfer.lean` | Eq. 13–14, the finite part of `P₀ᵀ M_S P₀ = M₀` | `ic-transfer-normal-equations`, `ic-transfer-mass-identity` |
+| `../FEM/Transfer.lean` (part FEM) | Eq. 13–14, the finite part of `P₀ᵀ M_S P₀ = M₀` | `ic-transfer-normal-equations`, `ic-transfer-mass-identity` |
 | `SplitEdge.lean` | splitting a crossed edge: `split_side`'s `n_mc` as a separation count | `ic-split-crossed-edge` |
 | `SplitAtCrossing.lean` | splitting an edge at its crossing `j`: the arcs crossing the new chord `mc` (`chordCount`, ends interleaving) are `sepCount` at the gap where the arc through `m` does not separate; the Rust `split_side_at_crossing` (`splitSideAtCrossingR`, any side) | `ic-split-at-crossing` |
-| `Strip.lean` | `Chord::hit`: the two parameters name one point, uniqueness, both directions | `ic-strip-intersection` |
+| `../Intrinsic/Strip.lean` (part Intrinsic) | `Chord::hit`: the two parameters name one point, uniqueness, both directions | `ic-strip-intersection` |
 | `Complex/Basic.lean` | tier C: the complex model `Cx` (gluing, `n` per halfedge, face models = canonical models of the counts), crossings, `rev`, Alg. 1's step `next` = `traceStep` | `ic-trace-step` (on the complex) |
 | `Complex/Trace.lean` | walks: end at a corner or return to the start, no crossing twice or in both directions, `2m ≤ Σ n⁺` | `ic-trace-terminates` |
 | `Complex/Labels.lean` | corners around a vertex (`rot`), the ends of a corner (`emList`), labels and `RoundaboutsOK` (certify's check), Alg. 3, Alg. 4 | `ic-identify-edge` |
@@ -74,7 +74,7 @@ not a type: the labels of an input vertex are functions of its corners that `rot
 and contain no implication: split by the emanating corner of each face first (16 cases), keep
 `min`/`max` definitions out of the context unless needed, and try `omega` before `contradiction`.
 `Complex/QuadOuter*.lean` are one file per side so that lake builds them in parallel (about a
-minute each); the whole IntegerCoords tree builds in about 2.5 minutes from scratch on 64 cores.
+minute each); the whole NormalCoords tree builds in about 2.5 minutes from scratch on 64 cores.
 
 ## How tier C was planned
 
@@ -82,7 +82,7 @@ minute each); the whole IntegerCoords tree builds in about 2.5 minutes from scra
    `twin : F × Fin 3 → F × Fin 3` (an involution without fixed points on interior sides; boundary
    sides unglued), a face model `M f` per face, and the matching conditions
    `(M f).n k = (M f').n k'` for `twin (f, k) = (f', k')`. Crossing `p` of `(f, k)` **is** crossing
-   `n − 1 − p` of `(f', k')` (`ic-reverse-crossing`: `DDG.IntegerCoords.Formulas.reverseCrossing`). Vertices are
+   `n − 1 − p` of `(f', k')` (`ic-reverse-crossing`: `DDG.NormalCoords.Formulas.reverseCrossing`). Vertices are
    classes of corners under the gluing; keep the Rust halfedge numbering (`h = 3f + k`) so that the
    oracle's `tracecurve` task and the Rust data structure can be compared literally.
 2. **Curves.** A curve step from crossing `(f, k, p)`: pass to the twin `(f', k', n − 1 − p)`, take

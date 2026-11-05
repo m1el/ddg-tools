@@ -49,7 +49,8 @@ the discrete method as implemented, listing every difference from the paper as p
 | `crates/ddg-uv` | end-to-end UV pipeline: polygons to charts, cones, cuts, flattening and per-corner UVs |
 | `crates/ddg-py` | PyO3 bindings (Python module `ddg_tools`) |
 | `blender/` | the Blender add-on: Conformal Unwrap (Optimal Cones); Cut: Start, Flow, Apply; Conformal Map to Sphere; Make Developable, Show Developability, Developable Seams + UV; Repulsive Flow (Live, Steps); Repulsive Surface Flow (Live, Steps) |
-| `lean/proofs`, `lean/oracle` | the derivations (`CITED.md` lists what is cited rather than proved) and the oracle |
+| `lean/ddg` | the library `DDG`: machine-checked discrete differential geometry in 14 separately buildable parts (MIT; see its `README.md`) |
+| `lean/proofs`, `lean/oracle` | the app layer of the proofs (Rust-to-Lean mapping, `CITED.md` lists what is cited rather than proved) and the oracle |
 | `showcase/` | stills and animations of every capability, rendered from the libraries' own results |
 | `scripts/` | builds of the wheel and the Blender extension, test runners, `check-formulas.sh` |
 

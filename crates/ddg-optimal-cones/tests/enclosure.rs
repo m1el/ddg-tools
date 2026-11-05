@@ -1,5 +1,5 @@
 //! What the numerical certificate may claim when the residuals are not zero
-//! (`lean/proofs`: `certificate_of_computed`, `certificate_enclosure`, `dual_lower_bound_of_clip`):
+//! (`lean/ddg`: `certificate_of_computed`, `certificate_enclosure`, `dual_lower_bound_of_clip`):
 //! the optimal value of the given problem lies in `optimum_enclosure()`, checked against the
 //! generic convex solver on triples that are deliberately wrong.
 

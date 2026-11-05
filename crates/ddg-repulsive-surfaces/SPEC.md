@@ -845,8 +845,8 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rs-circumcenter` | barycentric weights `a²(b²+c²−a²) : …` give the circumcenter | `remesh` | proved, `Remesh.lean` |
 | `rs-smoothing-weights` | `Σ_S a_S = 3 a_v`: the reference's `½ Σ a_S(c−x)/(3a_v)` is `ρ = ½` | `remesh` | proved, `Remesh.lean` |
 | `rs-delaunay-test` | opposite-angle sum `> π` ⇔ cotan weight `< 0` | `remesh` | proved, `Remesh.lean` |
-| `rs-ccd-advancement` | conservative advancement with moving triangles is a lower bound of the first contact time | `ccd` | proved, `Ccd.lean` (extends `rc-ccd-advancement`) |
-| `rs-lbfgs-two-loop` | two-loop recursion with `H₀ = W′⁻¹` applies the BFGS inverse | `optimize` | proved, `Optimize.lean` (or cited: Nocedal–Wright) |
+| `rs-ccd-advancement` | conservative advancement with moving triangles is a lower bound of the first contact time | `ccd` | proved, `AdvancementPairs.lean` (extends `rc-ccd-advancement`) |
+| `rs-lbfgs-two-loop` | two-loop recursion with `H₀ = W′⁻¹` applies the BFGS inverse | `optimize` | proved, `LBFGS.lean` (or cited: Nocedal–Wright) |
 | `rs-aqp` / `rs-bcqn` | Kovalsky 2016 momentum; Zhu 2018 blend | `optimize` | cited |
 | `rs-energy-consistency` | `ℰ̂(f_h) → ℰ(f)` empirically between O(h) and O(h²) (Fig. 10) | docs | cited |
 | `rs-chen-holst` | the remeshing scheme of Chen–Holst 2011 | docs | cited |

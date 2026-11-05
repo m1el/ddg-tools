@@ -74,7 +74,7 @@ I could not measure whole steps (WP5/WP6 not merged). Recommendation: default ON
 off by default only if the median there exceeds 10 %.
 
 ## Remaining
-- `Ccd.lean` is the proof of `rs-ccd-advancement`; the code tags `advance`, `vertex_triangle_advance`,
+- `AdvancementPairs.lean` is the proof of `rs-ccd-advancement`; the code tags `advance`, `vertex_triangle_advance`,
   `edge_edge_advance`, `first_contact`.
 - Not done: obstacle point clouds (only triangle meshes), moving obstacles, a CCD-aware `Session`
   (WP5), the "number of runs where the energy alone lets surfaces cross" study (needs the flow).

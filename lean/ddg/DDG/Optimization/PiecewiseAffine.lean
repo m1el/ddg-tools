@@ -12,7 +12,7 @@ linearization on the current pieces. Hence:
 * `newton_stageI_exact`, `newton_stageII_exact`: if a Newton step does not change the pieces,
   the new iterate is an **exact** zero of the residual (no invertibility is assumed).
 
-There is no geometry in this file. (It was the abstract part of `DdgProofs.Newton`; the
+There is no geometry in this file. (It was the abstract part of `DDG.OptimalCones.Newton`; the
 declarations keep their names.)
 -/
 

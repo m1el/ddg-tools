@@ -6,7 +6,7 @@ import DDG.OptimalCones.Optimality
 On a closed mesh the cotan Laplacian has zero row and column sums (`L·1 = 0`, `1ᵀL = 0`).
 
 * `Feasible.sum_cone_eq_sum_defect`: the state equation forces `Σ μ = Σ Ω` (which is `2πχ` by
-  discrete Gauss–Bonnet, see `DDG.GaussBonnet`);
+  discrete Gauss–Bonnet, see `DDG.Mesh.GaussBonnet`);
 * `distortion_add_const`, `distortion_add_const_eq`: the distortion as a function of the
   additive constant of `u`, and the optimal constant;
 * `KKT.weighted_mean_eq_zero`, `IsMinimizer.weighted_mean_eq_zero`: at the optimum the
@@ -128,7 +128,7 @@ theorem IsMinimizer.weighted_mean_eq_zero (hrow : P.L *ᵥ (fun _ => (1 : ℝ)) 
 
 /-- The same problem with all masses multiplied by `c`. Under uniform scaling of the mesh by a
 factor `s`, `L` and `Ω` do not change and the masses are multiplied by `c = s²`
-(`DDG.Triangle`, `DDG.Cotan`). -/
+(`DDG.Geometry.Triangle`, `DDG.Laplace.Cotan`). -/
 def scaleMass (P : ConeProblem ι) (c : ℝ) : ConeProblem ι :=
   { P with m := fun i => c * P.m i }
 

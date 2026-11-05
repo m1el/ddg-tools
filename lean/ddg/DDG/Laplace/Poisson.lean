@@ -26,7 +26,7 @@ Signs: `L` is positive semidefinite and `u` is the log scale factor (`CLAUDE.md`
 this `L`.
 
 (The conformal part of the BFF Laplace file, from the exterior angles on, is in
-`DdgProofs.Bff.Laplace`; the declarations keep their names.)
+`DDG.Conformal.Cherrier`; the declarations keep their names.)
 -/
 
 noncomputable section

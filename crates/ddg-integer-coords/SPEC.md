@@ -357,7 +357,7 @@ spoke mc, per side (c_a, e_c from that face, j counted from that side's tail):
 may be put, `before = j` or `j + 1`, the one where the chord does not cross `A`; if `A` ends at `c`
 the chord is `A`, which is the usual case on symmetric meshes: the other diagonal of a quad is an
 input edge.) The roundabout of `c → m` is Eq. 4's analogue with `e_before`, as for any split.
-`formulas::split_side_at_crossing`; proved in Lean (tier B, `IntegerCoords/SplitAtCrossing.lean`, `Complex/SplitAtCrossing.lean`). Like every
+`formulas::split_side_at_crossing`; proved in Lean (tier B, `lean/ddg/DDG/NormalCoords/SplitAtCrossing.lean`, `Complex/SplitAtCrossing.lean`). Like every
 split, the result is valid by construction; `certify` passes after each (`tests/snap.rs`).
 *Measured* (`tests/snap.rs`, 17 shapes + spot + camelbad, 7 scenarios, every crossing of every
 edge across input edges, strided to 300 edges on the big states, at the crossing and `+1e-14`,
@@ -666,7 +666,7 @@ its input edge (no walks of `ExtractIntrinsicEdge`), then one strip layout per e
 no or two input edges, a broken strip, a wrong roundabout) are `InvalidCoordinates` naming the
 halfedge, edge or crossing, never a panic. **Invariance:** the directions of an edge depend on its
 own `n`, roundabouts, crossing labels and length and on `q⁰` of its ends, so a flip changes the
-directions of the flipped edge only, bitwise. The formula is proved in Lean (`DdgProofs/IntegerCoords/Frames/`, §9.2) for the
+directions of the flipped edge only, bitwise. The formula is proved in Lean (`lean/ddg/DDG/NormalCoords/Frames/`, §9.2) for the
 straight segment of the strip; that the geodesic edge is that segment is cited (`it-straightest-geodesic`,
 `ic-normal-isotopy`).
 
@@ -862,7 +862,7 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-recover-barycentric` | Eq. 15–16 reproduce `q⁰` exactly for any solution `ξ`, when the corner positions are exact (affine combination) | A |
 | `ic-tangent-length` | Eq. 5 (law of cosines in barycentric form) | A (proved equal to `it-point-distances`, which the code evaluates; I25) |
 | `ic-transfer-mass-identity`, `ic-transfer-normal-equations` | the finite identity behind `P₀ᵀ M_S P₀ = M₀`; Eq. 14 is the minimizer of Eq. 13 | A |
-| `ic-transfer-mass-integral` | the per-piece mass is `∫_piece λ_aλ_b`; over pieces that tile the input triangle it sums to the P1 mass integral | B (proved, `TriangleIntegral/Tiling.lean`; the tiling is a hypothesis) |
+| `ic-transfer-mass-integral` | the per-piece mass is `∫_piece λ_aλ_b`; over pieces that tile the input triangle it sums to the P1 mass integral | B (proved, `lean/ddg/DDG/FEM/Tiling.lean`; the tiling is a hypothesis) |
 | `ic-vertex-removal` | Thm. D.1: a simplicial star of angle sum `2π` and degree `> 3` has a spoke whose quadrilateral has all angles `≤ π` (strictly convex when no inner corner is `π`; the strict version is false in general) | B′ |
 | `ic-vertex-removal-delta` | the Δ-complex case (paper: conjecture) | attempt, bounded; else CITED as open with I8's runtime refusal |
 | `ic-normal-isotopy` | complex models ↔ normal isotopy classes of curves on the surface (Kneser 1929, Haken 1961; Schaefer, Sedgwick, Štefankovič 2002; Erickson, Nayyeri 2013) | D, CITED |
@@ -1228,8 +1228,8 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP5 | **done** (432e0ea, 9cbd214): common subdivision, `P₀`, `P₁`, `T⁰ → T¹` point queries, batch `extract_all_edges` | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | **done** (49bac6c, 91ca49b): Delaunay refinement with boundary, one driver over `Triangulation` (`RefineRules::{Ruppert, Chew}`) | `src/refine.rs`, `tests/refine.rs`, `crates/ddg-intrinsic/src/refine.rs` | WP3, WP4 | Opus |
 | WP7 | **done** (b463c96, 406c0e0): transfer (Eq. 13–14); Fig. 14 as the paper's Poisson experiment (trends reproduced, factors depend on the unpublished generator) | `src/transfer.rs`, `tests/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
-| WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
-| WP9 | **done** (824dd36–70986f9; `ic-vertex-removal-delta` still open, cited): Lean tier C, the complex model (`Cx`, curves, labels), `ic-trace-terminates`, `ic-identify-edge`, `ic-flip-normal` (C part), `ic-roundabout-update`, `ic-merge-edge-normal`, `ic-extract-intrinsic-edge` (combinatorial); `ic-split-crossed-edge` (B), `ic-strip-intersection` (A); FaceSplit build 151 → ~60 s | `lean/proofs/DdgProofs/IntegerCoords/Complex/…`, `SplitEdge.lean`, `Strip.lean` | WP8 | Opus |
+| WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/ddg/DDG/NormalCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
+| WP9 | **done** (824dd36–70986f9; `ic-vertex-removal-delta` still open, cited): Lean tier C, the complex model (`Cx`, curves, labels), `ic-trace-terminates`, `ic-identify-edge`, `ic-flip-normal` (C part), `ic-roundabout-update`, `ic-merge-edge-normal`, `ic-extract-intrinsic-edge` (combinatorial); `ic-split-crossed-edge` (B), `ic-strip-intersection` (A); FaceSplit build 151 → ~60 s | `lean/ddg/DDG/NormalCoords/Complex/…`, `SplitEdge.lean`, `Strip.lean` | WP8 | Opus |
 | WP10 | **done** (307308a–a9fa390; I30 fix a589919, 16210ca): Thingi10k (Table 1 integers 100 %), benches, the demo comparison, ported reference tests (§10.2, §10.3) | `examples/{thingi_convert,thingi_eval}.rs`, `benches/representation.rs`, `tests/{reference_ports,thingi_regressions}.rs`, `scripts/{ic-eval,ic-demo-eval,ic-demo-build,ic-timings}.sh` | WP6, Q1, Q2 | Sonnet |
 | WP11 | **done; default integers since Q3 was flipped** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: none (the tangent fields became generic with I26, §4.12: `vector::TangentFrames`, `smoothest_direction_field(representation="integer")`); the export, the way back, the optimal Delaunay iteration and `ddg-uv` moved to integers with I29 | per crate | WP5, WP6 | Sonnet |
 
