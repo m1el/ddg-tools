@@ -19,6 +19,25 @@
 #   Intrinsic/Delaunay.lean -> Oracle/Intrinsic.lean (app, oracle bridges):
 #     DDG.Intrinsic.delaunayExcess_eq, delaunayHolds_iff, cotanWeight_eq, cotanWeightFromLengths_eq,
 #     oppositeAngles_eq, delaunayExcess_eq'
+#   Intrinsic/Move.lean -> Geometry/PlaneLemmas.lean: DDG.Intrinsic.rot, nsq, toDual, toDual_apply
+#   Intrinsic/Move.lean -> Delaunay/ODT.lean (section `it-odt-update`): DDG.Intrinsic.weightedBarycenter_eq,
+#     odtDisplacement_eq, circumVec, circumVec_fst, circumVec_snd, circumVec_equidistant,
+#     circumVec_layout, odtEnergy, odtGradient, starArea, triGrad, hasFDerivAt_triTerm, forceF,
+#     triGrad_split, sum_link_sides, sum_triGrad, hasFDerivAt_odtEnergy, hasDerivAt_odtEnergy_line,
+#     starArea_indep, triTerm_add, odtEnergy_add, odtDisplacement_eq_gradient, odtEnergy_step,
+#     odtEnergy_step_le
+#   TriangleIntegral/Fem.lean -> Delaunay/ODT.lean (section `it-odt-interpolation-error`):
+#     DDG.TriangleIntegral.odtInterp, odtInterp_sub, nsq_le_odtInterp, continuous_odtInterp,
+#     continuous_nsq, integral_odt_error_eq_sides, integral_abs_odt_error, odtEnergy_eq_sum_integral,
+#     odtEnergy_eq_sum_error_add
+#     (bary_nonneg_of_mem and measurableSet_triangle of that section stay in Fem.lean: FEM and
+#     Bff.ConformalEnergy use them)
+#   TriangleIntegral/Tiling.lean -> Delaunay/ODT.lean (section Odt, `it-odt-energy`):
+#     DDG.TriangleIntegral.integrableOn_odt_error, IsTiling.integral_abs_odt_error_eq_sum,
+#     IsTiling.integral_abs_odt_error, IsTiling.integral_abs_odt_error_eq_sides, starAreaOf,
+#     sum_corners_eq_sum_vertices, IsTiling.integral_abs_odt_error_vertices, fan, fan_term,
+#     odt_error_star, odt_error_sub, odt_error_step_le
 DdgProofs.Geometry.PlaneLemmas	DDG.Geometry.PlaneLemmas
 DdgProofs.Intrinsic.FlipAngles	DDG.Intrinsic.FlipAngles
 DdgProofs.Oracle.Intrinsic	DdgProofs.Oracle.Intrinsic
+DdgProofs.Delaunay.ODT	DDG.Delaunay.ODT

@@ -11,9 +11,12 @@ triangulations, the Delaunay theory and the finite element integrals:
   `dist2_nonneg`, `dist2_sq'`);
 * a plane triangle of nonzero signed area has distinct corners and its sides satisfy the strict
   triangle inequalities (`dist2_pos_of_sda_ne`, `isTriangle_of_sda_ne`), and its Heron area is
-  half the absolute signed double area (`two_mul_triArea_dist2`).
+  half the absolute signed double area (`two_mul_triArea_dist2`);
+* the quarter turn `rot`, the squared norm `nsq` and the linear form `toDual G` of a vector
+  (`toDual_apply`).
 
-(Library step S2b: moved here from `DdgProofs/Intrinsic/Diamond.lean`; the names keep their
+(Library step S2b: moved here from `DdgProofs/Intrinsic/Diamond.lean` and, `rot`, `nsq`,
+`toDual`, from `DdgProofs/Intrinsic/Move.lean`; the names keep their
 `DDG.Intrinsic` namespace until the renames of step S4.)
 -/
 
@@ -77,6 +80,21 @@ theorem two_mul_triArea_dist2 (i j k : ℝ × ℝ) :
   unfold triArea
   congr 3
   ring
+
+/-! ## The quarter turn, the squared norm, a vector as a linear form -/
+
+/-- The quarter turn `rot u = (−u₂, u₁)`. -/
+def rot (u : ℝ × ℝ) : ℝ × ℝ := (-u.2, u.1)
+
+/-- The squared norm `|u|² = u₁² + u₂²`. -/
+def nsq (u : ℝ × ℝ) : ℝ := u.1 ^ 2 + u.2 ^ 2
+
+/-- The linear form `v ↦ G₁ v₁ + G₂ v₂` (the gradient `G` as a derivative). -/
+def toDual (G : ℝ × ℝ) : (ℝ × ℝ) →L[ℝ] ℝ :=
+  G.1 • ContinuousLinearMap.fst ℝ ℝ ℝ + G.2 • ContinuousLinearMap.snd ℝ ℝ ℝ
+
+@[simp] theorem toDual_apply (G v : ℝ × ℝ) : toDual G v = G.1 * v.1 + G.2 * v.2 := by
+  simp [toDual]
 
 end Intrinsic
 

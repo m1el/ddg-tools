@@ -17,18 +17,6 @@ the hypothesis; nothing here proves that a given mesh layout tiles a domain.
 
 On it:
 
-* **`it-odt-energy`** — Chen–Holst Lemma 4.1 for a triangulation (`d = 2`, uniform density): for
-  any `u_I` that is the linear interpolant of `u = |x|²` on every triangle,
-  `E = ∫_Ω |u_I − u| = Σ_k (|T_k|/3) Σ_{i} |q_{k,i}|² − ∫_Ω |x|²`
-  (`IsTiling.integral_abs_odt_error`), `= Σ_k (|T_k|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)` (a function of the
-  edge lengths, `IsTiling.integral_abs_odt_error_eq_sides`), and with the vertices of a mesh
-  `= (1/3) Σ_i |x_i|² |ω_i| − ∫_Ω |x|²`, `|ω_i|` the area of the star of `x_i`
-  (`IsTiling.integral_abs_odt_error_vertices`). For a mesh whose triangles are a fan around `x`
-  (counter-clockwise) plus fixed triangles, `E(x) = S(x) + C − ∫_Ω |y|²` with `S = odtEnergy` of
-  `Intrinsic/Move.lean` and `C` independent of `x` (`odt_error_star`); so whenever the moved fan
-  still tiles the same region with the others, the update of Eq. 4.13 lowers the interpolation
-  error itself, by exactly what it lowers `S`, and `α = 1` minimizes `E` over all positions with
-  that property (`odt_error_step`, `odt_error_step_le`).
 * **`ic-transfer-mass-integral`** — a piece `r` of the common subdivision inside the input triangle
   `p` has the barycentric corner rows `β_{j c} = λ_c(r_j)`; its signed double area is
   `det β · D(p)` (`D_eq_bdet_mul`), the hat functions of `p` restricted to it are the linear
@@ -39,6 +27,8 @@ On it:
   pieces that tile `p` this is `∫_p λ_a λ_b = Area(p)(1 + δ_ab)/12`, the entry of `M₀`
   (`transfer_mass_tiling`); for pieces of the orientation of `p`, `Σ pieceMass β a b = (1 + δ_ab)/12`
   (`sum_pieceMass_tiling`).
+
+Chen–Holst's interpolation error over a tiling (`it-odt-energy`) is in `DdgProofs/Delaunay/ODT.lean`.
 -/
 
 noncomputable section
@@ -149,174 +139,6 @@ theorem volume_real_eq_sum (h : IsTiling s q Ω) : volume.real Ω = ∑ k ∈ s,
   rw [setIntegral_const, smul_eq_mul, mul_one, volume_real_triangle_eq_area (h.nondeg k hk)]
 
 end IsTiling
-
-/-! ## `it-odt-energy`: Chen–Holst Lemma 4.1 over a triangulation -/
-
-section Odt
-
-open Intrinsic
-open scoped DDG.Oracle
-
-variable {ι : Type*} {s : Finset ι} {q : ι → Fin 3 → ℝ × ℝ} {Ω : Set (ℝ × ℝ)}
-
-theorem integrableOn_odt_error (p : Fin 3 → ℝ × ℝ) {g : ℝ × ℝ → ℝ}
-    (hg : ∀ x ∈ triangle p, g x = odtInterp p x) :
-    IntegrableOn (fun x => |g x - nsq x|) (triangle p) :=
-  (integrableOn_triangle p ((continuous_odtInterp p).sub continuous_nsq).abs).congr_fun
-    (fun x hx => by simp only [hg x hx, Pi.sub_apply]) (measurableSet_triangle _)
-
-/-- The interpolation error over a tiling is the sum of the errors of the tiles, for any `u_I`
-that is the linear interpolant of `|x|²` on every tile. -/
-theorem IsTiling.integral_abs_odt_error_eq_sum (h : IsTiling s q Ω) {g : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ s, ∀ x ∈ triangle (q k), g x = odtInterp (q k) x) :
-    ∫ x in Ω, |g x - nsq x| = ∑ k ∈ s, ∫ x in triangle (q k), |odtInterp (q k) x - nsq x| := by
-  rw [h.integral_eq_sum fun k hk => integrableOn_odt_error (q k) (hg k hk)]
-  refine Finset.sum_congr rfl fun k hk =>
-    setIntegral_congr_fun (measurableSet_triangle _) fun x hx => ?_
-  simp only [hg k hk x hx]
-
-/-- **Chen–Holst Lemma 4.1 for a triangulation** (`d = 2`, uniform density): over a tiling of `Ω`,
-`E = ∫_Ω |u_I − u| = Σ_k (|T_k|/3) Σ_i |q_{k,i}|² − ∫_Ω |x|²` for `u = |x|²`.
-
-[formula: it-odt-energy] -/
-theorem IsTiling.integral_abs_odt_error (h : IsTiling s q Ω) {g : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ s, ∀ x ∈ triangle (q k), g x = odtInterp (q k) x) :
-    ∫ x in Ω, |g x - nsq x| =
-      (∑ k ∈ s, (nsq (q k 0) + nsq (q k 1) + nsq (q k 2)) * area (q k) / 3) - ∫ x in Ω, nsq x := by
-  rw [h.integral_abs_odt_error_eq_sum hg, h.integral_eq_sum_of_continuous continuous_nsq,
-    ← Finset.sum_sub_distrib]
-  exact Finset.sum_congr rfl fun k hk =>
-    _root_.DDG.TriangleIntegral.integral_abs_odt_error (h.nondeg k hk)
-
-/-- **The interpolation error is a function of the edge lengths**:
-`E = Σ_k (|T_k|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)` over a tiling.
-
-[formula: it-odt-energy] -/
-theorem IsTiling.integral_abs_odt_error_eq_sides (h : IsTiling s q Ω) {g : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ s, ∀ x ∈ triangle (q k), g x = odtInterp (q k) x) :
-    ∫ x in Ω, |g x - nsq x| = ∑ k ∈ s, area (q k) / 12 *
-      (sideLen (q k) 0 ^ 2 + sideLen (q k) 1 ^ 2 + sideLen (q k) 2 ^ 2) := by
-  rw [h.integral_abs_odt_error_eq_sum hg]
-  exact Finset.sum_congr rfl fun k hk => integral_odt_error_eq_sides (h.nondeg k hk)
-
-/-- The area of the star of the vertex `i`: `Σ_k Σ_c [v_{k,c} = i] A_k` (each corner of a tile at
-`i` counts the tile once). -/
-def starAreaOf {V : Type*} [DecidableEq V] (s : Finset ι) (v : ι → Fin 3 → V) (A : ι → ℝ)
-    (i : V) : ℝ :=
-  ∑ k ∈ s, ∑ c : Fin 3, if v k c = i then A k else 0
-
-/-- Regrouping a sum over the corners of the tiles by vertex. -/
-theorem sum_corners_eq_sum_vertices {V : Type*} [Fintype V] [DecidableEq V] (s : Finset ι)
-    (v : ι → Fin 3 → V) (A : ι → ℝ) (F : V → ℝ) :
-    ∑ k ∈ s, (F (v k 0) + F (v k 1) + F (v k 2)) * A k = ∑ i, F i * starAreaOf s v A i := by
-  simp only [starAreaOf, Finset.mul_sum]
-  rw [Finset.sum_comm]
-  refine Finset.sum_congr rfl fun k _ => ?_
-  rw [Finset.sum_comm]
-  simp only [mul_ite, mul_zero, Finset.sum_ite_eq, Finset.mem_univ, ite_true,
-    Fin.sum_univ_three]
-  ring
-
-/-- **Lemma 4.1 as Chen and Holst print it**: for the tiles of a mesh with vertices `X` and
-corner map `v`, `E = (1/3) Σ_i |x_i|² |ω_i| − ∫_Ω |x|²`, `|ω_i|` the area of the star of `x_i`.
-
-[formula: it-odt-energy] -/
-theorem IsTiling.integral_abs_odt_error_vertices {V : Type*} [Fintype V] [DecidableEq V]
-    (h : IsTiling s q Ω) (v : ι → Fin 3 → V) (X : V → ℝ × ℝ)
-    (hq : ∀ k ∈ s, ∀ c, q k c = X (v k c)) {g : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ s, ∀ x ∈ triangle (q k), g x = odtInterp (q k) x) :
-    ∫ x in Ω, |g x - nsq x| =
-      (∑ i, nsq (X i) * starAreaOf s v (fun k => area (q k)) i) / 3 - ∫ x in Ω, nsq x := by
-  rw [h.integral_abs_odt_error hg, ← sum_corners_eq_sum_vertices, Finset.sum_div]
-  congr 1
-  refine Finset.sum_congr rfl fun k hk => ?_
-  rw [hq k hk 0, hq k hk 1, hq k hk 2]
-
-/-- The fan triangle `(x, q_k, q_{k+1})` of a star. -/
-abbrev fan (q : ℕ → ℝ × ℝ) (x : ℝ × ℝ) (k : ℕ) : Fin 3 → ℝ × ℝ := ![x, q k, q (k + 1)]
-
-theorem fan_term (q : ℕ → ℝ × ℝ) (x : ℝ × ℝ) (k : ℕ) (hpos : 0 < sda x (q k) (q (k + 1))) :
-    (nsq (fan q x k 0) + nsq (fan q x k 1) + nsq (fan q x k 2)) * area (fan q x k) / 3 =
-      (nsq x + (nsq (q k) + nsq (q (k + 1)))) * (sda x (q k) (q (k + 1)) / 2) / 3 := by
-  have hD : D (fan q x k) = sda x (q k) (q (k + 1)) := rfl
-  rw [show area (fan q x k) = |D (fan q x k)| / 2 by rw [abs_D_eq_two_mul_area]; ring, hD,
-    abs_of_pos hpos]
-  simp only [fan, Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two,
-    Matrix.head_cons, Matrix.tail_cons]
-  ring
-
-/-- **The star energy is the interpolation error up to a constant.** A mesh whose tiles are the
-counter-clockwise fan `(x, q_k, q_{k+1})`, `k < n`, around `x` and fixed triangles `r_j`, `j ∈ t`,
-tiling `Ω`: `E(x) = S(x) + Σ_j (|T_j|/3) Σ_i |r_{j,i}|² − ∫_Ω |y|²`, with `S = odtEnergy`
-(`Intrinsic/Move.lean`), the only term that depends on `x`.
-
-[formula: it-odt-energy] -/
-theorem odt_error_star {κ : Type*} {n : ℕ} {t : Finset κ} {r : κ → Fin 3 → ℝ × ℝ}
-    {q : ℕ → ℝ × ℝ} {x : ℝ × ℝ} (hpos : ∀ k < n, 0 < sda x (q k) (q (k + 1)))
-    (h : IsTiling ((Finset.range n).disjSum t) (Sum.elim (fan q x) r) Ω) {g : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ (Finset.range n).disjSum t, ∀ y ∈ triangle (Sum.elim (fan q x) r k),
-      g y = odtInterp (Sum.elim (fan q x) r k) y) :
-    ∫ y in Ω, |g y - nsq y| = odtEnergy q n x +
-      (∑ j ∈ t, (nsq (r j 0) + nsq (r j 1) + nsq (r j 2)) * area (r j) / 3) - ∫ y in Ω, nsq y := by
-  rw [h.integral_abs_odt_error hg, Finset.sum_disjSum]
-  simp only [Sum.elim_inl, Sum.elim_inr]
-  congr 2
-  unfold odtEnergy
-  exact Finset.sum_congr rfl fun k hk => fan_term q x k (hpos k (Finset.mem_range.1 hk))
-
-/-- **Moving the centre changes the interpolation error by the change of the star energy**, for
-two positions whose fans tile the same region with the fixed triangles.
-
-[formula: it-odt-energy] -/
-theorem odt_error_sub {κ : Type*} {n : ℕ} {t : Finset κ} {r : κ → Fin 3 → ℝ × ℝ}
-    {q : ℕ → ℝ × ℝ} {x x' : ℝ × ℝ} (hpos : ∀ k < n, 0 < sda x (q k) (q (k + 1)))
-    (hpos' : ∀ k < n, 0 < sda x' (q k) (q (k + 1)))
-    (h : IsTiling ((Finset.range n).disjSum t) (Sum.elim (fan q x) r) Ω)
-    (h' : IsTiling ((Finset.range n).disjSum t) (Sum.elim (fan q x') r) Ω) {g g' : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ (Finset.range n).disjSum t, ∀ y ∈ triangle (Sum.elim (fan q x) r k),
-      g y = odtInterp (Sum.elim (fan q x) r k) y)
-    (hg' : ∀ k ∈ (Finset.range n).disjSum t, ∀ y ∈ triangle (Sum.elim (fan q x') r k),
-      g' y = odtInterp (Sum.elim (fan q x') r k) y) :
-    (∫ y in Ω, |g' y - nsq y|) - ∫ y in Ω, |g y - nsq y| = odtEnergy q n x' - odtEnergy q n x := by
-  rw [odt_error_star hpos' h' hg', odt_error_star hpos h hg]
-  ring
-
-/-- **The update of Eq. 4.13 lowers the interpolation error.** With a closed counter-clockwise
-link, the step `x' = x + odtDisplacement(w, |ω|, α)` for `0 ≤ α ≤ 2`, if the moved fan still tiles
-`Ω` with the fixed triangles, does not increase `E = ∫_Ω |u_I − u|`; for `α = 1`, `E(x') ≤ E(y)`
-for every position `y` whose fan tiles `Ω` with them.
-
-[formula: it-odt-energy] -/
-theorem odt_error_step_le {κ : Type*} {n : ℕ} {t : Finset κ} {r : κ → Fin 3 → ℝ × ℝ}
-    {q : ℕ → ℝ × ℝ} (hq : q n = q 0) {x x' : ℝ × ℝ} (hω : 0 < starArea q n x)
-    {step : ℝ} (h0 : 0 ≤ step) (h2 : step ≤ 2)
-    (hx' : x' = x + Ddg.odtDisplacement
-      (∑ k ∈ Finset.range n, (circumVec x (q k) (q (k + 1)) - (sda x (q k) (q (k + 1)) / 2) • x))
-      (starArea q n x) step)
-    (hpos : ∀ k < n, 0 < sda x (q k) (q (k + 1)))
-    (hpos' : ∀ k < n, 0 < sda x' (q k) (q (k + 1)))
-    (h : IsTiling ((Finset.range n).disjSum t) (Sum.elim (fan q x) r) Ω)
-    (h' : IsTiling ((Finset.range n).disjSum t) (Sum.elim (fan q x') r) Ω) {g g' : ℝ × ℝ → ℝ}
-    (hg : ∀ k ∈ (Finset.range n).disjSum t, ∀ y ∈ triangle (Sum.elim (fan q x) r k),
-      g y = odtInterp (Sum.elim (fan q x) r k) y)
-    (hg' : ∀ k ∈ (Finset.range n).disjSum t, ∀ y ∈ triangle (Sum.elim (fan q x') r k),
-      g' y = odtInterp (Sum.elim (fan q x') r k) y) :
-    (∫ y in Ω, |g' y - nsq y|) ≤ ∫ y in Ω, |g y - nsq y| ∧
-      (step = 1 → ∀ (y : ℝ × ℝ) (gy : ℝ × ℝ → ℝ), (∀ k < n, 0 < sda y (q k) (q (k + 1))) →
-        IsTiling ((Finset.range n).disjSum t) (Sum.elim (fan q y) r) Ω →
-        (∀ k ∈ (Finset.range n).disjSum t, ∀ z ∈ triangle (Sum.elim (fan q y) r k),
-          gy z = odtInterp (Sum.elim (fan q y) r k) z) →
-        (∫ z in Ω, |g' z - nsq z|) ≤ ∫ z in Ω, |gy z - nsq z|) := by
-  have hS := odtEnergy_step_le hq x hω h0 h2
-  simp only [← hx'] at hS
-  have e := odt_error_sub hpos hpos' h h' hg hg'
-  refine ⟨by linarith [hS.1], fun h1 y gy hposy hy hgy => ?_⟩
-  have hmin := (odtEnergy_step_le hq x hω zero_le_one one_le_two).2 y
-  simp only [← h1, ← hx'] at hmin
-  have ey := odt_error_sub hposy hpos' hy h' hgy hg'
-  linarith
-
-end Odt
 
 /-! ## `ic-transfer-mass-integral`: the transfer mass matrix as an integral -/
 

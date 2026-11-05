@@ -13,7 +13,7 @@ change, so each statement is about one diamond `(a, b, c, d, e)` and its flip `(
 
 `liftEnergy a b c = A (a² + b² + c²)`, `A = triArea a b c`. On a planar triangle, `liftEnergy/12`
 is the integral of `u_I − u` for `u(x) = |x|²` and `u_I` its linear interpolant (Chen–Holst 2011,
-Lemma 4.1; proved in `DdgProofs/TriangleIntegral/Fem.lean`, `it-odt-interpolation-error`): the
+Lemma 4.1; proved in `DdgProofs/Delaunay/ODT.lean`, `it-odt-interpolation-error`): the
 volume between the paraboloid and the triangle lifted to it. For a planar point set, the sum over
 a triangulation is the volume under the lifted triangulation, minimal for the lower convex hull,
 i.e. the Delaunay triangulation (Chen–Xu 2004; Musin 1997). It is intrinsic: it depends on the
