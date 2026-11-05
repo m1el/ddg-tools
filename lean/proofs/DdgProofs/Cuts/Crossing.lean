@@ -1,5 +1,6 @@
 import DdgProofs.Oracle.Scalar
 import DdgProofs.Cotan
+import DdgProofs.Geometry.Barycentric
 
 /-!
 # Cut flow: crossings, lengths and areas inside a face
@@ -19,7 +20,7 @@ scalar-generic definitions (`lean/oracle/DdgOracle/Formulas/Cuts.lean`) instanti
   of a real inner product space and a barycentric difference `d` with `Σ d = 0`,
   `‖d_a P_a + d_b P_b + d_c P_c‖² = −(d_a d_b ℓ_ab² + d_b d_c ℓ_bc² + d_c d_a ℓ_ca²)`
   (`baryLength2_eq_norm_sq`, `baryLength_eq_dist`; any number of points:
-  `norm_sq_sum_smul_of_sum_eq_zero`). For side lengths that satisfy the triangle inequalities the
+  `norm_sq_sum_smul_of_sum_eq_zero` in `DdgProofs/Geometry/Barycentric.lean`). For side lengths that satisfy the triangle inequalities the
   expression is nonnegative, so the floor at `0` in `baryLength` is inactive in exact arithmetic
   (`baryLength2_nonneg`).
   The polarization `Ddg.baryInner` is the inner product of two such vectors
@@ -190,43 +191,6 @@ theorem baryLength_eq (lab lbc lca da db dc : ℝ) :
     Ddg.baryLength lab lbc lca da db dc = √(max 0 (Ddg.baryLength2 lab lbc lca da db dc)) := by
   simp only [Ddg.baryLength, Oracle.sqrt_eq, Oracle.zero_eq]
 
-/-- **Squared length of a combination with coefficient sum zero**, for any finite family of
-points of a real inner product space:
-`‖Σ d_i P_i‖² = −½ Σ_{i,j} d_i d_j ‖P_i − P_j‖² = −Σ_{i<j} d_i d_j ‖P_i − P_j‖²`.
-
-[formula: cut-barycentric-length] -/
-theorem norm_sq_sum_smul_of_sum_eq_zero {ι : Type*} [Fintype ι] (P : ι → E) (d : ι → ℝ)
-    (hd : ∑ i, d i = 0) :
-    ‖∑ i, d i • P i‖ ^ 2 = -(1 / 2) * ∑ i, ∑ j, d i * d j * ‖P i - P j‖ ^ 2 := by
-  have h1 : ∀ i j, d i * d j * ‖P i - P j‖ ^ 2 =
-      d j * (d i * ‖P i‖ ^ 2) - 2 * (d i * d j * inner ℝ (P i) (P j)) +
-        d i * (d j * ‖P j‖ ^ 2) := by
-    intro i j
-    rw [norm_sub_sq_real]
-    ring
-  have h2 : ‖∑ i, d i • P i‖ ^ 2 = ∑ i, ∑ j, d i * d j * inner ℝ (P i) (P j) := by
-    rw [← real_inner_self_eq_norm_sq, sum_inner]
-    refine Finset.sum_congr rfl fun i _ => ?_
-    rw [inner_sum]
-    refine Finset.sum_congr rfl fun j _ => ?_
-    rw [real_inner_smul_left, real_inner_smul_right]
-    ring
-  have e1 : ∑ i, ∑ j, d j * (d i * ‖P i‖ ^ 2) = 0 := by
-    refine Finset.sum_eq_zero fun i _ => ?_
-    rw [← Finset.sum_mul, hd, zero_mul]
-  have e3 : ∑ i, ∑ j, d i * (d j * ‖P j‖ ^ 2) = 0 := by
-    rw [Finset.sum_comm]
-    exact e1
-  have h3 : ∑ i, ∑ j, d i * d j * ‖P i - P j‖ ^ 2 =
-      ∑ i, ∑ j, d j * (d i * ‖P i‖ ^ 2) - 2 * ∑ i, ∑ j, d i * d j * inner ℝ (P i) (P j) +
-        ∑ i, ∑ j, d i * (d j * ‖P j‖ ^ 2) := by
-    rw [Finset.mul_sum, ← Finset.sum_sub_distrib, ← Finset.sum_add_distrib]
-    refine Finset.sum_congr rfl fun i _ => ?_
-    rw [Finset.mul_sum, ← Finset.sum_sub_distrib, ← Finset.sum_add_distrib]
-    exact Finset.sum_congr rfl fun j _ => h1 i j
-  rw [h2, h3, e1, e3]
-  ring
-
 /-- **Barycentric length formula** (SPEC §3.3). For three points `P_a, P_b, P_c` of a real inner
 product space and a barycentric difference `(d_a, d_b, d_c)` with `d_a + d_b + d_c = 0`,
 `‖d_a P_a + d_b P_b + d_c P_c‖² = −(d_a d_b ℓ_ab² + d_b d_c ℓ_bc² + d_c d_a ℓ_ca²)`,
@@ -298,17 +262,6 @@ theorem baryLength2_nonneg {lab lbc lca : ℝ} (h : IsTriangle lab lbc lca) {da 
   exact nonneg_of_mul_nonneg_right h1 h2
 
 /-! ## Areas of sub-triangles -/
-
-/-- Sixteen times the squared area of a triangle as a function of its squared side lengths:
-`2xy + 2yz + 2zx − x² − y² − z²` (Heron). -/
-def heronPoly (x y z : ℝ) : ℝ := 2 * x * y + 2 * y * z + 2 * z * x - x ^ 2 - y ^ 2 - z ^ 2
-
-/-- Heron's formula in terms of the squared sides. -/
-theorem triArea_eq_sqrt_heronPoly (a b c : ℝ) :
-    triArea a b c = √(heronPoly (a ^ 2) (b ^ 2) (c ^ 2)) / 4 := by
-  unfold triArea heronPoly
-  congr 2
-  ring
 
 /-- The oracle's `det3` at `ℝ` is the determinant of the `3 × 3` matrix of the rows. -/
 theorem det3_eq (x0 x1 x2 y0 y1 y2 z0 z1 z2 : ℝ) :

@@ -37,7 +37,12 @@
 #     IsTiling.integral_abs_odt_error, IsTiling.integral_abs_odt_error_eq_sides, starAreaOf,
 #     sum_corners_eq_sum_vertices, IsTiling.integral_abs_odt_error_vertices, fan, fan_term,
 #     odt_error_star, odt_error_sub, odt_error_step_le
+#   Cuts/Crossing.lean -> Geometry/Barycentric.lean (the oracle-free part only):
+#     DDG.Cuts.norm_sq_sum_smul_of_sum_eq_zero, heronPoly, triArea_eq_sqrt_heronPoly
+#     (baryLength*, baryInner*, subTriangleArea*, det3_eq, cotFromInner_eq_cornerCot, cutFace_det_*
+#     are stated about the oracle's Ddg.* and stay in Cuts/Crossing.lean until the S3 de-oracling)
 DdgProofs.Geometry.PlaneLemmas	DDG.Geometry.PlaneLemmas
 DdgProofs.Intrinsic.FlipAngles	DDG.Intrinsic.FlipAngles
 DdgProofs.Oracle.Intrinsic	DdgProofs.Oracle.Intrinsic
 DdgProofs.Delaunay.ODT	DDG.Delaunay.ODT
+DdgProofs.Geometry.Barycentric	DDG.Geometry.Barycentric

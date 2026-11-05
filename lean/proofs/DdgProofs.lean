@@ -9,6 +9,7 @@ import DdgProofs.Components
 import DdgProofs.Solver
 import DdgProofs.Triangle
 import DdgProofs.Geometry.PlaneLemmas
+import DdgProofs.Geometry.Barycentric
 import DdgProofs.Cotan
 import DdgProofs.GaussBonnet
 import DdgProofs.Yamabe
