@@ -217,7 +217,11 @@ pub(crate) struct QueueRun {
 
 /// The five lengths `[ℓ_ij, ℓ_jk, ℓ_ki, ℓ_il, ℓ_lj]` of the two triangles `ijk`, `jil` on
 /// interior edge `e = ij`, or `None` for a boundary edge. For an edge whose two sides are the
-/// same triangle the triangle is listed twice, which is what the angle sums need.
+/// same triangle the triangle is listed twice, which is what the angle sums need; such an edge
+/// is always Delaunay, strictly (its two opposite angles are two corners of one triangle), so it
+/// never fails the test.
+///
+/// [formula: it-delaunay-self-glued]
 #[inline]
 pub(crate) fn diamond_lengths(complex: &Complex, lengths: &[f64], e: usize) -> Option<[f64; 5]> {
     let h0 = complex.edge_halfedge[e] as usize;
@@ -256,7 +260,10 @@ pub(crate) fn edge_cotan_weight(complex: &Complex, lengths: &[f64], e: usize) ->
 }
 
 /// Whether interior edge `e` fails the criterion. `false` for a boundary edge and for a
-/// constrained edge.
+/// constrained edge. In exact arithmetic an edge that fails either criterion is not locally
+/// Delaunay, has two distinct triangles and a strictly convex diamond.
+///
+/// [formula: it-delaunay-flip-loop]
 #[inline]
 pub(crate) fn fails_delaunay(
     complex: &Complex,
@@ -293,6 +300,12 @@ pub(crate) fn fails_delaunay(
 ///
 /// `thin`: a flip that the shape limit of SPEC N5 refuses ([`FlipRefusal::TooThin`]) is tried
 /// again under this test (refinement, IC-SPEC I30); `None` leaves it refused.
+///
+/// In exact arithmetic (and without the shape limit) every flip made here lowers the lifting
+/// potential `Σ A (a² + b² + c²)`, so no triangulation repeats; every edge off the queue passes
+/// the test, so an empty queue means that no interior edge fails it.
+///
+/// [formula: it-delaunay-flip-loop]
 ///
 /// [`FlipRefusal::TooThin`]: crate::FlipRefusal::TooThin
 pub(crate) fn run_flip_queue<T: Triangulation>(
@@ -469,7 +482,13 @@ impl IntrinsicTriangulation {
     /// of its neighbours is flipped.
     ///
     /// The same code runs for every representation ([`Triangulation::flip_to_delaunay`]).
-    /// The report says how it ended; reaching the flip limit is not an error.
+    /// The report says how it ended; reaching the flip limit is not an error. In exact
+    /// arithmetic, with [`FlipLimit::Unlimited`] the loop ends whenever finitely many
+    /// triangulations are reachable by Delaunay flips (on a compact surface: the cited finiteness
+    /// of triangulations with bounded edges), and its result has the Euler characteristic,
+    /// boundary, area and cone angles of the input.
+    ///
+    /// [formula: it-delaunay-flip-algorithm]
     ///
     /// # Errors
     /// [`IntrinsicError::InvalidOptions`] for a tolerance that is negative or not finite.

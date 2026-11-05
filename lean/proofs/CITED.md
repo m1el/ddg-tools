@@ -820,24 +820,34 @@ an earlier version with another title, were read).
   (arXiv:1007.3350; termination through a well-founded relation on a finite set, the decreasing
   quantity being the volume under the triangles lifted to the paraboloid). It is not a proof of the
   surface statement above (survey of 2026-10-31; the development's source could not be fetched).
-- **Why not formalized.** The argument is about the set of all geodesic triangulations of a
-  surface (a function on it that every flip decreases, and finiteness below a bound), which
-  rests on the geometry of geodesics on a cone surface.
-- **What depends on it.** That `Delaunay flipping` returns at all; the crate has a limit on the
-  number of flips and reports when it is reached (SPEC §4, N6; never reached in the recorded
-  runs). Proved: every step of the algorithm is possible (an edge that violates the condition has
-  a strictly convex diamond, `diamondConvex_of_not_delaunay`; an edge with the same triangle on
-  both sides never violates it, `delaunay_of_same_triangle`), and after the flip the new edge
-  satisfies the condition strictly (`flip_of_not_delaunay`). **The one-flip part of both proofs
-  is machine-checked** (`DdgProofs/Delaunay/Potential.lean`, `it-delaunay-potential`): the
-  lifting energy `Σ_T A_T(a² + b² + c²)` changes under the flip of an edge with a strictly convex
-  diamond by exactly `−8 A_ijk A_jil (cot θ_k + cot θ_l)` (`liftEnergy_flip`), so it decreases
-  strictly at every non-Delaunay edge (`liftEnergy_flip_lt`) and is unchanged at a tie; Musin's
-  harmonic index `Σ_T (a² + b² + c²)/A_T` (the potential of B–S Prop. 12) decreases strictly too
-  (`harmonicIndex_flip_lt`, from Rippa's identity at the four hat functions). Not checked: that a
-  strictly decreasing potential forces termination, which needs finiteness of the triangulations
-  below a level of the potential (immediate in the plane, where a point set has finitely many
-  triangulations; on a surface the discreteness argument of Indermitte et al. or B–S Thm. 15).
+- **Proved (trimmed, 2026-11-05, layer 3).** Everything but the finiteness, on the gluing data of
+  `DdgProofs/Delaunay/Complex.lean` (self-loops, multiple edges, faces glued to themselves):
+  `DdgProofs/Delaunay/Termination.lean` (`it-delaunay-self-glued`, `it-delaunay-potential`,
+  `it-delaunay-flip-algorithm`) and `DdgProofs/Delaunay/FlipQueue.lean` (`it-delaunay-flip-loop`).
+  Every non-Delaunay interior edge can be flipped (an edge with one face on both sides is always
+  Delaunay, strictly: `IsMetric.locallyDelaunayAt_of_same_face`; B–S's topological obstruction);
+  the global lifting energy and the harmonic index decrease strictly with every Delaunay flip
+  (`liftPotential_flip_lt`, `harmonicPotential_flip_lt`), so no state repeats; if the states
+  reachable by Delaunay flips are finitely many, every flip sequence is finite
+  (`MetricGluing.acc_of_finite`, at most `|reach| − 1` flips), and its end is Delaunay with the
+  χ, boundary, area and cone angles of the start (`MetricGluing.flip_algorithm`). The literature's
+  hypothesis — for every `L`, finitely many triangulations of the flip class with edges `≤ L`, up
+  to isomorphism (`MetricGluing.BoundedLengthFinite`) — implies that finiteness
+  (`reach_finite_of_boundedLengthFinite`: edges stay `≤ √(H·A)` because `H` decreases and the
+  area is constant, B–S's argument). The Rust queue loop with its tolerance is proved to make only
+  Delaunay flips, to terminate under the same hypothesis in any order, and, when it exits without
+  the cap, to leave every interior edge passing its test (`MetricGluing.loop_result`).
+- **Still cited: the finiteness.** That on a compact piecewise flat surface there are, for every
+  `L`, only finitely many geodesic triangulations with the given vertices and all edges at most
+  `L` long (B–S, proof of Thm. 15; Indermitte et al., proof of Thm. 1: the potential "takes values
+  in a discrete set"). It is about all geodesics on the cone surface, which is not modelled
+  (layer 4); the theorems above take it as the explicit hypothesis `BoundedLengthFinite`. A
+  strictly decreasing real potential alone does not give termination (`1/n`).
+- **What depends on it.** That `Delaunay flipping` returns at all with `FlipLimit::Unlimited`;
+  the crate has a limit on the number of flips and reports when it is reached (SPEC §4, N6; never
+  reached in the recorded runs). Earlier one-diamond results (`diamondConvex_of_not_delaunay`,
+  `delaunay_of_same_triangle`, `flip_of_not_delaunay`, `liftEnergy_flip`, `harmonicIndex_flip_lt`)
+  are the steps of the proof above.
 
 ### [formula: it-rippa-theorem] Rippa's theorem: Delaunay flips do not increase the Dirichlet energy
 

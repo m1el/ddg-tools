@@ -34,6 +34,8 @@ themselves allowed), with an edge-length metric (`DdgProofs/Delaunay/Metric.lean
   (`IsMetric.liftPotential_flip_eq_of_tie`). The same holds for Musin's harmonic index
   `H = Σ (a² + b² + c²)/A` (B–S Prop. 12, `IsMetric.harmonicPotential_flip_lt`), and every
   flip of a strictly convex diamond keeps the total area (`IsMetric.totalArea_flip`).
+* **Gauss–Bonnet with boundary** (`IsMetric.gauss_bonnet`): `Σ_v (2π − π b_v − Θ_v) = 2π χ`,
+  `b_v` the number of boundary halfedges at `v` (layer 2 had the closed case).
 * **States and the flip relation** (`MetricGluing`, `MetricGluing.DelaunayFlip`): a state is
   gluing data with a metric on a fixed face type `F` (a flip keeps the faces). `DelaunayFlip s t`:
   `t` is `s` with one Delaunay flip. Along any sequence of flips of strictly convex diamonds
@@ -318,6 +320,42 @@ theorem IsMetric.totalArea_flip (hm : G.IsMetric ℓ) (hf : G.Flippable h₀)
   linarith
 
 end PotentialFlip
+
+/-! ## Gauss–Bonnet with boundary -/
+
+/-- The number of boundary halfedges whose tail is the vertex `v` (`1` at a vertex of the boundary
+of a surface, `0` at an interior vertex). -/
+noncomputable def boundaryCount [Fintype F] [DecidableEq F] (G : Gluing F) (v : G.Vertex) : ℕ :=
+  (Finset.univ.filter fun h : Halfedge F => G.twin h = h ∧ G.vertexOf h = v).card
+
+/-- **Discrete Gauss–Bonnet with boundary** on gluing data:
+`Σ_v (2π − π b_v − Θ_v) = 2π χ`, with `b_v` the number of boundary halfedges at `v`. At an
+interior vertex the term is the angle defect `2π − Θ_v`; at a vertex with one boundary halfedge
+it is the boundary turning `π − Θ_v` (the convention of `GaussBonnet.lean`). For a closed surface
+this is `gauss_bonnet_closed`.
+
+[formula: gauss-bonnet] -/
+theorem IsMetric.gauss_bonnet [Fintype F] [DecidableEq F] {ℓ : Halfedge F → ℝ}
+    (hm : G.IsMetric ℓ) :
+    ∑ v, (2 * π - π * G.boundaryCount v - G.coneAngle ℓ v) = 2 * π * G.eulerChar := by
+  classical
+  have hB : ∑ v, (G.boundaryCount v : ℝ) = G.numBoundary := by
+    have := Finset.card_eq_sum_card_fiberwise (f := G.vertexOf)
+      (s := Finset.univ.filter fun h : Halfedge F => G.twin h = h)
+      (t := (Finset.univ : Finset G.Vertex)) (fun _ _ => Finset.mem_univ _)
+    rw [numBoundary, this]
+    push_cast
+    refine Finset.sum_congr rfl fun v _ => ?_
+    unfold boundaryCount
+    rw [Finset.filter_filter]
+  have hE := G.two_mul_numEdges
+  have hE' : (2 : ℝ) * G.numEdges = 3 * Fintype.card F + G.numBoundary := by exact_mod_cast hE
+  rw [Finset.sum_sub_distrib, Finset.sum_sub_distrib, hm.sum_coneAngle,
+    ← Finset.mul_sum Finset.univ (fun v => (G.boundaryCount v : ℝ)) π, hB,
+    Finset.sum_const, Finset.card_univ, eulerChar, numVertices, Nat.card_eq_fintype_card,
+    nsmul_eq_mul]
+  push_cast
+  linear_combination π * hE'
 
 /-! ## Edge lengths are bounded by the harmonic index and the area -/
 

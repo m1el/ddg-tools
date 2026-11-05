@@ -50,6 +50,8 @@ import DdgProofs.Delaunay.Complex
 import DdgProofs.Delaunay.Flip
 import DdgProofs.Delaunay.Metric
 import DdgProofs.Delaunay.FromTriMesh
+import DdgProofs.Delaunay.Termination
+import DdgProofs.Delaunay.FlipQueue
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric
