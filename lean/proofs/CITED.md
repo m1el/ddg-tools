@@ -32,7 +32,7 @@ this status:
   duality-gap certificate for an exactly feasible primal point and an exactly feasible dual point
   (`duality_gap_certificate`, `adjoint_gap_certificate`).
 * **A computed triple satisfies none of these equations exactly.** What is machine-checked for
-  arbitrary `(u, φ, µ)` (`DdgProofs/Certificate.lean`, ids `duality-gap-certificate`,
+  arbitrary `(u, φ, µ)` (`DDG/OptimalCones/Certificate.lean`, ids `duality-gap-certificate`,
   `duality-gap-inexact`), with `r = L u − µ + Ω`, `φ̂` the clipped `φ`,
   `D = dualObjectiveOfAdjoint φ̂`:
   - `D ≤` optimum, provided `(Lᵀφ̂)_i = 0` wherever `wE_i m_i = 0` (no condition if all
@@ -1960,7 +1960,7 @@ equation, algorithm and appendix numbers are the paper's). The contract is
 
 **What the machine-checked part covers, and what it does not.** Machine-checked
 (`DdgProofs/IntegerCoords/*.lean`; the design of the combinatorial model is
-`DdgProofs/IntegerCoords/DESIGN.md`): the arithmetic of Eq. 1, 2, 6 and of crossings; the **face
+`lean/ddg/DDG/NormalCoords/DESIGN.md`): the arithmetic of Eq. 1, 2, 6 and of crossings; the **face
 model** (one triangle of `T¹` with the pieces of the curves of `T⁰` in it, disjointness as
 non-interleaving on the boundary cycle): every valid model is the canonical pairing of Fig. 11 /
 Alg. 9 for corner counts given by Eq. 1–2, the side counts determine it, a model exists exactly for

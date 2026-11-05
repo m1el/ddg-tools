@@ -77,23 +77,23 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | File | Content |
 |---|---|
 | `DDG/Optimization/SoftThreshold.lean` | soft threshold, clamp, subdifferential of `t·\|x\|` on an interval (item A.1) |
-| `DdgProofs/Problem.lean` | the canonical discrete problem: `Site`, `ConeProblem`, objective, feasibility, optimality system |
-| `DdgProofs/Optimality.lean` | sufficiency, quadratic growth, uniqueness, necessity (invertible `L`), guarantee of paper Sec. 4.5 (A.2, A.3) |
-| `DdgProofs/Duality.lean` | discrete dual, Fenchel–Young, weak/strong duality, duality-gap certificate (A.4) |
-| `DdgProofs/Certificate.lean` | the certificate for inexact data: gap identity for arbitrary points, clipped dual lower bound, repaired upper bound, enclosure, backward statements, counterexamples (A.4′) |
-| `DdgProofs/Newton.lean` | residual maps, semismooth differentials, stopping rule, regularized problem (A.5) |
-| `DdgProofs/Solver.lean` | the linear systems `crates/ddg-optimal-cones` solves, closed-mesh treatment, adjoint constant, Gauss–Bonnet shift, line-search slope, proximal stage, backward error, cone merging (C) |
-| `DdgProofs/Closed.lean` | closed meshes, optimal additive constant, area normalization of `λ` (A.6, A.7) |
-| `DdgProofs/Components.lean` | the problem of a mesh with several connected components is the sum of the problems of its components (block diagonal `L`, common `λ`, masses normalized by the total area): minimizers, optimality system and Gauss–Bonnet per component; a component solved alone with its own area normalization and `λ_c = (A/A_c)·λ` (A.8) |
+| `DDG/OptimalCones/Problem.lean` | the canonical discrete problem: `Site`, `ConeProblem`, objective, feasibility, optimality system |
+| `DDG/OptimalCones/Optimality.lean` | sufficiency, quadratic growth, uniqueness, necessity (invertible `L`), guarantee of paper Sec. 4.5 (A.2, A.3) |
+| `DDG/OptimalCones/Duality.lean` | discrete dual, Fenchel–Young, weak/strong duality, duality-gap certificate (A.4) |
+| `DDG/OptimalCones/Certificate.lean` | the certificate for inexact data: gap identity for arbitrary points, clipped dual lower bound, repaired upper bound, enclosure, backward statements, counterexamples (A.4′) |
+| `DDG/OptimalCones/Newton.lean` | residual maps, semismooth differentials, stopping rule, regularized problem (A.5) |
+| `DdgProofs/OptimalCones/Solver.lean` | the linear systems `crates/ddg-optimal-cones` solves, closed-mesh treatment, adjoint constant, Gauss–Bonnet shift, line-search slope, proximal stage, backward error, cone merging (C) |
+| `DDG/OptimalCones/Closed.lean` | closed meshes, optimal additive constant, area normalization of `λ` (A.6, A.7) |
+| `DDG/OptimalCones/Components.lean` | the problem of a mesh with several connected components is the sum of the problems of its components (block diagonal `L`, common `λ`, masses normalized by the total area): minimizers, optimality system and Gauss–Bonnet per component; a component solved alone with its own area normalization and `λ_c = (A/A_c)·λ` (A.8) |
 | `DDG/Geometry/Triangle.lean` | corner angle, cotangent, Heron area, angle sum, scaling, link to Mathlib's Euclidean geometry (B.8) |
 | `DDG/Mesh/TriMesh.lean` | cotan formula, cotan Laplacian, lumped mass (B.9, B.10) |
 | `DDG/Mesh/GaussBonnet.lean` | angle defect, boundary curvature, discrete Gauss–Bonnet (B.11) |
 | `DDG/Conformal/Yamabe.lean` | linearized discrete Yamabe equation (B.12) |
 | `DDG/Geometry/Stable.lean` | the same formulas in the arrangements `crates/ddg-core` evaluates (Kahan's area, `atan2` corner angle, curvature fields, Laplacian entries) |
-| `DdgProofs/MeshProblem.lean` | the canonical problem of a mesh (`TriMesh.coneProblem`) and the translation between vectors on the unknowns and per-vertex vectors that vanish on the boundary |
-| `DdgProofs/FactorOnce.lean` | the factor-once method of `crates/ddg-optimal-cones/src/factor_once/`: the reduced (LASSO-type) problem in the cone vector, its Gram matrix, its optimality conditions and their link to `KKT`, the pinned solve of a singular `A` (C) |
-| `DdgProofs/BoundaryProblem.lean` | the mesh problem with boundary unknowns (`TriMesh.boundaryProblem`, `Ω̂`): sufficiency of the optimality system, `Σ s = 2πχ`, the free / penalized / convex boundary sites, first-order curvature of the scaled boundary |
-| `DdgProofs/ConeFeedback.lean` | the feedback loop of the cone solver: the mismatch `δ` between the solver's `u` and the realized log area factor is invariant under the free constant of `u` and the scale of the plane, and zero where the flattening realizes `u` up to constants; the weighted quantile is shift-equivariant |
+| `DDG/OptimalCones/MeshProblem.lean` | the canonical problem of a mesh (`TriMesh.coneProblem`) and the translation between vectors on the unknowns and per-vertex vectors that vanish on the boundary |
+| `DdgProofs/OptimalCones/FactorOnce.lean` | the factor-once method of `crates/ddg-optimal-cones/src/factor_once/`: the reduced (LASSO-type) problem in the cone vector, its Gram matrix, its optimality conditions and their link to `KKT`, the pinned solve of a singular `A` (C) |
+| `DDG/OptimalCones/BoundaryProblem.lean` | the mesh problem with boundary unknowns (`TriMesh.boundaryProblem`, `Ω̂`): sufficiency of the optimality system, `Σ s = 2πχ`, the free / penalized / convex boundary sites, first-order curvature of the scaled boundary |
+| `DdgProofs/OptimalCones/ConeFeedback.lean` | the feedback loop of the cone solver: the mismatch `δ` between the solver's `u` and the realized log area factor is invariant under the free constant of `u` and the scale of the plane, and zero where the flattening realizes `u` up to constants; the weighted quantile is shift-equivariant |
 | `DDG/Conformal/Cherrier.lean` | BFF: Poisson solves, Dirichlet-to-Neumann, Neumann problem, exterior-angle sum, first-order Cherrier formula (D) |
 | `DDG/Conformal/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
 | `DDG/Conformal/BoundaryCurve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
@@ -180,7 +180,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
   (`L = L_II`, `u = 0` on the boundary already eliminated, see `laplacian_mulVec_of_zero_off`), or
   all vertices on a closed mesh. On a closed mesh the competitors in `IsMinimizer` are *all*
   solutions of `L v = ν − Ω`, so the additive constant of `u` is optimized.
-  `TriMesh.coneProblem M p wE λ site` (`DdgProofs/MeshProblem.lean`) is this problem for a mesh
+  `TriMesh.coneProblem M p wE λ site` (`DDG/OptimalCones/MeshProblem.lean`) is this problem for a mesh
   `M` with unknowns `p`, with the masses divided by the total area. For per-vertex vectors that
   vanish off the unknowns (as the Rust arrays do; an exact test), its state residual is
   `(L u)_v − µ_v + Ω_v` with the full Laplacian (`coneProblem_stateResidual`), its adjoint product
@@ -656,7 +656,7 @@ Gillespie, Sharp, Crane, ACM TOG 40(6), 2021 ("the IC paper"); contract
 `crates/ddg-integer-coords/SPEC.md` §9. Integer formulas are the oracle's definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`, namespace `Ddg.IntegerCoords`); the face model
 and the rest live in `namespace DdgProofs.IntegerCoords`. Design and how tier C extends it:
-`DdgProofs/IntegerCoords/DESIGN.md`. A face has sides `k` from corner `k` to `k + 1`, crossings
+`lean/ddg/DDG/NormalCoords/DESIGN.md`. A face has sides `k` from corner `k` to `k + 1`, crossings
 numbered from corner `k`; corner `k` is opposite side `k + 1`.
 
 | id | exact statement | theorems |
@@ -780,7 +780,7 @@ twin (the surface on the left, as `hilbert_transform` walks the boundary).
 ## Theorems
 
 Sections A and B below index the theorems about the canonical problem and the operators. The
-theorems about the cone solver (`DdgProofs/Solver.lean`), about Boundary First Flattening
+theorems about the cone solver (`DdgProofs/OptimalCones/Solver.lean`), about Boundary First Flattening
 (`DdgProofs/Bff/*.lean`) and about the cut flow (`DdgProofs/Cuts/*.lean`) are indexed by the
 three id tables just above. The first two groups are about this package's own definitions, which
 transcribe the Rust expressions where the statement says "as the code evaluates it"; the cut-flow
@@ -847,7 +847,7 @@ Necessity on closed meshes is **not** proved (see `CITED.md`, `optimality-system
 | — | `Site.fenchel_young`, `Site.exists_conj_eq`, `Site.Stationary.fenchel_young_eq` | Fenchel–Young for the per-vertex cost, attainment, and equality at a stationary pair. | Prop. A.3 | own |
 | `duality-gap-certificate` | `Ddg.Problem.objective_le_add_gap` | The certificate for the oracle's problem (finite bounds: every `φ` is dual feasible). | — | oracle (dual value: own formula `dualValue`) |
 
-### A.4′ The certificate for inexact data (`DdgProofs/Certificate.lean`)
+### A.4′ The certificate for inexact data (`DDG/OptimalCones/Certificate.lean`)
 
 No assumption on `(u, φ, µ)` unless stated. `r = L u − µ + Ω` (`stateResidual`),
 `φ̂ = dualClip φ`, `D(φ) = dualObjectiveOfAdjoint φ`, `G = complementarityGap`,
@@ -916,7 +916,7 @@ Convergence of the iteration is not proved (`CITED.md`, `semismooth-newton-conve
 | `scale-invariance` | `cornerAngle_smul`, `cornerCot_smul`, `triArea_smul` | Angles and cotangents are scale invariant; areas scale by `s²`. | Sec. 6.2 | own |
 | `scale-invariance` | `TriMesh.laplacian_scale`, `TriMesh.mass_scale`, `TriMesh.angleDefect_scale` | `L` and `Ω` are scale invariant; masses scale by `s²`. | Sec. 6.2 | own |
 
-### A.8 Connected components (`DdgProofs/Components.lean`)
+### A.8 Connected components (`DDG/OptimalCones/Components.lean`)
 
 `P.sum Q`: block diagonal `L = fromBlocks P.L 0 0 Q.L`, `Ω, m, wE, site` by `Sum.elim`, `λ = P.lam`;
 every theorem that involves `λ` assumes `P.lam = Q.lam`. Several components: iterate.
@@ -1111,7 +1111,7 @@ The Rust code is not connected to Lean mechanically. For `crates/ddg-core`,
 (`kahanArea`, `kahanCornerAngle`, `kahanCornerCot`, `angleDefectField`, `geodesicCurvatureField`)
 and proves them equal to the math-level quantities; `DDG/Geometry/Plane.lean` and
 `DDG/Conformal/BoundaryCurve.lean` do the same for the per-triangle and per-loop expressions of
-`crates/ddg-bff`, and `DdgProofs/Solver.lean` transcribes the rows of the cone solver's linear
+`crates/ddg-bff`, and `DdgProofs/OptimalCones/Solver.lean` transcribes the rows of the cone solver's linear
 systems. That a transcription matches the Rust source is checked by reading, and by the
 differential tests against the oracle.
 
@@ -1494,7 +1494,7 @@ oracle's definitions for it; 46–51 the RC paper and its SPEC; 52–56 the IC p
   residual points inward. When (c) fails only the backward statements hold
   (`backward_certificate`, `repaired_certificate`). The quantities `r`, `D`, `J` themselves are
   evaluated in floating point by the Rust code, and that evaluation is outside every theorem.
-- The theorems of `DdgProofs/Solver.lean` say what an *exact* solution of the solver's linear
+- The theorems of `DdgProofs/OptimalCones/Solver.lean` say what an *exact* solution of the solver's linear
   system is. The solver accepts a computed solution by its componentwise backward error
   (`oettli_prager` says what that number means); the effect of that error on the iterate is not
   analysed. The solver's final answer is judged by the certificate, not by these theorems.

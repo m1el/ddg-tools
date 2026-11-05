@@ -1,5 +1,5 @@
 import DdgProofs.Oracle.Problem
-import DdgProofs.Newton
+import DDG.OptimalCones.Newton
 
 /-!
 # The oracle's regularized system with `μ` kept as an unknown, and its piecewise linear systems

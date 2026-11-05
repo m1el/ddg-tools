@@ -85,7 +85,7 @@ Item 1 of the earlier list, the feedback loop of the cones solver, landed on 202
   solution of the canonical problem on the whole mesh (masses divided by the total area, one
   constant of `u` and one Gauss–Bonnet sum per closed component), solved per component and
   certified as a whole, with a report per component. Lean: `component-separation`,
-  `component-lambda-rescaling` (`DdgProofs/Components.lean`).
+  `component-lambda-rescaling` (`DDG/OptimalCones/Components.lean`).
 * **`reoptimize_cones`** (2026-10-17, same crate, README "Re-optimizing given cones"; Python
   `ddg_tools.reoptimize_cones`): the least-distortion angles for given cone positions, by a direct
   solve of the linear optimality system or, up to 32 free sites, the reduced system of the

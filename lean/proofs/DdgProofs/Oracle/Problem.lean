@@ -1,6 +1,6 @@
 import DdgProofs.Oracle.Scalar
-import DdgProofs.Duality
-import DdgProofs.Closed
+import DDG.OptimalCones.Duality
+import DDG.OptimalCones.Closed
 
 /-!
 # The optimality theorems, stated about the oracle's `Ddg.Problem`

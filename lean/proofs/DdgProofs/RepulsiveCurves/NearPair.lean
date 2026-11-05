@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Kernel
+import DDG.Repulsive.Curves.Kernel
 
 /-!
 # Repulsive Curves: the near-pair quadrature (WP16; SPEC §3.4, §17o; not in the paper)

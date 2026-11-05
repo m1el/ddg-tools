@@ -1749,7 +1749,7 @@ traversal opened, the transpose is taken over opened leaves (6–8× fewer entri
 parallel pass over the leaves adds, for each row `I` that opened leaf `Λ` (increasing `I`),
 `∂e_IJ/∂γ_J` for every `J ∈ Λ` not adjacent to `I`.
 
-**Lean** (`DdgProofs/RepulsiveCurves/BarnesHutAdjoint.lean`): `hasDerivAt_nodeMass`,
+**Lean** (`DDG/Repulsive/Curves/BarnesHutAdjoint.lean`): `hasDerivAt_nodeMass`,
 `hasDerivAt_nodeMoment`, `hasDerivAt_nodeCentre` (the derivative of `x̄_N`), `bh_adjoint` (the
 whole chain rule of one lumped term along a motion of the curve: own part plus node part,
 `ν > 0`, `L_N ≠ 0`), the algebraic identities `adj_own_alg`, `adj_node_alg`, and

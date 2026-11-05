@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveSurfaces.Basic
+import DDG.Repulsive.Surfaces.Basic
 
 /-!
 # Repulsive Surfaces: the formulas of the remesher (paper Sec. 6; SPEC §10, D16)

@@ -384,7 +384,7 @@ The last two lines are an algebraic identity for any numbers `u, φ, µ` that va
 boundary (`duality-gap-inexact`; checked on random non-solutions in `tests/api.rs`). The dual
 point `(ũ, φ̂)` satisfies the adjoint equation by construction and is dual feasible exactly.
 
-What is proved, in `lean/proofs` (`DdgProofs/Certificate.lean`), for exact real arithmetic:
+What is proved, in `lean/proofs` (`DDG/OptimalCones/Certificate.lean`), for exact real arithmetic:
 
 * The identity above (`objective_sub_dualObjectiveOfAdjoint`).
 * **Lower bound** (`dual_lower_bound_of_clip`): if all `wE_i m_i > 0`, `D` is at most the
@@ -447,7 +447,7 @@ block on the unknowns) is block diagonal; the objective `½ Σ wE m u² + λ Σ 
 the components; every constraint involves one component. So `(u, µ)` is a minimizer iff its
 restriction to every component minimizes that component's part of the objective under that
 component's constraints, and the optimality systems separate the same way
-(`isMinimizer_sum_iff`, `kkt_sum_iff` in `lean/proofs/DdgProofs/Components.lean`,
+(`isMinimizer_sum_iff`, `kkt_sum_iff` in `lean/ddg/DDG/OptimalCones/Components.lean`,
 `component-separation`). In particular every closed component has its own additive constant of
 `u` (the competitors' constants are independent), and its own Gauss–Bonnet constraint
 `Σ_C µ = 2πχ_C` (its block of `L` annihilates its constants; `sum_cone_eq_sum_defect_inl`). A
@@ -1484,7 +1484,7 @@ boundary; largest `|δ|` over the interior vertices; logs `runs_tmp/fb-mismatch/
 | stop | a round that picks no vertex | then the solution agrees with its flattening at the threshold |
 | default | the options of `solve_with_feedback` are explicit (it needs a flattener); `ddg-uv`, Python and Blender: see `crates/ddg-uv/README.md`, "The cone feedback loop" | the user's rule: the more stable and reliable option is the default |
 
-**What is proved and what is not.** `cone-feedback-mismatch` (`DdgProofs/ConeFeedback.lean`):
+**What is proved and what is not.** `cone-feedback-mismatch` (`DdgProofs/OptimalCones/ConeFeedback.lean`):
 `faceMean` shifts with its values, the weighted median is shift-equivariant (the quantile of
 `cut-weighted-quantile`, the same scan in Rust), `δ` does not change when a constant is added
 to `u` and another to every `r_t`, and `δ = 0` wherever the flattening realizes `u` up to such
@@ -1683,7 +1683,7 @@ the ids with `lean/proofs`. Ids taken from there: `soft-threshold-fixed-point`,
 `lambda-area-normalization`, `cotan-laplacian`, `discrete-yamabe-linearization`.
 
 Ids introduced by this crate, with the statement the function implements. `lean/proofs` has
-theorems for them by now (`DdgProofs/Solver.lean`, `DdgProofs/Certificate.lean`; one is cited
+theorems for them by now (`DdgProofs/OptimalCones/Solver.lean`, `DDG/OptimalCones/Certificate.lean`; one is cited
 in `CITED.md`), except for the four `reduced-…` ids of the factor-once method, which are new and
 have neither a theorem nor an entry in `CITED.md` yet (`lean/` was not touched when they were
 added, so `scripts/check-formulas.sh` reports them as missing). The last column says
@@ -1704,10 +1704,10 @@ what the theorems cover, which is not always the whole statement.
 | `reduced-sum-constraint-pin` | `Reduced::new`, `Reduced::project` | If `A` is positive semidefinite with kernel exactly the constants, `p` an index, `A_p` positive definite, and `Σ b = 0`, then `x = P pad(A_p⁻¹ b_p̂)` solves `A x = b` (the equation of `p` follows from the others because `1ᵀ A = 0` and `Σ b = 0`) and, among `x + c 1`, `x` is the one with `Σ w x = 0`, which minimizes `½ Σ w (x + c)²`. For `b = µ − Ω` the condition is `Σ µ = Σ Ω`, i.e. `Σ_S µ_S = Σ (Ω − a_F)`. | not in `lean/proofs` |
 | `proximal-fixed-point` | `solve` | If `(u, µ)` minimizes `J(v, ν) + Σ (ν_i − µ̄_i)²/(2 k_i)` over the feasible pairs and `µ = µ̄`, then `(u, µ)` minimizes `J`. | `IsProxMinimizer.isMinimizer_of_fixedPoint`; also that a proximal step does not increase the objective (`IsProxMinimizer.objective_add_le`) |
 | `componentwise-backward-error` | `backward_error` | `max_i \|b − K x\|_i / (\|K\| \|x\| + \|b\|)_i` is the smallest `ε` such that `(K + δK) x = b + δb` for some `\|δK\| ≤ ε\|K\|`, `\|δb\| ≤ ε\|b\|` entrywise (Oettli and Prager 1964). | `oettli_prager` |
-| `component-separation` | `Instance::part`, `Discrete::from_instance`, `certify_instance`, `solve`, `solve_part`, `evaluate_cones`, `reoptimize_cones` | On a mesh with several components `L` is block diagonal and the objective a sum: `(u, µ)` is a minimizer (a solution of the optimality system) of the whole problem iff every restriction is one of its component's part, with the masses of the whole problem; every closed component has its own constant of `u` and its own `Σ µ = 2πχ`. | `isMinimizer_sum_iff`, `kkt_sum_iff`, `objective_sum`, `feasible_sum_iff`, `isMinimizer_sum_iff_alone` (`DdgProofs/Components.lean`) |
+| `component-separation` | `Instance::part`, `Discrete::from_instance`, `certify_instance`, `solve`, `solve_part`, `evaluate_cones`, `reoptimize_cones` | On a mesh with several components `L` is block diagonal and the objective a sum: `(u, µ)` is a minimizer (a solution of the optimality system) of the whole problem iff every restriction is one of its component's part, with the masses of the whole problem; every closed component has its own constant of `u` and its own `Σ µ = 2πχ`. | `isMinimizer_sum_iff`, `kkt_sum_iff`, `objective_sum`, `feasible_sum_iff`, `isMinimizer_sum_iff_alone` (`DDG/OptimalCones/Components.lean`) |
 | `component-lambda-rescaling` | `equivalent_lambda` | A component with its masses normalized by its own area `A_c` instead of the total `A` has the same minimizers with `λ · A / A_c`, and the adjoint of its optimality system is `A / A_c` times that of the whole problem. | `isMinimizer_normalizeMass_alone_iff`, `kkt_normalizeMass_alone_iff`, `isMinimizer_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff`, `Site.stationary_mul_iff` |
 | `feature-size-weights` | `feature_size_weights` | `wE_i = r_i`, `wR_i = 1/r_i` with `r_i = \|Ω_i\|/m_i + ε` ("as described") or its reciprocal ("as printed"), `m` area-normalized (paper Sec. 8.1). | cited in `CITED.md` (a choice of input data, not a derived formula) |
-| `cone-feedback-mismatch` | `scale_mismatch` | `R_i = Σ_{t∋i} A_t r_t / Σ_{t∋i} A_t` over the measured faces, `δ_i = (u_i − R_i) − c` with `c` the mass-weighted median of `u − R` over the measured vertices of the component; `δ` is invariant under `u + a`, `r + b`, and zero where `u − R` is constant. | `faceMean_shift`, `mismatch_shift`, `mismatch_eq_zero_of_const` (`DdgProofs/ConeFeedback.lean`) |
+| `cone-feedback-mismatch` | `scale_mismatch` | `R_i = Σ_{t∋i} A_t r_t / Σ_{t∋i} A_t` over the measured faces, `δ_i = (u_i − R_i) − c` with `c` the mass-weighted median of `u − R` over the measured vertices of the component; `δ` is invariant under `u + a`, `r + b`, and zero where `u − R` is constant. | `faceMean_shift`, `mismatch_shift`, `mismatch_eq_zero_of_const` (`DdgProofs/OptimalCones/ConeFeedback.lean`) |
 | `cut-weighted-quantile` (taken from the cut flow) | `weighted_quantile` (feedback) | the first value, in ascending order, at which the weights summed so far reach `q` times their sum; here `q = ½`. Shifting the values shifts it. | the cut flow's theorems, and `isWeightedQuantile_shift`, `weightedQuantile_shift` |
 | `cone-feedback-rule` | `Feedback::observe` | the reweighting rule of [the feedback loop](#the-feedback-loop) | cited in `CITED.md` as a design choice: a threshold rule, nothing to prove |
 

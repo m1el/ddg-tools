@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Constraints
+import DDG.Repulsive.Curves.Constraints
 
 /-!
 # Repulsive Curves: length schedules and subdivision (SPEC §5.4, D13)

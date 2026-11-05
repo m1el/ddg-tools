@@ -29,7 +29,8 @@ import DDG.NormalCoords.SplitAtCrossing
 import DDG.NormalCoords.SplitEdge
 
 /-!
-# DDG.NormalCoords
+# Integer Coordinates for Intrinsic Geometry Processing (Gillespie, Sharp, Crane 2021)
 
-Root module of the library part `NormalCoords`: imports every module below `DDG/NormalCoords/`.
+Tiers A, B, B′ and C (`Complex/`, the complex model; `Frames/`, the input-aligned frames) of `crates/ddg-integer-coords/SPEC.md` §9.2. The face model and how tier C extends
+it: `DDG/NormalCoords/DESIGN.md`. Cited results: `CITED.md`, section "Integer Coordinates".
 -/

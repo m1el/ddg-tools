@@ -1,4 +1,4 @@
-import DdgProofs.PointsAsTori.Apps
+import DDG.SDF.Operations
 
 /-!
 # Points as Tori: baselines (Sec. 5.2, Eq. 28–29; SPEC §9)

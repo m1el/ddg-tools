@@ -49,7 +49,7 @@ All pass. (Nothing found.) GPU entry points are covered by `tests/gpu.rs` (run t
 `pat-triangle-sampling`, `pat-query-sampling` (the last two were used by `src/train/queries.rs`), tags on
 `truth::closest_point_on_triangle` and `baselines::fwn::triangle_winding` (it was tagged `pat-winding-dipole`,
 which is the point-element dipole; the triangle element is the solid angle).
-Lean (`DdgProofs/PointsAsTori/Torus.lean`, builds without Mathlib recompiling): `torus_sdf_stable_general`
+Lean (`DDG/SDF/Torus.lean`, builds without Mathlib recompiling): `torus_sdf_stable_general`
 (any expansion point `o`, no `(o−c)·u = 0`: `v − v_o = (v² − v_o²)/(v + v_o)` with
 `v² − v_o² = |δ|² + 2δ·m − (δ·u)² − 2(δ·u)(m·u)`), `stable_core_dist` (`√((d₁+e₁)²+(d₂+e₂)²) − |r| =
 (K + 2(d₁e₁+d₂e₂) + e₁²+e₂²)/(√… + |r|)`, `K = d₁²+d₂²−r²`) and `torusSDF_stable_general` (the SDF in the doubly

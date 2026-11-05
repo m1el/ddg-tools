@@ -8,3 +8,6 @@ import DDG.FEM
 import DDG.NormalCoords
 import DDG.Delaunay
 import DDG.Conformal
+import DDG.OptimalCones
+import DDG.Repulsive
+import DDG.SDF

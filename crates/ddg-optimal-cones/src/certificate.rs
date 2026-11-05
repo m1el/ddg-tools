@@ -56,8 +56,8 @@ use crate::problem::{BoundaryTreatment, ConeProblem, Instance};
 ///
 /// # What this proves
 ///
-/// The statements are machine-checked in `lean/proofs` (`DdgProofs/Certificate.lean`,
-/// `DdgProofs/Duality.lean`) for exact real arithmetic; `φ̂` is dual feasible by construction.
+/// The statements are machine-checked in `lean/proofs` (`DDG/OptimalCones/Certificate.lean`,
+/// `DDG/OptimalCones/Duality.lean`) for exact real arithmetic; `φ̂` is dual feasible by construction.
 ///
 /// * The identity above is `objective_sub_dualObjectiveOfAdjoint`.
 /// * **Lower bound** (`dual_lower_bound_of_clip`): if `(L φ̂)_i = 0` wherever `w_i = 0` (no
