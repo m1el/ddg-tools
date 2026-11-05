@@ -1,6 +1,8 @@
 # Library step S2b (intrinsic / FEM / Delaunay splits): modules created or to be moved.
 # Columns: current module <TAB> final module. Declarations keep their full names in S2.
 #
+# Removed module: DdgProofs.Intrinsic.Delaunay (split into the three pieces below; no file left).
+#
 # Declarations moved (old file -> new file):
 #   Intrinsic/Diamond.lean -> Triangle.lean: DDG.IsTriangle.swap, DDG.Intrinsic.isTriangle_of_heron_pos
 #   Intrinsic/Delaunay.lean -> Triangle.lean: DDG.Intrinsic.cornerAngle_swap
@@ -46,3 +48,59 @@ DdgProofs.Intrinsic.FlipAngles	DDG.Intrinsic.FlipAngles
 DdgProofs.Oracle.Intrinsic	DdgProofs.Oracle.Intrinsic
 DdgProofs.Delaunay.ODT	DDG.Delaunay.ODT
 DdgProofs.Geometry.Barycentric	DDG.Geometry.Barycentric
+#
+# The other modules of the S2b scope, with their final names from the module map (LIBRARY-PLAN.md §2),
+# for step S4. App modules that keep their path (Cuts.Crossing, IS.{Operators,Oracle,Transport,Wrap})
+# and the aggregators (TriangleIntegral, IntrinsicSimplification) are not listed.
+DdgProofs.Triangle	DDG.Geometry.Triangle
+DdgProofs.Intrinsic.AppsAmrVector	DDG.VectorFields.Holonomy
+DdgProofs.Intrinsic.Barycentric	DDG.Intrinsic.Barycentric
+DdgProofs.Intrinsic.Diamond	DDG.Intrinsic.Diamond
+DdgProofs.Intrinsic.Move	DDG.Intrinsic.Move
+DdgProofs.Intrinsic.Signpost	DDG.Intrinsic.Signpost
+DdgProofs.Intrinsic.SingularityIndex	DDG.VectorFields.PoincareHopf
+DdgProofs.Intrinsic.Trace	DDG.Intrinsic.Trace
+DdgProofs.IntrinsicApps.HeatFem	DDG.FEM.Heat
+DdgProofs.TriangleIntegral.Basic	DDG.FEM.TriangleIntegral
+DdgProofs.TriangleIntegral.BetaExp	DDG.FEM.BetaExp
+DdgProofs.TriangleIntegral.Fem	DDG.FEM.Elements
+DdgProofs.TriangleIntegral.Flux	DDG.FEM.Flux
+DdgProofs.TriangleIntegral.Tiling	DDG.FEM.Tiling
+DdgProofs.IntrinsicSimplification.Curvature	DDG.Conformal.CETM.Curvature
+DdgProofs.IntrinsicSimplification.Flatten	DDG.Conformal.CETM.Flatten
+DdgProofs.IntrinsicSimplification.Interpolation	DDG.Conformal.CETM.Interpolation
+DdgProofs.IntrinsicSimplification.Monotone	DDG.Conformal.CETM.Monotone
+DdgProofs.IntrinsicSimplification.Removal	DDG.Intrinsic.FlatVertexRemoval
+DdgProofs.IntrinsicSimplification.Wasserstein	DDG.Optimization.Wasserstein
+DdgProofs.Delaunay.BoundaryFan	DDG.Delaunay.BoundaryFan
+DdgProofs.Delaunay.Complex	DDG.Mesh.Gluing
+DdgProofs.Delaunay.Encroachment	DDG.Delaunay.Planar.Encroachment
+DdgProofs.Delaunay.Flip	DDG.Mesh.GluingFlip
+DdgProofs.Delaunay.FlipQueue	DDG.Delaunay.FlipQueue
+DdgProofs.Delaunay.FromTriMesh	DDG.Delaunay.FromTriMesh
+DdgProofs.Delaunay.Local	DDG.Delaunay.Local
+DdgProofs.Delaunay.Metric	DDG.Delaunay.Metric
+DdgProofs.Delaunay.PlanarBasic	DDG.Delaunay.Planar.Basic
+DdgProofs.Delaunay.PlanarBridge	DDG.Delaunay.PlanarBridge
+DdgProofs.Delaunay.PlanarExistence	DDG.Delaunay.Planar.Existence
+DdgProofs.Delaunay.PlanarFlip	DDG.Delaunay.Planar.Flip
+DdgProofs.Delaunay.PlanarFlipCount	DDG.Delaunay.Planar.FlipCount
+DdgProofs.Delaunay.PlanarInsertion	DDG.Delaunay.Planar.Insertion
+DdgProofs.Delaunay.PlanarLemma	DDG.Delaunay.Planar.Lemma
+DdgProofs.Delaunay.PlanarTermination	DDG.Delaunay.Planar.Termination
+DdgProofs.Delaunay.PlanarUniqueness	DDG.Delaunay.Planar.Uniqueness
+DdgProofs.Delaunay.Potential	DDG.Delaunay.Potential
+DdgProofs.Delaunay.Rippa	DDG.Delaunay.Rippa
+DdgProofs.Delaunay.Surface.Angle	DDG.Delaunay.Surface.Angle
+DdgProofs.Delaunay.Surface.Count	DDG.Delaunay.Surface.Count
+DdgProofs.Delaunay.Surface.Fan	DDG.Delaunay.Surface.Fan
+DdgProofs.Delaunay.Surface.Finite	DDG.Delaunay.Surface.Finite
+DdgProofs.Delaunay.Surface.FlipEdge	DDG.Delaunay.Surface.FlipEdge
+DdgProofs.Delaunay.Surface.FlipFace	DDG.Delaunay.Surface.FlipFace
+DdgProofs.Delaunay.Surface.Layout	DDG.Delaunay.Surface.Layout
+DdgProofs.Delaunay.Surface.Overlay	DDG.Delaunay.Surface.Overlay
+DdgProofs.Delaunay.Surface.Plane	DDG.Delaunay.Surface.Plane
+DdgProofs.Delaunay.Surface.Quad	DDG.Delaunay.Surface.Quad
+DdgProofs.Delaunay.Surface.Relayout	DDG.Delaunay.Surface.Relayout
+DdgProofs.Delaunay.Surface.Segment	DDG.Delaunay.Surface.Segment
+DdgProofs.Delaunay.Termination	DDG.Delaunay.Termination
