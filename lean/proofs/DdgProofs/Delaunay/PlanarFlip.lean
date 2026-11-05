@@ -23,7 +23,7 @@ triangles across an edge (`DdgProofs/Delaunay/PlanarLemma.lean`) would fail for 
 It is preserved by the flip (`lawson_flip`). The interiors are those of `ℝ × ℝ` with its product
 topology (the same as the Euclidean one); the boundaries of triangles are null sets for the
 Lebesgue measure `volume`, which is how the flip keeps interiors disjoint
-(`eq_empty_of_subset_union_hull`). This is the model of `DdgProofs/TriangleIntegral/Tiling.lean`
+(`eq_empty_of_subset_union_hull`). This is the model of `DDG/FEM/Tiling.lean`
 (`IsTiling`: union and disjoint interiors) with corners in `S` and the vertex condition.
 
 Two triangles `{i, j, k}` and `{i, j, l}` of `T` with `k ≠ l` share the **interior edge** `ij`;

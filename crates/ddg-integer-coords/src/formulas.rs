@@ -402,7 +402,7 @@ pub struct SideSplitAtCrossing {
 /// at `c` the new edge is `A` itself. `None` for a face that is not valid or `j` out of range.
 ///
 /// Formula id `ic-split-at-crossing` (SPEC I28; proved in Lean,
-/// `lean/proofs/DdgProofs/IntegerCoords/SplitAtCrossing.lean`, `Complex/SplitAtCrossing.lean`).
+/// `lean/ddg/DDG/NormalCoords/SplitAtCrossing.lean`, `Complex/SplitAtCrossing.lean`).
 ///
 /// [formula: ic-split-at-crossing]
 pub fn split_side_at_crossing(n: [i64; 3], s: usize, j: i64) -> Option<SideSplitAtCrossing> {

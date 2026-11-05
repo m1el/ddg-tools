@@ -82,7 +82,7 @@ plane); and that every adaptive step reduces the error of a problem with a known
    `HeatReport::inconsistency`, `ExactReport` counters, eigen-residuals, linear-solve residuals,
    `Singularities::max_rounding`.
 2. Independent algorithms in the tests (§3).
-3. Lean proofs (`lean/proofs/DdgProofs/IntrinsicApps/HeatFem.lean`,
+3. Lean proofs (`lean/ddg/DDG/FEM/Heat.lean`,
    `lean/ddg/DDG/VectorFields/Holonomy.lean`) and cited results
    (`lean/proofs/CITED.md`), tagged `[formula: app-…]`.
 

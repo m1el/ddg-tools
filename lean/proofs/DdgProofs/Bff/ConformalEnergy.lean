@@ -1,5 +1,5 @@
 import DDG.Mesh.Orientation
-import DdgProofs.TriangleIntegral.Fem
+import DDG.FEM.Elements
 import DdgProofs.Bff.Curve
 import DDG.Laplace.Cotan
 

@@ -84,7 +84,7 @@ import DDG.Intrinsic.Trace
 import DDG.Intrinsic.Barycentric
 import DDG.Intrinsic.Move
 import DdgProofs.Delaunay.ODT
-import DdgProofs.IntrinsicApps.HeatFem
+import DDG.FEM.Heat
 import DDG.VectorFields.Holonomy
 import DdgProofs.Developability.Vec
 import DdgProofs.Developability.Basic

@@ -1,8 +1,8 @@
-import DdgProofs.TriangleIntegral.Basic
-import DdgProofs.TriangleIntegral.Fem
-import DdgProofs.TriangleIntegral.Tiling
-import DdgProofs.TriangleIntegral.Flux
-import DdgProofs.TriangleIntegral.BetaExp
+import DDG.FEM.TriangleIntegral
+import DDG.FEM.Elements
+import DDG.FEM.Tiling
+import DDG.FEM.Flux
+import DDG.FEM.BetaExp
 
 /-!
 # Integrals over a triangle

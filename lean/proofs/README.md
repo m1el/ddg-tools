@@ -687,7 +687,7 @@ numbered from corner `k`; corner `k` is opposite side `k + 1`.
 | `ic-recover-barycentric` | for an affine change `A` of barycentric coordinates and any `ξ` solving Eq. 15, Eq. 16 gives `A v`; `Σ ξ = 1`. | `recover_eq`, `recover_sum_xi`, `changeCoords_sum` |
 | `ic-tangent-length` | Eq. 5 (`‖w‖² = −Σ ℓ² w w` for `Σ w = 0`), the restatement of `cut-barycentric-length`; the face-split lengths. | `tangent_length_sq`, `split_length` |
 | `ic-transfer-normal-equations` | for symmetric PSD `M`, `g` minimizes Eq. 13 ⟺ Eq. 14 holds; unique if `P₀ᵀMP₀` is PD. | `transfer_minimizer_iff`, `transfer_normal_unique`, `transfer_energy_add` |
-| `ic-transfer-mass-identity` | the piece mass formula: the whole triangle gives `M₀/Area`, additive under splits and fans (as an integral over pieces that tile the input triangle: `ic-transfer-mass-integral`, `DdgProofs/TriangleIntegral/Tiling.lean`). | `pieceMass_one`, `pieceMass_split`, `pieceMass_split_edge`, `pieceMass_fan_apex` |
+| `ic-transfer-mass-identity` | the piece mass formula: the whole triangle gives `M₀/Area`, additive under splits and fans (as an integral over pieces that tile the input triangle: `ic-transfer-mass-integral`, `DDG/FEM/Tiling.lean`). | `pieceMass_one`, `pieceMass_split`, `pieceMass_split_edge`, `pieceMass_fan_apex` |
 
 ### Intrinsic Simplification (`crates/ddg-intrinsic-simplification`)
 

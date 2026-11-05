@@ -1,5 +1,5 @@
 import DDG.Intrinsic.Move
-import DdgProofs.TriangleIntegral.Tiling
+import DDG.FEM.Tiling
 
 /-!
 # Optimal Delaunay triangulations (Chen–Holst): the vertex update and the interpolation error
@@ -11,7 +11,7 @@ Sec. 4.2.1 of the preprint (barycentres at the boundary).
 
 Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area), `sqDist2`, `dist2` of
 `DDG/Geometry/Plane.lean` and `nsq`, `rot`, `toDual` of `DDG/Geometry/PlaneLemmas.lean`;
-the integrals are those of `DdgProofs/TriangleIntegral/Fem.lean` and `Tiling.lean`.
+the integrals are those of `DDG/FEM/Elements.lean` and `Tiling.lean`.
 
 * **`it-odt-update`** — `weightedBarycenter` is `A (a + b + c)/3` in the frame of the
   circumcentre vector of `DDG/Intrinsic/Move.lean`
@@ -46,8 +46,8 @@ Not covered here: what the minimizing triangulations are and the boundary rule a
 unfolds into such a star is SPEC N19.
 
 (Library step S2b: assembled from `DDG/Intrinsic/Move.lean` § `it-odt-update`,
-`DdgProofs/TriangleIntegral/Fem.lean` § `it-odt-interpolation-error` and
-`DdgProofs/TriangleIntegral/Tiling.lean` § `it-odt-energy`; the declarations keep their
+`DDG/FEM/Elements.lean` § `it-odt-interpolation-error` and
+`DDG/FEM/Tiling.lean` § `it-odt-energy`; the declarations keep their
 namespaces `DDG.Intrinsic` and `DDG.TriangleIntegral` until the renames of step S4.)
 
 Own definitions: `circumVec`, `odtEnergy`, `odtGradient`, `starArea`, `odtInterp`, `starAreaOf`,

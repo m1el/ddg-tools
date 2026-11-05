@@ -4,3 +4,5 @@ import DDG.Mesh
 import DDG.Laplace
 import DDG.Intrinsic
 import DDG.VectorFields
+import DDG.FEM
+import DDG.NormalCoords

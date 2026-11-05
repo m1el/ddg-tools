@@ -1,10 +1,10 @@
 import DdgOracle.IntegerCoords.Formulas
-import DdgProofs.IntegerCoords.Formulas
+import DDG.NormalCoords.Formulas
 
 /-!
 # Oracle bridges for the integer-coordinate formulas
 
-The library (`DdgProofs/IntegerCoords/Formulas.lean`, namespace `DDG.IntegerCoords.Formulas`) defines
+The library (`DDG/NormalCoords/Formulas.lean`, namespace `DDG.IntegerCoords.Formulas`) defines
 the pure integer formulas natively. This app module relates them to the oracle's `Ddg.IntegerCoords`
 definitions: `rfl` for every definition whose type mentions no oracle inductive, and a conversion map
 plus a commutation theorem for those that do (`Step`, `Pt`, `Region`, `Decoded`).

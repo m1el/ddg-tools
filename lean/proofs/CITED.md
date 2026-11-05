@@ -189,7 +189,7 @@ boundary).
   those of the Laplace–Beltrami problem under refinement.
 - **Reference.** Paper Sec. 5.1.3; MacNeal 1949; Pinkall, Polthier 1993.
 - **Why not formalized.** Convergence of finite elements on surfaces needs Sobolev spaces on a
-  surface, which Mathlib does not have. Proved instead (`DdgProofs/TriangleIntegral/Fem.lean`,
+  surface, which Mathlib does not have. Proved instead (`DDG/FEM/Elements.lean`,
   `[formula: cotan-fem-stiffness]`): `L` is the stiffness matrix of piecewise linear elements,
   as Lebesgue integrals over isometric layouts of the faces — `∫_T ∇λᵢ·∇λⱼ = −½ cot θ_k`,
   `∫_T |∇f|² = ½ Σ cot θ_k (f_i − f_j)²`, `Σ_f ∫_{T_f} |∇u|² = uᵀLu` — and the lumped mass is the
@@ -1113,7 +1113,7 @@ an earlier version with another title, were read).
   attributed to them are as Chen–Holst report them. Chen–Holst do **not** claim that Eq. 4.13
   decreases the energy for every `α`; the line search guards validity of the mesh, not descent.
 - **Proved instead** (formerly part of this entry, id `it-odt-energy`;
-  `DdgProofs/TriangleIntegral/Tiling.lean`, with `it-odt-interpolation-error` and `it-odt-update`):
+  `DDG/FEM/Tiling.lean`, with `it-odt-interpolation-error` and `it-odt-update`):
   Lemma 4.1 for a triangulation, as a Lebesgue integral over any tiling of `Ω` by the triangles
   (`IsTiling`: union `Ω`, disjoint interiors; boundaries of triangles are null sets),
   `E = Σ_T (|T|/3) Σ_i |x_i|² − ∫_Ω |x|² = (1/3) Σ_i |x_i|² |ω_i| − ∫_Ω |x|²
@@ -1169,10 +1169,10 @@ an earlier version with another title, were read).
 
 The applications of the Signpost paper's Sec. 5.1 (Steiner trees), 5.2 (finite elements) and 5.3
 (geodesic distance by the heat method) are in `crates/ddg-intrinsic-apps` (contract: its `SPEC.md`,
-decisions `N30`–`N39`). Machine-checked (`DdgProofs/IntrinsicApps/HeatFem.lean`): the closed forms
+decisions `N30`–`N39`). Machine-checked (`DDG/FEM/Heat.lean`): the closed forms
 of one triangle, `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-mass` (row sums and
 the bounds against the lumped mass; that its entries are the integrals `∫ φ_i φ_j` is proved in
-`DdgProofs/TriangleIntegral/Fem.lean`) and `app-fem-midpoint-subdivision`. The stiffness matrix is
+`DDG/FEM/Elements.lean`) and `app-fem-midpoint-subdivision`. The stiffness matrix is
 `cotan-fem-stiffness`, proved as the matrix of the integrals `∫ ∇φ_i·∇φ_j` in the same file; its
 convergence is `cotan-fem-convergence` above. Cited below: the Fermat point of a triangle. Not covered: the Steiner
 heuristic as a whole (Smith, Lee, Liebman 1981, a heuristic with no optimality statement), the
@@ -1281,7 +1281,7 @@ machine-checked: the entries below, and everything about rounding and the solver
   the area-coordinate rule as a Lebesgue integral over the triangle, and the slice formula that
   `monomial_integral` evaluates, `∫_T b₀^{e₀} b₁^{e₁} b₂^{e₂} e^{iΩ b_c} = 2|T| q! r!/(q + r + 1)! ·
   ∫₀¹ s^{e_c} (1 − s)^{q+r+1} e^{iΩs} ds` (`q = e_{c+1}`, `r = e_{c+2}`); and
-  (`DdgProofs/TriangleIntegral/BetaExp.lean`, `[formula: app-vector-beta-exp]`) the two ways
+  (`DDG/FEM/BetaExp.lean`, `[formula: app-vector-beta-exp]`) the two ways
   `beta_exp` evaluates the one-dimensional integral, exactly: the power series with its running
   product and a geometric bound on the tail after any term `K` with `|Ω| < K + 1`, and for `Ω ≠ 0`
   the recurrence `K_k = (e^{iΩ} − k K_{k−1})/(iΩ)` with the binomial expansion of `(1 − s)^m`.
@@ -1312,10 +1312,10 @@ machine-checked: the entries below, and everything about rounding and the solver
   `‖H_S^{1/2} J_S‖²_S + ‖H f‖²_{ω_S}`); the paper's supplement, Sec. 2 (which prints
   `A_ijk²` in place of `H_T²`; SPEC N47).
 - **Why not formalized.** Sobolev spaces and Clément interpolation are not in Mathlib in the
-  needed form. Proved (`DdgProofs/TriangleIntegral/Fem.lean`, `[formula: app-amr-element-norms]`):
+  needed form. Proved (`DDG/FEM/Elements.lean`, `[formula: app-amr-element-norms]`):
   the element norms as `estimate` evaluates them, `‖R‖²_T = (|T|/6)(Σ r_i² + Σ_{i<j} r_i r_j)` and
   `‖R − R̄‖²_T = ‖R‖²_T − |T| R̄²` for linear `R` with corner values `r`, `R̄` their mean (which is
-  the mean of `R` over `T`); and the jump terms (`DdgProofs/TriangleIntegral/Flux.lean`,
+  the mean of `R` over `T`); and the jump terms (`DDG/FEM/Flux.lean`,
   `[formula: app-amr-edge-flux]`): `side_flux` is `ℓ ∇u·ν` and the two fluxes of an interior side
   add up to `ℓ` times the jump of the normal derivative. The side term `ℓ_S ‖J_S‖²_S = (ℓ_S J_S)²`
   for a constant jump (a line integral) is not stated.

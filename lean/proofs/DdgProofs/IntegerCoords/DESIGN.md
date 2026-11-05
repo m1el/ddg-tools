@@ -34,7 +34,7 @@ changing them.
 
 Cited (`CITED.md`, "Integer Coordinates"): `ic-normal-isotopy`, `ic-refinement-termination`,
 `ic-dijkstra-ball`, `ic-mollify`, `ic-vertex-removal-delta` (open). `ic-transfer-mass-integral` is
-proved as an integral over pieces that tile the input triangle (`DdgProofs/TriangleIntegral/Tiling.lean`).
+proved as an integral over pieces that tile the input triangle (`DDG/FEM/Tiling.lean`).
 
 ## The face model (`FaceModel.lean`)
 

@@ -608,7 +608,7 @@ solution difference of 0 at the input vertices.
   model; of `vector/eigen.rs`: the Jacobi eigensolver of the Rayleigh–Ritz step.
 - Formula tags (`scripts/check-formulas.sh`): `app-heat-gradient`, `app-heat-divergence`,
   `app-fem-galerkin-mass`, `app-fem-midpoint-subdivision` are machine-checked
-  (`lean/proofs/DdgProofs/IntrinsicApps/HeatFem.lean`), as are `app-vector-face-holonomy`,
+  (`lean/ddg/DDG/FEM/Heat.lean`), as are `app-vector-face-holonomy`,
   `app-vector-fd-connection-laplacian`, `app-amr-map-distortion`
   (`lean/ddg/DDG/VectorFields/Holonomy.lean`); `app-steiner-fermat-point`,
   `app-vector-transport`, `app-vector-fem-connection-laplacian`, `app-vector-singularity-index`,
