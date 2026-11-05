@@ -397,6 +397,8 @@ fn record_move(moves: &mut Vec<(u32, u32)>, from: u32, to: u32) {
 impl Complex {
     /// The complex of a `TriMesh`: same vertices, edges, faces and halfedges, with the same
     /// ids; no edge constrained.
+    ///
+    /// [formula: it-complex-from-mesh]
     pub fn from_tri_mesh(mesh: &TriMesh) -> Complex {
         let n_halfedges = mesh.n_halfedges();
         Complex {
@@ -442,6 +444,8 @@ impl Complex {
     }
 
     /// Euler characteristic `χ = V − E + F`. No operation changes it.
+    ///
+    /// [formula: it-complex-euler]
     pub fn euler_characteristic(&self) -> i64 {
         self.n_vertices() as i64 - self.n_edges() as i64 + self.n_faces() as i64
     }
@@ -754,6 +758,8 @@ impl Complex {
     /// the flip is geometrically possible is for the representation to decide first.
     ///
     /// [`flip_refusal`]: Self::flip_refusal
+    ///
+    /// [formula: it-complex-flip]
     ///
     /// # Errors
     /// [`IntrinsicError::IndexOutOfRange`] and [`IntrinsicError::FlipRefused`]; the complex is

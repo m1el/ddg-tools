@@ -707,9 +707,17 @@ Delaunay criteria (angles, cotangents, empty circumcircle of the layout), the fl
 non-Delaunay edge with its corner-angle bookkeeping, Rippa's identity for one diamond
 (`it-rippa-diamond`), two potentials that decrease strictly with each such flip
 (`it-delaunay-potential`), and the encroachment criterion of Ruppert's rule
-(`it-encroachment-angle`). **Not**
-machine-checked: the eight results below; the
-halfedge data structure and that the Rust code applies the formulas to the right elements; a
+(`it-encroachment-angle`). The combinatorics of a triangulation and of the flip
+(`DdgProofs/Delaunay/{Complex,Flip,Metric,FromTriMesh}.lean`, ids `it-complex-*`): a triangulated
+surface as gluing data (the halfedge Δ-complex of `Complex`, with self-loops, multiple edges and
+faces glued to themselves), its vertices, edges, boundary and Euler characteristic; that the edge
+flip as `Complex::flip_edge` computes it keeps all of these, every vertex's class and cone angle,
+a faithful vertex labelling and a metric (for a strictly convex diamond), and that two flips give
+an isomorphic complex; Gauss–Bonnet on a closed one. **Not**
+machine-checked: the eight results below; that the Rust arrays (`faces`, `twin`,
+`halfedge_edge`, `edge_halfedge`, `vertex_halfedge`) are those of the gluing data (by reading, the
+`it-complex-*` tags and `Complex::check`) and that the Rust code applies the formulas to the right
+elements; a
 tracing query as a whole (only one step is covered), edge traces and their checks (SPEC N7, N8),
 the overlay (N12), point queries (N11), refinement and its termination (N1, N4, N14), the
 simplicial export (N15); the shape limit of flips and every tolerance (N5, N6); anything about
@@ -1453,9 +1461,24 @@ rotation (numerical devices); anything about rounding.
   University Press, 2001, Ch. 2 (edge flips), as cited by the SPEC; the same operation on
   surfaces is the flip of `it-delaunay-flip-termination` above (signpost paper Sec. 3.3).
 - **Source check.** Not re-read for this entry; the statement is elementary combinatorics.
-- **Why not formalized.** Combinatorics of the mesh data structure, which `lean/proofs` does not
-  model; the Rust code rebuilds and validates the mesh after every remeshing pass
-  (`TriMesh::new`, SPEC §5.3), so a violation is an error, never a silent corruption.
+- **Proved (trimmed, 2026-11-05).** The topological part, for the flip on gluing data
+  (`DdgProofs/Delaunay/Flip.lean`, `it-complex-flip`) and hence for an oriented mesh whose vertex
+  stars are single fans (`DdgProofs/Delaunay/FromTriMesh.lean`, `it-complex-from-mesh`): the flip
+  of an interior edge whose two triangles are distinct keeps the vertices (each with its class, also
+  when `i, j, k, l` coincide), the number of edges and faces, the boundary halfedges with their end
+  points, the Euler characteristic, the orientation, and the property that every vertex star is one
+  fan (`Gluing.flipVertexEquiv`, `flip_vertexOf_surviving`, `flip_diamond_vertices`,
+  `flip_eulerChar`, `flip_numBoundary`, `Faithful.flip`, `TriMesh.eulerChar_toGluing`).
+- **Still cited.** That the flipped mesh is again *simplicial* in the sense of `TriMesh`
+  (no face with a repeated vertex, no two edges with the same end points: this is where `k ≠ l`
+  and "`kl` is not an edge" enter) and satisfies `TriMesh.Manifold` (every edge in at most two
+  faces, every boundary vertex on exactly two boundary edges), i.e. that the remesher's re-listing
+  of the two faces as `(a, q, p)`, `(q, b, p)` is the gluing-data flip up to the rotation of the
+  faces. The boundary half of `Manifold` needs that every boundary fan has one boundary halfedge,
+  which is not proved in the gluing model.
+- **Why not formalized.** The remaining step is the simplicial bookkeeping between the two models;
+  the Rust code rebuilds and validates the mesh after every remeshing pass (`TriMesh::new`, SPEC
+  §5.3), so a violation is an error, never a silent corruption.
 - **What depends on it.** That legal flips are never refused by the validation.
 
 ### [formula: dev-link-condition] An edge collapse keeps a 2-manifold iff the link condition holds

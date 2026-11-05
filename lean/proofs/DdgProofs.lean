@@ -46,6 +46,10 @@ import DdgProofs.Delaunay.Local
 import DdgProofs.Delaunay.Rippa
 import DdgProofs.Delaunay.Potential
 import DdgProofs.Delaunay.Encroachment
+import DdgProofs.Delaunay.Complex
+import DdgProofs.Delaunay.Flip
+import DdgProofs.Delaunay.Metric
+import DdgProofs.Delaunay.FromTriMesh
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric
