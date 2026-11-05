@@ -35,9 +35,9 @@ crossing `j` itself belongs to neither half: `A` ends at `m`.
 
 set_option linter.unusedSimpArgs false
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord faceValid nPlus)
+open DDG.NormalCoords.Formulas (cornerCoord faceValid nPlus)
 
 namespace SplitAtCrossing
 
@@ -247,4 +247,4 @@ theorem split_at_crossing_merge {n' c' : Fin 3 → ℕ} (hc : Admissible n c) (h
 
 end SplitAtCrossing
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

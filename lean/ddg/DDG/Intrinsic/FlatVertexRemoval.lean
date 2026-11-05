@@ -31,7 +31,7 @@ at `i` computed from the lengths (law of cosines).
   boundary vertex (angle sum `π`) of degree `d ≥ 3` has an interior spoke whose quadrilateral is
   **strictly** convex (`FlatHalfStar.exists_flippable`): every inner corner is below `π` (the
   angles at `i` sum to `π`), and the `d − 1` outer corners sum to less than `(d − 1)π`. Unlike the
-  interior case (the cross star, `IntegerCoords.cross_star_no_strict`) strict convexity, the flip
+  interior case (the cross star, `DDG.Intrinsic.cross_star_no_strict`) strict convexity, the flip
   condition of SPEC §3.2, always holds for one of them. In a simplicial half-star the flip of spoke
   `i j_k` adds the edge `j_{k−1} j_{k+1}`, not incident to `i`: the degree drops by one, so
   repeated flips reach degree 2 (the combinatorial half, as for Thm. D.1; Δ-complexes:
@@ -278,10 +278,10 @@ end BoundaryMerge
 
 /-- **Interior, simplicial: Thm. D.1** (`ic-vertex-removal`): a flat star of degree `≥ 4` has a
 spoke whose quadrilateral is convex (corners at most `π`). Not strictly, in general
-(`IntegerCoords.cross_star_no_strict`).
+(`DDG.Intrinsic.cross_star_no_strict`).
 
 [formula: iem-flip-to-degree-three] -/
-theorem flatStar_exists_flippable {n : ℕ} (S : IntegerCoords.FlatStar n) (hn : 3 ≤ n) :
+theorem flatStar_exists_flippable {n : ℕ} (S : DDG.Intrinsic.FlatStar n) (hn : 3 ≤ n) :
     ∃ k, S.inner k ≤ π ∧ S.outer k ≤ π :=
   S.exists_flippable hn
 

@@ -36,8 +36,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 /-- The six coefficients of the height function `Q` (Eq. 18; `a_{nm}` multiplies `sⁿ tᵐ`). -/
 structure Coef where
@@ -494,8 +492,8 @@ theorem torus_frame {ns v : V3} (hn : ns ⬝ᵥ ns = 1) (hv : v ≠ 0) (hnv : ns
   have hnorm : vnorm (ns ⨯₃ v) = vnorm v := by
     unfold vnorm; rw [cross_dot_cross, hn, hnv]; ring_nf
   have hne : ns ⨯₃ v ≠ 0 := by
-    intro h; apply hv; rw [← vnorm_eq_zero_iff, ← hnorm, h, RC.vnorm_zero]
-  refine ⟨hnorm, RC.unit_dot_self hne, ?_, ?_, ?_⟩
+    intro h; apply hv; rw [← vnorm_eq_zero_iff, ← hnorm, h, DDG.vnorm_zero]
+  refine ⟨hnorm, DDG.unit_dot_self hne, ?_, ?_, ?_⟩
   · rw [smul_dotProduct, dotProduct_comm, dot_self_cross, smul_zero]
   · rw [smul_dotProduct, dotProduct_comm, dot_cross_self, smul_zero]
   · intro h; rw [hnorm]; exact max_eq_left h

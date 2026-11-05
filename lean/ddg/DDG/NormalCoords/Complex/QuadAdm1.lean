@@ -3,9 +3,9 @@ import DDG.NormalCoords.Complex.Quad
 /-! # The new face `F₁` of the flip is valid (`Complex/Quad.lean`); a file of its own so that the
 two case analyses build in parallel. -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (faceValid)
+open DDG.NormalCoords.Formulas (faceValid)
 
 namespace Glue
 
@@ -37,4 +37,4 @@ lemma Hyp.model1 (h : Hyp nA nB m) (hD : Dkl nA nB ≤ 1) :
 
 end Glue
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

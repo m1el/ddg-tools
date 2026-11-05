@@ -180,7 +180,7 @@ theorem cornerAngleAt_toGluing (f : F) :
   refine ⟨?_, ?_, ?_⟩ <;>
   · simp only [Gluing.cornerAngleAt, halfedgeLength, Halfedge.next, Halfedge.prev, angleA,
       angleB, angleC, la, lb, lc]
-    exact Intrinsic.cornerAngle_swap _ _ _
+    exact DDG.cornerAngle_swap _ _ _
 
 omit [Fintype F] in
 theorem angleAt_eq_sum_corners (hM : M.Valid) (f : F) (v : V) :

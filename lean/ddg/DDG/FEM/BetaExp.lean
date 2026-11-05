@@ -34,7 +34,7 @@ noncomputable section
 
 namespace DDG
 
-namespace TriangleIntegral
+namespace FEM
 
 open intervalIntegral
 open scoped Nat
@@ -310,6 +310,6 @@ theorem norm_tail_betaExp_le (p m : ℕ) (Ω : ℝ) (K : ℕ) (hρ : |Ω| / (K +
         hsum.tsum_le_tsum (fun j => by rw [add_comm j]; exact hdom j) hgeom.summable
     _ = ‖betaExpTerm p m Ω K‖ * (ρ / (1 - ρ)) := hgeom.tsum_eq
 
-end TriangleIntegral
+end FEM
 
 end DDG

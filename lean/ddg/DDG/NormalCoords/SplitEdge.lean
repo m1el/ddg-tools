@@ -19,9 +19,9 @@ chord `mc`, `ic-chord-interleave`), which is `sepCount n c before 2` (`FaceSplit
   `clamp(before − c_a, 0, e_c)` (the Rust `emanating_before`).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord emanating nPlus faceValid)
+open DDG.NormalCoords.Formulas (cornerCoord emanating nPlus faceValid)
 
 /-- **`ic-split-crossed-edge`: the new edge to the opposite corner of a split side.** For a valid
 face (admissible corner counts `c`) and a split point after `before ≤ n_0` crossings of side `0`,
@@ -66,4 +66,4 @@ theorem emanatingBefore_eq {n c : Fin 3 → ℕ} (before : ℕ) :
     ext s; simp only [Finset.mem_filter, Finset.mem_range]; omega
   rw [this, Finset.card_range]
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

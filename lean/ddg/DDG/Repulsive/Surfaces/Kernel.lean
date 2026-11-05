@@ -30,9 +30,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff
-  dot_self_nonneg unit_dot_self proj hasDerivAt_dot hasDerivAt_cross hasDerivAt_vnorm
-  hasDerivAt_unit orth_dot orth_vnorm vnorm_smul vnorm_neg)
 
 /-- The tangent-point kernel `K(X, N; Y) = |N·(X − Y)|^α / |X − Y|^β` (paper Eq. 16, in the
 reference's two-exponent form).

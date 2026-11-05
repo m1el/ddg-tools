@@ -35,7 +35,6 @@ noncomputable section
 
 namespace DDG
 
-namespace RC
 
 open Matrix Real Filter Topology
 
@@ -307,6 +306,5 @@ theorem tangent_dot_deriv (h : 0 < len (Γ t) ep I) :
 
 end curveDeriv
 
-end RC
 
 end DDG

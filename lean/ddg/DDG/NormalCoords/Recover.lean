@@ -21,7 +21,7 @@ App. A (Eq. 15–16).
 * **`ic-tangent-length`** — Eq. 5: a tangent vector with barycentric components `w`
   (`w_i + w_j + w_k = 0`) has `‖w‖² = −ℓ²_ij w_i w_j − ℓ²_jk w_j w_k − ℓ²_ki w_k w_i`
   (`tangent_length_sq`). This is the same statement as `cut-barycentric-length`
-  (`DDG.Cuts.baryLength2_eq_norm_sq`), restated in the paper's form; the new edge lengths of a
+  (`DDG.baryLength2_eq_norm_sq`), restated in the paper's form; the new edge lengths of a
   face split, `ℓ_im = ‖v − e_i‖`, are its value at `w = v − e_i` (`split_length`), which is what
   `it-point-distances` (`DDG.Intrinsic.cornerDistances_eq_baryLength`) proves for the
   intrinsic crate's `cornerDistances` on the unfolded triangle; here it is stated for any three
@@ -30,7 +30,7 @@ App. A (Eq. 15–16).
 
 namespace DDG
 
-namespace IntegerCoords
+namespace NormalCoords
 
 open Finset
 
@@ -98,7 +98,7 @@ variable {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E]
 theorem tangent_length_sq (Pi Pj Pk : E) {wi wj wk : ℝ} (h : wi + wj + wk = 0) :
     ‖wi • Pi + wj • Pj + wk • Pk‖ ^ 2 =
       -(‖Pi - Pj‖ ^ 2 * wi * wj) - ‖Pj - Pk‖ ^ 2 * wj * wk - ‖Pk - Pi‖ ^ 2 * wk * wi := by
-  rw [← Cuts.baryLength2_eq_norm_sq Pi Pj Pk h]
+  rw [← DDG.baryLength2_eq_norm_sq Pi Pj Pk h]
   unfold baryLength2
   ring
 
@@ -116,6 +116,6 @@ theorem split_length (Pi Pj Pk : E) {vi vj vk : ℝ} (h : vi + vj + vk = 1) :
 
 end Lengths
 
-end IntegerCoords
+end NormalCoords
 
 end DDG

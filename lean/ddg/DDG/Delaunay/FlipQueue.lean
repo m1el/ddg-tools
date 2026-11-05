@@ -83,8 +83,8 @@ noncomputable def angleSumCriterion (τ : ℝ) : FlipCriterion where
     cornerCot a b c + cornerCot a d e < 0 ∧ τ < (cornerAngle a b c - π) + cornerAngle a d e
   not_locallyDelaunay hk hl h := not_isLocallyDelaunay_iff.2 ((pi_lt_iff_cot_neg hk hl).2 h.1)
   mirror a b c d e := by
-    rw [cornerCot_swap a e d, cornerCot_swap a c b, Intrinsic.cornerAngle_swap a e d,
-      Intrinsic.cornerAngle_swap a c b]
+    rw [cornerCot_swap a e d, cornerCot_swap a c b, DDG.cornerAngle_swap a e d,
+      DDG.cornerAngle_swap a c b]
     constructor <;> rintro ⟨h1, h2⟩ <;> exact ⟨by linarith, by linarith⟩
 
 /-- The Rust test `DelaunayCriterion::CotanWeight { tolerance: τ }`: the cotan weight

@@ -24,8 +24,6 @@ noncomputable section
 
 namespace DDG
 
-namespace Intrinsic
-
 open Real
 
 theorem dist2_comm (p q : ℝ × ℝ) : dist2 p q = dist2 q p := by
@@ -80,6 +78,8 @@ theorem two_mul_triArea_dist2 (i j k : ℝ × ℝ) :
   unfold triArea
   congr 3
   ring
+
+namespace Intrinsic
 
 /-! ## The quarter turn, the squared norm, a vector as a linear form -/
 

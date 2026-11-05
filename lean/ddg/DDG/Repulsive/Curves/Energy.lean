@@ -25,8 +25,8 @@ over the ordered pairs `𝒫` of edges without a common vertex (`Disj`).
 * `rc-gradient-identities`: `Σ_v g_v = 0`, `Σ_v γ_v × g_v = 0`, `Σ_v γ_v · g_v = (2 + α − β) Ê`
   for that gradient (`energy_gradient_identities`), from invariance and homogeneity along explicit
   curves (the rotation curves and their derivatives are those of `dev-gradient-invariance`,
-  `Dev.rotX`, `Dev.rot_hasDerivAt`); and the same for any Fréchet gradient on `Fin n` vertices,
-  through `Dev.sum_grad_eq_zero`, `Dev.sum_cross_grad_eq_zero` (`energy_gradient_identities_fderiv`).
+  `DDG.rotX`, `DDG.rot_hasDerivAt`); and the same for any Fréchet gradient on `Fin n` vertices,
+  through `DDG.sum_grad_eq_zero`, `DDG.sum_cross_grad_eq_zero` (`energy_gradient_identities_fderiv`).
 
 The evaluation order of SPEC §3.2 (rows `R_I`, per-edge endpoint derivatives `G_{I,a}`) only
 regroups the finite sums of `energyGrad`.
@@ -386,25 +386,25 @@ end differential
 
 section identities
 
-/-- The rotation `Dev.rotX s` as a matrix. -/
+/-- The rotation `DDG.rotX s` as a matrix. -/
 def rotMatX (s : ℝ) : Matrix (Fin 3) (Fin 3) ℝ := !![1, 0, 0; 0, cos s, -sin s; 0, sin s, cos s]
-/-- The rotation `Dev.rotY s` as a matrix. -/
+/-- The rotation `DDG.rotY s` as a matrix. -/
 def rotMatY (s : ℝ) : Matrix (Fin 3) (Fin 3) ℝ := !![cos s, 0, sin s; 0, 1, 0; -sin s, 0, cos s]
-/-- The rotation `Dev.rotZ s` as a matrix. -/
+/-- The rotation `DDG.rotZ s` as a matrix. -/
 def rotMatZ (s : ℝ) : Matrix (Fin 3) (Fin 3) ℝ := !![cos s, -sin s, 0; sin s, cos s, 0; 0, 0, 1]
 
-theorem rotX_eq (s : ℝ) (p : V3) : Dev.rotX s p = rotMatX s *ᵥ p := by
+theorem rotX_eq (s : ℝ) (p : V3) : DDG.rotX s p = rotMatX s *ᵥ p := by
   ext i
-  fin_cases i <;> simp [Dev.rotX, rotMatX, mulVec, dotProduct, Fin.sum_univ_three]
+  fin_cases i <;> simp [DDG.rotX, rotMatX, mulVec, dotProduct, Fin.sum_univ_three]
   ring
 
-theorem rotY_eq (s : ℝ) (p : V3) : Dev.rotY s p = rotMatY s *ᵥ p := by
+theorem rotY_eq (s : ℝ) (p : V3) : DDG.rotY s p = rotMatY s *ᵥ p := by
   ext i
-  fin_cases i <;> simp [Dev.rotY, rotMatY, mulVec, dotProduct, Fin.sum_univ_three]
+  fin_cases i <;> simp [DDG.rotY, rotMatY, mulVec, dotProduct, Fin.sum_univ_three]
 
-theorem rotZ_eq (s : ℝ) (p : V3) : Dev.rotZ s p = rotMatZ s *ᵥ p := by
+theorem rotZ_eq (s : ℝ) (p : V3) : DDG.rotZ s p = rotMatZ s *ᵥ p := by
   ext i
-  fin_cases i <;> simp [Dev.rotZ, rotMatZ, mulVec, dotProduct, Fin.sum_univ_three]
+  fin_cases i <;> simp [DDG.rotZ, rotMatZ, mulVec, dotProduct, Fin.sum_univ_three]
   ring
 
 theorem rotMatX_orth (s : ℝ) : (rotMatX s)ᵀ * rotMatX s = 1 := by
@@ -420,37 +420,37 @@ theorem rotMatZ_orth (s : ℝ) : (rotMatZ s)ᵀ * rotMatZ s = 1 := by
     simp [rotMatZ, Matrix.mul_apply, Fin.sum_univ_three] <;> nlinarith [sin_sq_add_cos_sq s]
 
 theorem hasDerivAt_rotX (p : V3) :
-    HasDerivAt (fun s => Dev.rotX s p) ![0, -p 2, p 1] 0 := by
+    HasDerivAt (fun s => DDG.rotX s p) ![0, -p 2, p 1] 0 := by
   rw [hasDerivAt_pi]
   intro c
   fin_cases c
-  · simpa [Dev.rotX] using hasDerivAt_const (0 : ℝ) (p 0)
-  · simpa [Dev.rotX] using (Dev.rot_hasDerivAt (p 1) (p 2)).1
-  · simpa [Dev.rotX] using (Dev.rot_hasDerivAt (p 1) (p 2)).2
+  · simpa [DDG.rotX] using hasDerivAt_const (0 : ℝ) (p 0)
+  · simpa [DDG.rotX] using (DDG.rot_hasDerivAt (p 1) (p 2)).1
+  · simpa [DDG.rotX] using (DDG.rot_hasDerivAt (p 1) (p 2)).2
 
 theorem hasDerivAt_rotY (p : V3) :
-    HasDerivAt (fun s => Dev.rotY s p) ![p 2, 0, -p 0] 0 := by
+    HasDerivAt (fun s => DDG.rotY s p) ![p 2, 0, -p 0] 0 := by
   rw [hasDerivAt_pi]
   intro c
   fin_cases c
-  · simpa [Dev.rotY] using (Dev.rotY_hasDerivAt (p 0) (p 2)).1
-  · simpa [Dev.rotY] using hasDerivAt_const (0 : ℝ) (p 1)
-  · simpa [Dev.rotY] using (Dev.rotY_hasDerivAt (p 0) (p 2)).2
+  · simpa [DDG.rotY] using (DDG.rotY_hasDerivAt (p 0) (p 2)).1
+  · simpa [DDG.rotY] using hasDerivAt_const (0 : ℝ) (p 1)
+  · simpa [DDG.rotY] using (DDG.rotY_hasDerivAt (p 0) (p 2)).2
 
 theorem hasDerivAt_rotZ (p : V3) :
-    HasDerivAt (fun s => Dev.rotZ s p) ![-p 1, p 0, 0] 0 := by
+    HasDerivAt (fun s => DDG.rotZ s p) ![-p 1, p 0, 0] 0 := by
   rw [hasDerivAt_pi]
   intro c
   fin_cases c
-  · simpa [Dev.rotZ] using (Dev.rot_hasDerivAt (p 0) (p 1)).1
-  · simpa [Dev.rotZ] using (Dev.rot_hasDerivAt (p 0) (p 1)).2
-  · simpa [Dev.rotZ] using hasDerivAt_const (0 : ℝ) (p 2)
+  · simpa [DDG.rotZ] using (DDG.rot_hasDerivAt (p 0) (p 1)).1
+  · simpa [DDG.rotZ] using (DDG.rot_hasDerivAt (p 0) (p 1)).2
+  · simpa [DDG.rotZ] using hasDerivAt_const (0 : ℝ) (p 2)
 
 omit [Fintype E] [DecidableEq V] in
 /-- **Invariance and homogeneity ⇒ the gradient identities**, for a function `F` of the positions
 whose derivative along every differentiable motion through `γ` is `Σ_v g_v·Γ'_v`: invariant under
 translations and orthogonal maps, homogeneous of degree `p` ⇒ `Σ g = 0`, `Σ γ × g = 0`,
-`Σ γ·g = p F(γ)` (the curves are the translations, `Dev.rotX/Y/Z` and `s ↦ (1+s)γ`).
+`Σ γ·g = p F(γ)` (the curves are the translations, `DDG.rotX/Y/Z` and `s ↦ (1+s)γ`).
 
 [formula: rc-gradient-identities] -/
 theorem gradient_identities_of_curves {F : (V → V3) → ℝ} {γ g : V → V3} {p : ℝ}
@@ -476,14 +476,14 @@ theorem gradient_identities_of_curves {F : (V → V3) → ℝ} {γ g : V → V3}
       (by simp) (fun v => by simpa using ((hasDerivAt_id (0 : ℝ)).smul_const
         (Pi.single c (1 : ℝ) : V3)).const_add (γ v)) (fun s => htr _)
     simpa [dotProduct, Pi.single_apply, Finset.sum_apply] using this
-  · have dX := const0 (fun s v => Dev.rotX s (γ v)) (fun v => ![0, -γ v 2, γ v 1])
-      (by funext v; ext i; fin_cases i <;> simp [Dev.rotX]) (fun v => hasDerivAt_rotX (γ v))
+  · have dX := const0 (fun s v => DDG.rotX s (γ v)) (fun v => ![0, -γ v 2, γ v 1])
+      (by funext v; ext i; fin_cases i <;> simp [DDG.rotX]) (fun v => hasDerivAt_rotX (γ v))
       (fun s => by simp only [rotX_eq]; exact hrot _ (rotMatX_orth s))
-    have dY := const0 (fun s v => Dev.rotY s (γ v)) (fun v => ![γ v 2, 0, -γ v 0])
-      (by funext v; ext i; fin_cases i <;> simp [Dev.rotY]) (fun v => hasDerivAt_rotY (γ v))
+    have dY := const0 (fun s v => DDG.rotY s (γ v)) (fun v => ![γ v 2, 0, -γ v 0])
+      (by funext v; ext i; fin_cases i <;> simp [DDG.rotY]) (fun v => hasDerivAt_rotY (γ v))
       (fun s => by simp only [rotY_eq]; exact hrot _ (rotMatY_orth s))
-    have dZ := const0 (fun s v => Dev.rotZ s (γ v)) (fun v => ![-γ v 1, γ v 0, 0])
-      (by funext v; ext i; fin_cases i <;> simp [Dev.rotZ]) (fun v => hasDerivAt_rotZ (γ v))
+    have dZ := const0 (fun s v => DDG.rotZ s (γ v)) (fun v => ![-γ v 1, γ v 0, 0])
+      (by funext v; ext i; fin_cases i <;> simp [DDG.rotZ]) (fun v => hasDerivAt_rotZ (γ v))
       (fun s => by simp only [rotZ_eq]; exact hrot _ (rotMatZ_orth s))
     simp only [dotProduct, Fin.sum_univ_three, Matrix.cons_val_zero, Matrix.cons_val_one,
       Matrix.cons_val_two, Matrix.head_cons, Matrix.tail_cons] at dX dY dZ
@@ -529,16 +529,16 @@ theorem energy_gradient_identities {α β : ℝ} {γ : V → V3} {ep : E → Fin
     (fun _ hc => energy_smul α β γ ep hc)
 
 /-- **The gradient identities for a Fréchet gradient**, through `dev-gradient-invariance`
-(`Dev.sum_grad_eq_zero`, `Dev.sum_cross_grad_eq_zero`) on `Fin n` vertices: if `Ê` has a Fréchet
+(`DDG.sum_grad_eq_zero`, `DDG.sum_cross_grad_eq_zero`) on `Fin n` vertices: if `Ê` has a Fréchet
 derivative at `γ` represented by `g`, then `Σ g = 0` and `Σ γ × g = 0`.
 
 [formula: rc-gradient-identities] -/
 theorem energy_gradient_identities_fderiv {n : ℕ} {E : Type*} [Fintype E] {α β : ℝ}
-    {ep : E → Fin 2 → Fin n} {γ : Dev.Positions n} {E' : Dev.Positions n →L[ℝ] ℝ}
-    (hE : HasFDerivAt (fun γ => energy α β γ ep) E' γ) (g : Dev.Positions n)
+    {ep : E → Fin 2 → Fin n} {γ : DDG.Positions n} {E' : DDG.Positions n →L[ℝ] ℝ}
+    (hE : HasFDerivAt (fun γ => energy α β γ ep) E' γ) (g : DDG.Positions n)
     (hg : ∀ δ, E' δ = ∑ v, ∑ c, g v c * δ v c) :
     ∑ v, g v = 0 ∧ ∑ v, crossProduct (γ v) (g v) = 0 := by
-  refine ⟨Dev.sum_grad_eq_zero hE g hg fun a s => ?_, Dev.sum_cross_grad_eq_zero hE g hg ?_ ?_ ?_⟩
+  refine ⟨DDG.sum_grad_eq_zero hE g hg fun a s => ?_, DDG.sum_cross_grad_eq_zero hE g hg ?_ ?_ ?_⟩
   · have : γ + s • (fun _ => a) = fun v => γ v + s • a := by funext v; simp
     rw [this]; exact energy_translate α β γ ep (s • a)
   · intro s; simp only [rotX_eq]; exact energy_orth α β γ ep (rotMatX_orth s)

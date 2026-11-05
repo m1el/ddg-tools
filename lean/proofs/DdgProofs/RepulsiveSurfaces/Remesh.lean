@@ -20,7 +20,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3)
 
 /-! ## Circumcenter -/
 

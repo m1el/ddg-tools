@@ -7,8 +7,8 @@ import Mathlib.Algebra.Order.Group.Int
 "Integer Coordinates for Intrinsic Geometry Processing", Gillespie, Sharp, Crane, ACM TOG 40(6), 2021
 ("the paper"; Supp. = its supplement). Written from the paper's text (Sec. 2.3–3.7, Supp. B), not from
 the authors' code. Everything here is exact integer arithmetic (`Int`, `Nat`); there is no rounding.
-This is the library's native copy (namespace `DDG.IntegerCoords.Formulas`) of the oracle's
-`DdgOracle/IntegerCoords/Formulas.lean`; the app bridge `DdgProofs/Oracle/NormalCoords.lean` proves them equal by `rfl`.
+This is the library's native copy (namespace `DDG.NormalCoords.Formulas`) of the oracle's
+`DdgOracle/NormalCoords/Formulas.lean`; the app bridge `DdgProofs/Oracle/NormalCoords.lean` proves them equal by `rfl`.
 
 **Face convention** (the halfedge convention of the workspace, `h = 3f + k` runs from corner `k` to
 corner `k + 1`). A face has corners `0, 1, 2` and sides `0, 1, 2`; side `k` runs from corner `k` to
@@ -18,11 +18,11 @@ and side `k` (which starts at it); the side opposite corner `k` is side `k + 1`.
 modulo 3 (`next`, `prev`).
 
 **Never `/` on a negative integer** (SPEC I14): the numerator of Eq. 1 is never negative
-(`DDG.IntegerCoords.cornerNumerator_nonneg`), and `cornerCoord?` refuses an odd one instead
+(`DDG.NormalCoords.cornerNumerator_nonneg`), and `cornerCoord?` refuses an odd one instead
 of rounding it.
 -/
 
-namespace DDG.IntegerCoords.Formulas
+namespace DDG.NormalCoords.Formulas
 
 /-! ## Signs (Sec. 2.3) -/
 
@@ -165,7 +165,7 @@ side counts `n` and corner coordinates `c` (`n`, `c` as the positive parts): the
 (from corner `k`) cut corner `k` and reach side `k + 2` in reverse order, the last `c_{k+1}` cut
 corner `k + 1` and reach side `k + 1` in reverse order, and the ones between come from the opposite
 corner `k + 2`. This is the pairing of Alg. 9 in both of its cases (case 2 is the one where the
-middle block is not empty); it is the only valid one (`DDG.IntegerCoords.FaceModel.eq_canon`). -/
+middle block is not empty); it is the only valid one (`DDG.NormalCoords.FaceModel.eq_canon`). -/
 def partner (n c : Nat → Nat) (k p : Nat) : Pt :=
   if p < c k then .side (prev k) (n (prev k) - 1 - p)
   else if p + c (next k) < n k then .corner (prev k)
@@ -238,14 +238,14 @@ def faceSplit? (n0 n1 n2 : Int) (R : Region) : Option (Nat × Nat × Nat) :=
   | some d =>
     if R.valid d then some (splitCount d R 0, splitCount d R 1, splitCount d R 2) else none
 
-end DDG.IntegerCoords.Formulas
+end DDG.NormalCoords.Formulas
 
 /-!
 # Integer coordinates: arithmetic of the formulas (tier A)
 
 `crates/ddg-integer-coords/SPEC.md` §2.2–2.4, §4.2, §4.5, §9.2; the paper Sec. 2.3, 2.5, 3.2, 3.4.
-All statements are about the oracle's integer definitions (`lean/oracle/DdgOracle/IntegerCoords/
-Formulas.lean`, namespace `DDG.IntegerCoords.Formulas`), i.e. about the code the oracle runs.
+All statements are about the oracle's integer definitions (`lean/oracle/DdgOracle/NormalCoords/
+Formulas.lean`, namespace `DDG.NormalCoords.Formulas`), i.e. about the code the oracle runs.
 
 Face convention: side `k` runs from corner `k` to corner `k + 1`; corner `k` is opposite side
 `k + 1`. A face `(n₀, n₁, n₂)` has the corner coordinates
@@ -271,15 +271,15 @@ Face convention: side `k` runs from corner `k` to corner `k + 1`; corner `k` is 
   crossing (`splitEdgeNormal_eq`).
 
 Corrections to the paper / SPEC found here: Eq. 3's first term is printed `c^{jk}_l`, which names no
-corner; it is `c^{ji}_l` (corner `l` of `jil`), which is what `DDG.IntegerCoords.Formulas.flipDoubled`
+corner; it is `c^{ji}_l` (corner `l` of `jil`), which is what `DDG.NormalCoords.Formulas.flipDoubled`
 computes. Eq. 6 is `max(n_ki, n_jk, 0)` (SPEC §4.5 drops the `0`, wrong when both are `−1`).
 -/
 
 namespace DDG
 
-namespace IntegerCoords
+namespace NormalCoords
 
-open DDG.IntegerCoords.Formulas
+open DDG.NormalCoords.Formulas
 
 /-! ## Signs -/
 
@@ -536,6 +536,6 @@ theorem splitEdgeNormal_eq {n0 n1 n2 : ℤ} (hv : faceValid n0 n1 n2 = true) (h0
     Bool.and_eq_true, beq_iff_eq] at *
   omega
 
-end IntegerCoords
+end NormalCoords
 
 end DDG

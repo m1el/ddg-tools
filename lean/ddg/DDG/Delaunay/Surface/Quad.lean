@@ -27,7 +27,6 @@ noncomputable section
 
 namespace DDG.Delaunay.Surface
 
-open DDG.Intrinsic (dist2_comm)
 open DDG.Delaunay.Planar
 open Set Filter Topology
 

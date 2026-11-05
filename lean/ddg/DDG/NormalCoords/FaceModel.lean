@@ -34,7 +34,7 @@ Validity (`FaceModel.Valid`) is purely combinatorial:
 Results.
 
 * **The structure theorem** (`FaceModel.Valid.eq_canon`): every valid model is the canonical one
-  (`canon n c`, the oracle's `DDG.IntegerCoords.Formulas.partner`) for corner counts `c` that are admissible
+  (`canon n c`, the oracle's `DDG.NormalCoords.Formulas.partner`) for corner counts `c` that are admissible
   (`Admissible`): on side `k` the first `c k` crossings cut corner `k` and reach side `k + 2` in
   reverse order, the last `c (k+1)` cut corner `k + 1` and reach side `k + 1` in reverse order, the
   ones between come from corner `k + 2`; at most one corner has arcs to its opposite side, and then
@@ -55,9 +55,9 @@ Results.
 
 namespace DDG
 
-namespace IntegerCoords
+namespace NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus)
+open DDG.NormalCoords.Formulas (cornerNumerator cornerCoord emanating nPlus)
 
 /-! ## Boundary points and interleaving -/
 
@@ -191,11 +191,11 @@ lemma Valid.disj (hM : M.Valid) {k k' : Fin 3} {p p' : ℕ} {x y : Pt} (hp : p <
 
 end FaceModel
 
-end IntegerCoords
+end NormalCoords
 
 end DDG
 
-namespace DDG.IntegerCoords.FaceModel
+namespace DDG.NormalCoords.FaceModel
 
 variable {M : FaceModel}
 
@@ -245,9 +245,9 @@ def IsL (M : FaceModel) (k : Fin 3) (p : ℕ) : Prop := ∃ q, M.partner k p = .
 /-- Crossing `p` of side `k` cuts corner `k + 1` (its partner is on side `k + 1`). -/
 def IsR (M : FaceModel) (k : Fin 3) (p : ℕ) : Prop := ∃ q, M.partner k p = .side (k + 1) q
 
-end DDG.IntegerCoords.FaceModel
+end DDG.NormalCoords.FaceModel
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 /-! ### Initial segments and strictly decreasing maps of natural numbers -/
 
@@ -314,14 +314,14 @@ lemma anti_ge {f : ℕ → ℕ} {a L : ℕ} (hanti : ∀ p p', p < p' → p' < a
     have h2 := hanti p (p + 1) (by omega) (by omega)
     omega
 
-end DDG.IntegerCoords
+end DDG.NormalCoords
 
-namespace DDG.IntegerCoords.FaceModel
+namespace DDG.NormalCoords.FaceModel
 
 variable {M : FaceModel}
 
 /-- The position of a boundary point on its side (`0` for a corner). -/
-def _root_.DDG.IntegerCoords.Pt.pos : Pt → ℕ
+def _root_.DDG.NormalCoords.Pt.pos : Pt → ℕ
   | .corner _ => 0
   | .side _ p => p
 
@@ -481,9 +481,9 @@ theorem Valid.eq_canon (hM : M.Valid) :
   · exact hmid k p (by omega) h2
   · exact hfin k p hp (by omega)
 
-end DDG.IntegerCoords.FaceModel
+end DDG.NormalCoords.FaceModel
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 lemma canon_normal {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) (p : ℕ) (hp : p < n k) :
     (∃ q, q < n (k + 2) ∧ canon n c k p = .side (k + 2) q) ∨
@@ -554,11 +554,11 @@ lemma canon_disjoint {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) (p :
 theorem canon_valid {n c : Fin 3 → ℕ} (h : Admissible n c) : (⟨n, canon n c⟩ : FaceModel).Valid :=
   ⟨canon_normal h, canon_symm h, canon_disjoint h⟩
 
-end DDG.IntegerCoords
+end DDG.NormalCoords
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
+open DDG.NormalCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
 
 /-! ## Counting arcs by type: Eq. 1 and 2 -/
 
@@ -679,7 +679,7 @@ theorem Valid.counts (hM : M.Valid) (k : Fin 3) :
   · rw [hem]; exact hco.2
 
 /-- Admissible corner counts are Eq. 1 of the side counts. -/
-lemma _root_.DDG.IntegerCoords.Admissible.c_eq {n c : Fin 3 → ℕ} (hc : Admissible n c)
+lemma _root_.DDG.NormalCoords.Admissible.c_eq {n c : Fin 3 → ℕ} (hc : Admissible n c)
     (k : Fin 3) : (c k : ℤ) = cornerCoord (n (k + 1)) (n k) (n (k + 2)) := (hc.coords k).1.symm
 
 /-- **`ic-face-decoding`, uniqueness (Fig. 11).** Two valid face models with the same side counts
@@ -773,16 +773,16 @@ end FaceModel
 /-! ## The oracle's decoding and pairing (Alg. 9) -/
 
 /-- A boundary point as the oracle writes it. -/
-def Pt.toOracle : Pt → DDG.IntegerCoords.Formulas.Pt
+def Pt.toOracle : Pt → DDG.NormalCoords.Formulas.Pt
   | .corner k => .corner k.val
   | .side k p => .side k.val p
 
 /-- The oracle's `decode?` of a valid face returns `n⁺` and Eq. 1 per side and corner. -/
 lemma decode?_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = true) :
-    ∃ d, DDG.IntegerCoords.Formulas.decode? n0 n1 n2 = some d ∧
-      d.n = (fun k => (nPlus (DDG.IntegerCoords.Formulas.side n0 n1 n2 k)).toNat) ∧
-      d.c = (fun k => (DDG.IntegerCoords.Formulas.faceCorner n0 n1 n2 k).toNat) := by
-  unfold DDG.IntegerCoords.Formulas.decode?
+    ∃ d, DDG.NormalCoords.Formulas.decode? n0 n1 n2 = some d ∧
+      d.n = (fun k => (nPlus (DDG.NormalCoords.Formulas.side n0 n1 n2 k)).toNat) ∧
+      d.c = (fun k => (DDG.NormalCoords.Formulas.faceCorner n0 n1 n2 k).toNat) := by
+  unfold DDG.NormalCoords.Formulas.decode?
   simp only [h, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
   split <;> exact ⟨_, rfl, rfl, rfl⟩
 
@@ -790,9 +790,9 @@ lemma decode?_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = true) :
 model, the oracle decodes the side counts and its `partner` returns the other end of every arc.
 [formula: ic-face-decoding] -/
 theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
-    ∃ d, DDG.IntegerCoords.Formulas.decode? (M.n 0) (M.n 1) (M.n 2) = some d ∧
+    ∃ d, DDG.NormalCoords.Formulas.decode? (M.n 0) (M.n 1) (M.n 2) = some d ∧
       ∀ (k : Fin 3) (p : ℕ), p < M.n k →
-        DDG.IntegerCoords.Formulas.partner d.n d.c k.val p = (M.partner k p).toOracle := by
+        DDG.NormalCoords.Formulas.partner d.n d.c k.val p = (M.partner k p).toOracle := by
   have hv := (exists_valid_iff M.n).1 ⟨M, rfl, hM⟩
   obtain ⟨d, hd, hdn, hdc⟩ := decode?_of_faceValid hv
   refine ⟨d, hd, fun k p hp => ?_⟩
@@ -804,23 +804,23 @@ theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
   have hc2 := hc.c_eq 2
   simp only [l1, l2, l3, l4, l5, l6] at hc0 hc1 hc2
   have dn0 : d.n 0 = M.n 0 := by
-    rw [hdn]; simp [DDG.IntegerCoords.Formulas.side, np]
+    rw [hdn]; simp [DDG.NormalCoords.Formulas.side, np]
   have dn1 : d.n 1 = M.n 1 := by
-    rw [hdn]; simp [DDG.IntegerCoords.Formulas.side, np]
+    rw [hdn]; simp [DDG.NormalCoords.Formulas.side, np]
   have dn2 : d.n 2 = M.n 2 := by
-    rw [hdn]; simp [DDG.IntegerCoords.Formulas.side, np]
+    rw [hdn]; simp [DDG.NormalCoords.Formulas.side, np]
   have dc0 : d.c 0 = c 0 := by
-    rw [hdc]; simp [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.side, DDG.IntegerCoords.Formulas.next,
-      DDG.IntegerCoords.Formulas.prev]; omega
+    rw [hdc]; simp [DDG.NormalCoords.Formulas.faceCorner, DDG.NormalCoords.Formulas.side, DDG.NormalCoords.Formulas.next,
+      DDG.NormalCoords.Formulas.prev]; omega
   have dc1 : d.c 1 = c 1 := by
-    rw [hdc]; simp [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.side, DDG.IntegerCoords.Formulas.next,
-      DDG.IntegerCoords.Formulas.prev]; omega
+    rw [hdc]; simp [DDG.NormalCoords.Formulas.faceCorner, DDG.NormalCoords.Formulas.side, DDG.NormalCoords.Formulas.next,
+      DDG.NormalCoords.Formulas.prev]; omega
   have dc2 : d.c 2 = c 2 := by
-    rw [hdc]; simp [DDG.IntegerCoords.Formulas.faceCorner, DDG.IntegerCoords.Formulas.side, DDG.IntegerCoords.Formulas.next,
-      DDG.IntegerCoords.Formulas.prev]; omega
+    rw [hdc]; simp [DDG.NormalCoords.Formulas.faceCorner, DDG.NormalCoords.Formulas.side, DDG.NormalCoords.Formulas.next,
+      DDG.NormalCoords.Formulas.prev]; omega
   rw [e k p hp]
   rcases fin3_cases k with rfl | rfl | rfl <;>
-    simp only [DDG.IntegerCoords.Formulas.partner, canon, DDG.IntegerCoords.Formulas.next, DDG.IntegerCoords.Formulas.prev,
+    simp only [DDG.NormalCoords.Formulas.partner, canon, DDG.NormalCoords.Formulas.next, DDG.NormalCoords.Formulas.prev,
       l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two, dn0, dn1, dn2,
       dc0, dc1, dc2] <;> norm_num <;> split_ifs <;> rfl
 
@@ -829,7 +829,7 @@ theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
 /-- Where Alg. 1's step sends the curve, as a boundary point of the face it enters through side
 `s`: `ik→` is side `s + 1` (counted from `i`, corner `s + 1`), `kj→` is side `s + 2` (counted from
 `k`, corner `s + 2`), and the vertex `k` is corner `s + 2`. -/
-def stepPt (s : Fin 3) : DDG.IntegerCoords.Formulas.Step → Pt
+def stepPt (s : Fin 3) : DDG.NormalCoords.Formulas.Step → Pt
   | .toIK p => .side (s + 1) p.toNat
   | .toKJ p => .side (s + 2) p.toNat
   | .vertex => .corner (s + 2)
@@ -846,7 +846,7 @@ through that crossing: crossing `p` of `ik→` (Fig. 7 case 3), crossing `n_kj +
 (case 1), or the vertex `k` (case 2). [formula: ic-trace-step] -/
 theorem FaceModel.Valid.traceStep_eq {M : FaceModel} (hM : M.Valid) (s : Fin 3) (p : ℕ)
     (hp : p < M.n s) :
-    stepPt s (DDG.IntegerCoords.Formulas.traceStep (M.n s) (M.n (s + 1)) (M.n (s + 2)) p) =
+    stepPt s (DDG.NormalCoords.Formulas.traceStep (M.n s) (M.n (s + 1)) (M.n (s + 2)) p) =
       M.partner s (M.n s - 1 - p) := by
   obtain ⟨c, hc, e⟩ := hM.eq_canon
   have hci : cornerCoord (M.n (s + 2)) (M.n s) (M.n (s + 1)) = c (s + 1) := by
@@ -861,8 +861,8 @@ theorem FaceModel.Valid.traceStep_eq {M : FaceModel} (hM : M.Valid) (s : Fin 3) 
   rw [fin3_add_one_add_one] at a1
   rw [fin3_add_two_add_one] at a2
   rw [e s _ (by omega)]
-  unfold DDG.IntegerCoords.Formulas.traceStep canon
+  unfold DDG.NormalCoords.Formulas.traceStep canon
   rw [hci, hcj, np, np]
   split_ifs <;> simp only [stepPt] <;> first | omega | rfl | (congr 1; omega)
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

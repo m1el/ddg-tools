@@ -263,7 +263,7 @@ theorem dist2_bary_eq_baryLength (v0 v1 v2 : ℝ × ℝ) {x0 x1 x2 y0 y1 y2 : �
     dist2 (y0 * v0.1 + y1 * v1.1 + y2 * v2.1, y0 * v0.2 + y1 * v1.2 + y2 * v2.2)
         (x0 * v0.1 + x1 * v1.1 + x2 * v2.1, x0 * v0.2 + x1 * v1.2 + x2 * v2.2) =
       baryLength (dist2 v0 v1) (dist2 v1 v2) (dist2 v2 v0) (x0 - y0) (x1 - y1) (x2 - y2) := by
-  have key := Cuts.baryLength_eq_dist (toC v0) (toC v1) (toC v2) hx hy
+  have key := DDG.baryLength_eq_dist (toC v0) (toC v1) (toC v2) hx hy
   rw [dist2_eq_dist_toC v0 v1, dist2_eq_dist_toC v1 v2, dist2_eq_dist_toC v2 v0, key,
     dist2_eq_dist_toC, dist_comm]
   congr 1 <;>
@@ -378,18 +378,18 @@ theorem alg6_distance_on_edge {lij : ℝ} (hl : 0 ≤ lij) {bi bj : ℝ} (hb : b
     (hj : 0 ≤ bj) (ljk lki : ℝ) :
     baryLength lij ljk lki (bi - 1) bj 0 = lij * bj := by
   have e : baryLength2 lij ljk lki (bi - 1) bj 0 = (lij * bj) ^ 2 := by
-    rw [Cuts.baryLength2_eq, show bi - 1 = -bj by linarith]
+    rw [DDG.baryLength2_eq, show bi - 1 = -bj by linarith]
     ring
-  rw [Cuts.baryLength_eq, e, max_eq_right (sq_nonneg _), sqrt_sq (mul_nonneg hl hj)]
+  rw [DDG.baryLength_eq, e, max_eq_right (sq_nonneg _), sqrt_sq (mul_nonneg hl hj)]
 
 /-- … and from the corner `j` it is `ℓ_ij b_i`. -/
 theorem alg6_distance_on_edge' {lij : ℝ} (hl : 0 ≤ lij) {bi bj : ℝ} (hb : bi + bj = 1)
     (hi : 0 ≤ bi) (ljk lki : ℝ) :
     baryLength lij ljk lki bi (bj - 1) 0 = lij * bi := by
   have e : baryLength2 lij ljk lki bi (bj - 1) 0 = (lij * bi) ^ 2 := by
-    rw [Cuts.baryLength2_eq, show bj - 1 = -bi by linarith]
+    rw [DDG.baryLength2_eq, show bj - 1 = -bi by linarith]
     ring
-  rw [Cuts.baryLength_eq, e, max_eq_right (sq_nonneg _), sqrt_sq (mul_nonneg hl hi)]
+  rw [DDG.baryLength_eq, e, max_eq_right (sq_nonneg _), sqrt_sq (mul_nonneg hl hi)]
 
 /-- **`edgeSplitLengths` are the distances of the point on the side to its two
 ends**: `cornerDistances` with `b₂ = 0` gives `ℓ₀₁ b₁` from corner `0` and `ℓ₀₁ b₀` from corner
@@ -620,10 +620,10 @@ theorem circumcenter_equidistant {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
     intro x hx
     rw [hx, ← hR2, max_eq_right (sq_nonneg _), sqrt_sq hR]
   rw [cornerDistances_eq_baryLength h.rotate.rotate (circumcenterBary_sum h),
-    Cuts.baryLength_eq, Cuts.baryLength_eq, Cuts.baryLength_eq]
+    DDG.baryLength_eq, DDG.baryLength_eq, DDG.baryLength_eq]
   refine Prod.ext ?_ (Prod.ext ?_ ?_)
   · apply root
-    rw [Cuts.baryLength2_eq, circumcenterBary_eq]
+    rw [DDG.baryLength2_eq, circumcenterBary_eq]
     dsimp only
     refine circum_aux0 hs.ne' (div_mul_cancel₀ _ hs.ne') (div_mul_cancel₀ _ hs.ne')
       (div_mul_cancel₀ _ hs.ne') ?_
@@ -631,7 +631,7 @@ theorem circumcenter_equidistant {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
     simp only [circumWeight_eq]
     ring
   · apply root
-    rw [Cuts.baryLength2_eq, circumcenterBary_eq]
+    rw [DDG.baryLength2_eq, circumcenterBary_eq]
     dsimp only
     refine circum_aux1 hs.ne' (div_mul_cancel₀ _ hs.ne') (div_mul_cancel₀ _ hs.ne')
       (div_mul_cancel₀ _ hs.ne') ?_
@@ -639,7 +639,7 @@ theorem circumcenter_equidistant {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
     simp only [circumWeight_eq]
     ring
   · apply root
-    rw [Cuts.baryLength2_eq, circumcenterBary_eq]
+    rw [DDG.baryLength2_eq, circumcenterBary_eq]
     dsimp only
     refine circum_aux2 hs.ne' (div_mul_cancel₀ _ hs.ne') (div_mul_cancel₀ _ hs.ne')
       (div_mul_cancel₀ _ hs.ne') ?_

@@ -30,7 +30,7 @@ changes nothing. The tree must be clean unless --allow-dirty (so a bad move is o
 import argparse, difflib, os, re, subprocess, sys
 
 PACKAGES = {'DdgProofs': 'lean/proofs', 'DDG': 'lean/ddg', 'DdgOracle': 'lean/oracle'}
-IDCH = r"[\w'!?À-￿]"   # identifier characters (rough; includes unicode letters/subscripts)
+IDCH = r"[\w'!?₀-₉ₐ-ₜᵢ-ᵪ]"   # identifier characters (letters, digits, subscripts; NOT other symbols such as ⟨)
 
 
 def sh(repo, *cmd):
@@ -70,6 +70,7 @@ def main():
     ap.add_argument('--diff', action='store_true')
     ap.add_argument('--names-in', default='md,rs,sh,py')
     ap.add_argument('--allow-dirty', action='store_true')
+    ap.add_argument('--exclude', default='', help='comma-separated path prefixes (relative to the repo) whose files are left untouched, e.g. lean/oracle/')
     a = ap.parse_args()
     repo = os.path.abspath(a.repo)
 
@@ -129,6 +130,8 @@ def main():
         if rel == 'scripts/lean-move.py':
             continue
         if ext not in ('.lean', '.md', '.rs', '.sh', '.py', '.toml'):
+            continue
+        if any(p and rel.startswith(p) for p in a.exclude.split(',')):
             continue
         full = os.path.join(repo, rel if not a.dry_run else next((s for s, d in file_moves.items() if d == rel), rel))
         try:

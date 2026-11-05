@@ -9,7 +9,7 @@ import DDG.Laplace.Cotan
 # Finite element integrals over a triangle
 
 The integrals behind the finite element matrices of the library, as Lebesgue integrals over a
-triangle `T` of the plane (`DDG/FEM/TriangleIntegral.lean`), with `λᵢ = bary p i` the hat
+triangle `T` of the plane (`DDG/FEM/FEM.lean`), with `λᵢ = bary p i` the hat
 functions of the corners and `A = area p` the Heron area of the Euclidean side lengths.
 
 * **`app-fem-galerkin-mass`** — `∫_T λᵢ λⱼ = A/6` (`i = j`) and `A/12` (`i ≠ j`)
@@ -42,7 +42,7 @@ noncomputable section
 
 namespace DDG
 
-namespace TriangleIntegral
+namespace FEM
 
 open MeasureTheory Set Real
 open scoped Nat
@@ -483,13 +483,13 @@ theorem integral_amr_osc (hD : D p ≠ 0) (r : Fin 3 → ℝ) :
   · ring
   · exact i1.sub i2
 
-end TriangleIntegral
+end FEM
 
 /-! ## Meshes: the integrals of all faces, each laid out isometrically -/
 
 namespace TriMesh
 
-open TriangleIntegral Matrix
+open FEM Matrix
 
 variable {V F : Type*} (M : TriMesh V F)
 
@@ -521,7 +521,7 @@ theorem exists_isLayout (hM : M.Valid) : ∃ P, M.IsLayout P := by
   · rw [sideLen_zero]
     simpa only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two, Matrix.head_cons,
       Matrix.tail_cons] using h12
-  · rw [sideLen_one, Intrinsic.dist2_comm]
+  · rw [sideLen_one, DDG.dist2_comm]
     simpa only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two, Matrix.head_cons,
       Matrix.tail_cons] using h02
   · rw [sideLen_two]

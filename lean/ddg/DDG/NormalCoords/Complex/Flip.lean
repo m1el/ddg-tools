@@ -36,17 +36,17 @@ halfedges `j→k` (old `(f, s+1)`) and `i→l` (old `(g, t+1)`) move with their 
 
 set_option linter.unusedSectionVars false
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal roundaboutUpdate)
+open DDG.NormalCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal roundaboutUpdate)
 
 /-! ## Rotating a face -/
 
 lemma faceValid_rot (a b c : ℤ) : faceValid a b c = faceValid b c a := by
   simp only [faceValid]
-  generalize (DDG.IntegerCoords.Formulas.cornerNumerator b a c % 2 == 0) = x
-  generalize (DDG.IntegerCoords.Formulas.cornerNumerator c b a % 2 == 0) = y
-  generalize (DDG.IntegerCoords.Formulas.cornerNumerator a c b % 2 == 0) = z
+  generalize (DDG.NormalCoords.Formulas.cornerNumerator b a c % 2 == 0) = x
+  generalize (DDG.NormalCoords.Formulas.cornerNumerator c b a % 2 == 0) = y
+  generalize (DDG.NormalCoords.Formulas.cornerNumerator a c b % 2 == 0) = z
   cases x <;> cases y <;> cases z <;> rfl
 
 lemma cc_rot (n : Fin 3 → ℕ) (r k : Fin 3) : cc (fun k => n (k + r)) k = cc n (k + r) := by
@@ -924,4 +924,4 @@ theorem flip_roundabouts (hC : C.Valid) (D : C.FlipAt) (hn : -1 ≤ D.nkl) {L : 
 
 end Cx
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

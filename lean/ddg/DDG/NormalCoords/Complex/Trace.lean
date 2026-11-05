@@ -30,7 +30,7 @@ The proofs use only that the step map is injective and commutes with reversal
 involutions (`DESIGN.md` item 2).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 namespace Cx
 
@@ -337,4 +337,4 @@ theorem Valid.trace_terminates_of_noClosed [Fintype F] [DecidableEq F] (hC : C.V
 
 end Cx
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

@@ -32,7 +32,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg)
 
 /-! ## The energy with the leaf rule -/
 

@@ -45,9 +45,9 @@ The walk back past inserted vertices on the input edge (Alg. 3 lines 1–5, the 
 given by the realization.
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord emanating nPlus nMinus identifyIndex)
+open DDG.NormalCoords.Formulas (cornerCoord emanating nPlus nMinus identifyIndex)
 
 namespace Cx
 
@@ -130,7 +130,7 @@ lemma Valid.admissible (hC : C.Valid) (f : F) : Admissible (C.fn f) (cc (C.fn f)
 `c_{k+1}, …, c_{k+1} + e_k − 1` (Fig. 11; the Rust `first_emanating`), with `c` = Eq. 1. -/
 lemma Valid.emList_eq (hC : C.Valid) (c : F × Fin 3) :
     C.emList c = List.range' (cc (C.fn c.1) (c.2 + 1))
-      (IntegerCoords.em (C.fn c.1) (cc (C.fn c.1)) c.2) := by
+      (NormalCoords.em (C.fn c.1) (cc (C.fn c.1)) c.2) := by
   have ha := hC.admissible c.1
   have h1 := ha.le (c.2 + 1)
   rw [fin3_add_one_add_one] at h1
@@ -140,14 +140,14 @@ lemma Valid.emList_eq (hC : C.Valid) (c : F × Fin 3) :
       p < C.fn c.1 (c.2 + 1) - cc (C.fn c.1) (c.2 + 2)))]
   · rw [filter_range_Ico _ _ _ (by omega) (by simp only [fn]; omega)]
     congr 1
-    unfold IntegerCoords.em; omega
+    unfold NormalCoords.em; omega
   · intro p hp
     simp only [List.mem_range] at hp
     rw [decide_eq_decide, FaceModel.canon_corner]
     omega
 
 lemma Valid.emc_eq (hC : C.Valid) (c : F × Fin 3) :
-    C.emc c = IntegerCoords.em (C.fn c.1) (cc (C.fn c.1)) c.2 := by
+    C.emc c = NormalCoords.em (C.fn c.1) (cc (C.fn c.1)) c.2 := by
   rw [emc, hC.emList_eq, List.length_range']
 
 lemma Valid.emList_get (hC : C.Valid) (c : F × Fin 3) {q : ℕ} (hq : q < C.emc c) :
@@ -161,7 +161,7 @@ lemma emanating_nPlus (a b c : ℤ) : emanating a b c = emanating (nPlus a) (nPl
 lemma cornerCoord_nPlus (a b c : ℤ) :
     cornerCoord a b c = cornerCoord (nPlus a) (nPlus b) (nPlus c) := by
   have h : ∀ x : ℤ, nPlus (nPlus x) = nPlus x := fun x => by simp only [nPlus]; omega
-  simp only [cornerCoord, DDG.IntegerCoords.Formulas.cornerNumerator, emanating, h]
+  simp only [cornerCoord, DDG.NormalCoords.Formulas.cornerNumerator, emanating, h]
 
 lemma np_cast (s : F × Fin 3) : ((C.np s : ℕ) : ℤ) = nPlus (C.n s) := by
   simp only [np, nPlus]; omega
@@ -222,7 +222,7 @@ theorem Valid.alg4_index (hC : C.Valid) (L : Labels F) (c : F × Fin 3) {q : ℕ
     (((C.emList c)[q]'hq : ℕ) : ℤ) = ((L.r c + C.nm c + q : ℕ) : ℤ) + C.n c - L.r c := by
   rw [hC.emList_get c hq]
   have ha := hC.admissible c.1
-  have hpos : 0 < IntegerCoords.em (C.fn c.1) (cc (C.fn c.1)) c.2 := by
+  have hpos : 0 < NormalCoords.em (C.fn c.1) (cc (C.fn c.1)) c.2 := by
     rw [← hC.emc_eq]; omega
   have h0 := ha.2.1 c.2 hpos
   have h2 := (ha.2.2 c.2 hpos).2
@@ -232,7 +232,7 @@ theorem Valid.alg4_index (hC : C.Valid) (L : Labels F) (c : F × Fin 3) {q : ℕ
   have hnp := np_cast (C := C) c
   have : cc (C.fn c.1) (c.2 + 1) = C.np c := by
     have e : C.fn c.1 c.2 = C.np c := rfl
-    unfold IntegerCoords.em at h2
+    unfold NormalCoords.em at h2
     rw [fin3_add_two_add_one, fin3_add_two_add_two] at h2
     omega
   rw [this]
@@ -251,4 +251,4 @@ theorem RoundaboutsOK.lab_next {L : Labels F} (hL : C.RoundaboutsOK L) {c c' : F
 
 end Cx
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

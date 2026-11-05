@@ -28,8 +28,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 /-! ## Inequalities in `ℝ³` and `ℝ²` -/
 
@@ -463,7 +461,7 @@ theorem torus_contact_normal {c u ns : V3} (hu : u ⬝ᵥ u = 1) (hn : ns ⬝ᵥ
     rw [hv, hz, show (ρ - (ρ - σ * r)) ^ 2 + (0 : ℝ) ^ 2 = (σ * r) ^ 2 by ring,
       Real.sqrt_sq_eq_abs, abs_mul, habsσ, one_mul, abs_of_pos hr]
   have hvne : (o - c) ⨯₃ u ≠ 0 := by
-    intro h; have := congrArg vnorm h; rw [hv, RC.vnorm_zero] at this; linarith
+    intro h; have := congrArg vnorm h; rw [hv, DDG.vnorm_zero] at this; linarith
   have hdne : (vnorm ((o - c) ⨯₃ u) - (ρ - σ * r)) ^ 2 + ((o - c) ⬝ᵥ u) ^ 2 ≠ 0 := by
     rw [hv, hz]; ring_nf; rw [hσ]; positivity
   refine (torus_sdf_gradient hu _ _ hvne hdne).congr_fderiv ?_

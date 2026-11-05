@@ -7,8 +7,8 @@ import DDG.Geometry.Vec3
 ACM TOG 45(4), Article 53, 2026 ("the paper"); contract `crates/ddg-points-as-tori/SPEC.md`
 ("SPEC", formula ids `pat-…`, §13).
 
-Vectors are `RC.V3 = Fin 3 → ℝ` with `dotProduct` (`⬝ᵥ`), `crossProduct` (`⨯₃`) and the Euclidean
-norm `RC.vnorm v = √(v·v)`. Gradients are Fréchet derivatives `HasFDerivAt f (dualOf ∇f) x`, where
+Vectors are `DDG.V3 = Fin 3 → ℝ` with `dotProduct` (`⬝ᵥ`), `crossProduct` (`⨯₃`) and the Euclidean
+norm `DDG.vnorm v = √(v·v)`. Gradients are Fréchet derivatives `HasFDerivAt f (dualOf ∇f) x`, where
 `dualOf a` is the linear form `h ↦ a·h` (Mathlib's norm on `Fin 3 → ℝ` is the sup norm; the
 derivative does not depend on the choice of norm).
 
@@ -24,8 +24,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 /-! ## Linear forms and gradients -/
 

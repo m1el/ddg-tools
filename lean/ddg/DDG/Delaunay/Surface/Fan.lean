@@ -25,7 +25,6 @@ noncomputable section
 
 namespace DDG.Delaunay.Surface
 
-open DDG.Intrinsic (dist2_comm)
 open DDG.Delaunay.Planar
 open Set Real
 open scoped Classical
@@ -254,7 +253,7 @@ theorem exit_le [Fintype F] [Nonempty F] (h : IsChord s p d c t₀ t₁ kin kout
   have h1 := dist2_ge_mul_sin hs
   rw [h.angle] at h1
   have h2 := sinMin_le s (c.1, pivotIdx kin kout)
-  nlinarith [DDG.Intrinsic.dist2_nonneg (c.tri s (pivotIdx kin kout)) (ray p d t₁)]
+  nlinarith [DDG.dist2_nonneg (c.tri s (pivotIdx kin kout)) (ray p d t₁)]
 
 /-- The chord bound towards the entry point. -/
 theorem entry_le [Fintype F] [Nonempty F] (h : IsChord s p d c t₀ t₁ kin kout) (hd : d ≠ 0) :
@@ -265,7 +264,7 @@ theorem entry_le [Fintype F] [Nonempty F] (h : IsChord s p d c t₀ t₁ kin kou
   have h1 := dist2_ge_mul_sin hs
   rw [angleAt_comm, h.angle, dist2_comm (ray p d t₁)] at h1
   have h2 := sinMin_le s (c.1, pivotIdx kin kout)
-  nlinarith [DDG.Intrinsic.dist2_nonneg (c.tri s (pivotIdx kin kout)) (ray p d t₀)]
+  nlinarith [DDG.dist2_nonneg (c.tri s (pivotIdx kin kout)) (ray p d t₀)]
 
 end IsChord
 
@@ -371,7 +370,7 @@ theorem numCross_le [Fintype F] [Nonempty F] {c : Cell F} (C : Chain s p d c 0) 
   obtain ⟨lamN, hlamN⟩ : ∃ f : ℕ → ℝ, ∀ j,
       f j = dist2 (ray p d (st (j + 1)).t₀) (ray p d (st (j + 1)).t₁) := ⟨_, fun _ => rfl⟩
   have hlam : ∀ i : Fin n, 0 ≤ lamN i.1 := fun i => by
-    rw [hlamN]; exact DDG.Intrinsic.dist2_nonneg _ _
+    rw [hlamN]; exact DDG.dist2_nonneg _ _
   -- the fan bound
   have hrun : ∀ i j : Fin n, i ≤ j → (∀ m, i ≤ m → m ≤ j → vN m.1 = vN i.1) →
       j.1 + 1 - i.1 ≤ blockBound s := by
@@ -456,7 +455,7 @@ theorem numCross_le [Fintype F] [Nonempty F] {c : Cell F} (C : Chain s p d c 0) 
   have hfc := fan_count (fun i : Fin n => vN i.1) (fun i : Fin n => lamN i.1) (switchCost_pos s)
     hlam hrun hsw
   -- the total length of the chords
-  have hD := DDG.Intrinsic.dist2_nonneg p (p + d)
+  have hD := DDG.dist2_nonneg p (p + d)
   have hΛ : ∑ i : Fin n, lamN i.1 ≤ dist2 p (ray p d 1) := by
     rw [Fin.sum_univ_eq_sum_range (fun j => lamN j) n, ray_one]
     have e : ∀ j ∈ Finset.range n,

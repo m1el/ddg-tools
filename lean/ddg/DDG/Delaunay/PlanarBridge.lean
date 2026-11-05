@@ -44,8 +44,8 @@ theorem isTriangle_dist2 {i j k : ℝ × ℝ} (h : sda i j k ≠ 0) :
   have h' : sda k i j ≠ 0 := by
     have : sda k i j = sda i j k := by unfold sda; ring
     rwa [this]
-  have t := Intrinsic.isTriangle_of_sda_ne h'
-  rw [Intrinsic.dist2_comm k i] at t
+  have t := DDG.isTriangle_of_sda_ne h'
+  rw [DDG.dist2_comm k i] at t
   exact ⟨by linarith [t.lt_a], by linarith [t.lt_c], by linarith [t.lt_b]⟩
 
 /-- **The cotangent of a corner in coordinates**: `cot θ_k = ⟨i − k, j − k⟩ / |sda(i,j,k)|`. -/
@@ -54,7 +54,7 @@ theorem cornerCot_dist2 {i j k : ℝ × ℝ} (h : sda i j k ≠ 0) :
       ((i.1 - k.1) * (j.1 - k.1) + (i.2 - k.2) * (j.2 - k.2)) / |sda i j k| := by
   have hA : 4 * triArea (dist2 i j) (dist2 i k) (dist2 j k) = 2 * |sda i j k| := by
     have e := abs_sda_eq_two_mul_triArea k i j
-    rw [Intrinsic.dist2_comm k i, show sda k i j = sda i j k by unfold sda; ring,
+    rw [DDG.dist2_comm k i, show sda k i j = sda i j k by unfold sda; ring,
       triArea_swap] at e
     linarith
   have hα : 0 < |sda i j k| := abs_pos.2 h

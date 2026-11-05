@@ -24,7 +24,7 @@ its vertex values:
 * `E_C(a, b) ≥ 0`, and `E_C(a, b) = 0` iff `f` satisfies the Cauchy–Riemann equations on every
   face (`TriMesh.loopConformalEnergy_eq_zero_iff`).
 
-The per-face identity is `[formula: bff-conformal-energy-triangle]` (`TriangleIntegral/Fem.lean`).
+The per-face identity is `[formula: bff-conformal-energy-triangle]` (`FEM/Fem.lean`).
 -/
 
 noncomputable section
@@ -33,7 +33,7 @@ namespace DDG
 
 namespace TriMesh
 
-open TriangleIntegral MeasureTheory
+open FEM MeasureTheory
 
 variable {V F β : Type*} (M : TriMesh V F)
 
@@ -108,7 +108,7 @@ theorem exists_isLayout_pos (hM : M.Valid) : ∃ P, M.IsLayout P ∧ ∀ f, 0 < 
   · rw [sideLen_zero]
     simpa only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two, Matrix.head_cons,
       Matrix.tail_cons] using h12
-  · rw [sideLen_one, Intrinsic.dist2_comm]
+  · rw [sideLen_one, DDG.dist2_comm]
     simpa only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.cons_val_two, Matrix.head_cons,
       Matrix.tail_cons] using h02
   · rw [sideLen_two]

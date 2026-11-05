@@ -152,9 +152,9 @@ theorem IsMetric.cornerAngleAt_add_next_add_prev (hm : G.IsMetric ℓ) (h : Half
   have := cornerAngle_add_cornerAngle_add_cornerAngle t
   simp only [cornerAngleAt, Halfedge.next_next, Halfedge.prev_next, Halfedge.next_prev,
     Halfedge.prev_prev]
-  rw [Intrinsic.cornerAngle_swap (ℓ h.next) (ℓ h.prev) (ℓ h),
-    Intrinsic.cornerAngle_swap (ℓ h.prev) (ℓ h) (ℓ h.next),
-    Intrinsic.cornerAngle_swap (ℓ h) (ℓ h.next) (ℓ h.prev)]
+  rw [DDG.cornerAngle_swap (ℓ h.next) (ℓ h.prev) (ℓ h),
+    DDG.cornerAngle_swap (ℓ h.prev) (ℓ h) (ℓ h.next),
+    DDG.cornerAngle_swap (ℓ h) (ℓ h.next) (ℓ h.prev)]
   linarith
 
 /-- Every corner angle of a metric is positive. -/
@@ -168,7 +168,7 @@ theorem IsMetric.oppositeAngles_eq (hm : G.IsMetric ℓ) (h₀ : Halfedge F) :
         cornerAngle (ℓ h₀) (ℓ (G.twin h₀).next) (ℓ (G.twin h₀).prev) =
       cornerAngleAt ℓ h₀.prev + cornerAngleAt ℓ (G.twin h₀).prev := by
   simp only [cornerAngleAt, Halfedge.next_prev, Halfedge.prev_prev, hm.twin]
-  rw [Intrinsic.cornerAngle_swap (ℓ h₀) (ℓ (G.twin h₀).prev)]
+  rw [DDG.cornerAngle_swap (ℓ h₀) (ℓ (G.twin h₀).prev)]
 
 /-- Being locally Delaunay is a property of the edge: it does not depend on which of its two
 halfedges is used. -/

@@ -6,7 +6,7 @@ import DDG.NormalCoords.Complex.QuadOuterLJ
 
 /-! # `ic-flip-normal` (the C part): the four outer sides together (`Complex/Quad.lean`). -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 namespace Glue
 
@@ -25,4 +25,4 @@ theorem Hyp.outer (h : Hyp nA nB m) (hD : Dkl nA nB ≤ 1) (s : QS) {p : ℕ}
 
 end Glue
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

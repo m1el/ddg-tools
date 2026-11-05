@@ -90,8 +90,8 @@ theorem IsMetric.sum_cornerAngleAt_face {ℓ : Halfedge F → ℝ} (hm : G.IsMet
   have e3 : ((0 : Fin 3) + 2) = 2 := rfl
   have e4 : ((1 : Fin 3) + 2) = 0 := rfl
   have e5 : ((2 : Fin 3) + 2) = 1 := rfl
-  rw [e0, e1, e2, e3, e4, e5, Intrinsic.cornerAngle_swap (ℓ (f, 1)),
-    Intrinsic.cornerAngle_swap (ℓ (f, 2)), Intrinsic.cornerAngle_swap (ℓ (f, 0))]
+  rw [e0, e1, e2, e3, e4, e5, DDG.cornerAngle_swap (ℓ (f, 1)),
+    DDG.cornerAngle_swap (ℓ (f, 2)), DDG.cornerAngle_swap (ℓ (f, 0))]
   linarith
 
 variable {G} in
@@ -266,7 +266,7 @@ theorem IsMetric.locallyDelaunayAt_iff {ℓ : Halfedge F → ℝ} (hm : G.IsMetr
       cornerAngleAt ℓ h₀.prev + cornerAngleAt ℓ (G.twin h₀).prev ≤ π := by
   simp only [LocallyDelaunayAt, IsLocallyDelaunay, cornerAngleAt, Halfedge.next_prev,
     Halfedge.prev_prev, hm.twin]
-  rw [Intrinsic.cornerAngle_swap (ℓ h₀) (ℓ (G.twin h₀).prev)]
+  rw [DDG.cornerAngle_swap (ℓ h₀) (ℓ (G.twin h₀).prev)]
 
 /-- **After the flip of a non-Delaunay edge the new edge is locally Delaunay**, strictly
 (layer 1's `flip_isLocallyDelaunay`): the two corners opposite the new edge `next h₀ = l → k`,
@@ -281,7 +281,7 @@ theorem IsMetric.flip_edge_isLocallyDelaunay {ℓ : Halfedge F → ℝ} (hm : G.
   simp only [cornerAngleAt, Halfedge.prev_next]
   rw [flipLen_self hf, flipLen_next, flipLen_prev hf, flipLen_twin hf, flipLen_twin_next,
     flipLen_twin_prev hf,
-    Intrinsic.cornerAngle_swap (G.newLength ℓ h₀) (ℓ h₀.prev) (ℓ (G.twin h₀).next)]
+    DDG.cornerAngle_swap (G.newLength ℓ h₀) (ℓ h₀.prev) (ℓ (G.twin h₀).next)]
   unfold newLength
   linarith
 
@@ -359,12 +359,12 @@ theorem IsMetric.coneAngle_flip [Fintype F] {ℓ : Halfedge F → ℝ} (hm : G.I
       Halfedge.prev_prev]
     rw [flipLen_self hf, flipLen_next, flipLen_prev hf, flipLen_twin hf, flipLen_twin_next,
       flipLen_twin_prev hf, hm.twin]
-    have s1 := Intrinsic.cornerAngle_swap (G.newLength ℓ h₀) (ℓ h₀.prev) (ℓ (G.twin h₀).next)
-    have s2 := Intrinsic.cornerAngle_swap (ℓ h₀.prev) (ℓ (G.twin h₀).next) (G.newLength ℓ h₀)
-    have s3 := Intrinsic.cornerAngle_swap (ℓ (G.twin h₀).next) (G.newLength ℓ h₀) (ℓ h₀.prev)
-    have s4 := Intrinsic.cornerAngle_swap (ℓ (G.twin h₀).next) (ℓ (G.twin h₀).prev) (ℓ h₀)
-    have s5 := Intrinsic.cornerAngle_swap (ℓ (G.twin h₀).prev) (ℓ h₀) (ℓ (G.twin h₀).next)
-    have s6 := Intrinsic.cornerAngle_swap (ℓ h₀) (ℓ (G.twin h₀).next) (ℓ (G.twin h₀).prev)
+    have s1 := DDG.cornerAngle_swap (G.newLength ℓ h₀) (ℓ h₀.prev) (ℓ (G.twin h₀).next)
+    have s2 := DDG.cornerAngle_swap (ℓ h₀.prev) (ℓ (G.twin h₀).next) (G.newLength ℓ h₀)
+    have s3 := DDG.cornerAngle_swap (ℓ (G.twin h₀).next) (G.newLength ℓ h₀) (ℓ h₀.prev)
+    have s4 := DDG.cornerAngle_swap (ℓ (G.twin h₀).next) (ℓ (G.twin h₀).prev) (ℓ h₀)
+    have s5 := DDG.cornerAngle_swap (ℓ (G.twin h₀).prev) (ℓ h₀) (ℓ (G.twin h₀).next)
+    have s6 := DDG.cornerAngle_swap (ℓ h₀) (ℓ (G.twin h₀).next) (ℓ (G.twin h₀).prev)
     simp only [newLength] at *
     split_ifs <;> linarith
   · -- outside the diamond nothing changes

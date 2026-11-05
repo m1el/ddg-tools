@@ -34,7 +34,7 @@ the workspace's `sda` (twice the signed area, `signed-area-2d`), and `lerp a b s
 
 namespace DDG
 
-namespace IntegerCoords
+namespace NormalCoords
 
 /-! ## Segments -/
 
@@ -273,6 +273,6 @@ theorem corner_arc_crosses_cevian (V : Fin 3 → ℝ × ℝ) (hV : 0 < sda (V 0)
     (by simp [OnOneSide])).1.1
   simpa only [bpt_zero] using this
 
-end IntegerCoords
+end NormalCoords
 
 end DDG

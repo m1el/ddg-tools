@@ -33,9 +33,9 @@ for them as well.
 
 namespace DDG
 
-namespace IntegerCoords
+namespace NormalCoords
 
-open DDG.IntegerCoords.Formulas
+open DDG.NormalCoords.Formulas
 
 /-- The arcs of a quadrilateral `i, l, j, k` by kind. -/
 structure Quad where
@@ -206,6 +206,6 @@ theorem flipNormal_flipNormal {a b c d e : ℤ} (ha : -1 ≤ a) (v1 : faceValid 
   rw [this, h_ij, ← hD]
   linarith
 
-end IntegerCoords
+end NormalCoords
 
 end DDG

@@ -21,7 +21,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_pos_iff hasDerivAt_dot hasDerivAt_cross)
 
 variable {V F : Type*} [Fintype V] [Fintype F] [DecidableEq V]
 

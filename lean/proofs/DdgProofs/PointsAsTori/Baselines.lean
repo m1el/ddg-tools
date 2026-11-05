@@ -21,8 +21,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 variable {ι : Type*} [Fintype ι]
 
@@ -196,7 +194,7 @@ theorem fwn_expansion {y : V3} (hy : y ≠ 0) :
       ← vnorm_mul_self, smul_eq_mul]
     field_simp
     ring
-  · simp only [greenGrad, dotProduct_smul, smul_eq_mul, RC.vnorm_sub_comm p x]
+  · simp only [greenGrad, dotProduct_smul, smul_eq_mul, DDG.vnorm_sub_comm p x]
     rw [show p - x = -(x - p) by abel, dotProduct_neg]
     ring
 

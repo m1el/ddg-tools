@@ -35,7 +35,7 @@ noncomputable section
 
 namespace DDG
 
-namespace TriangleIntegral
+namespace FEM
 
 open MeasureTheory Set Real
 
@@ -144,7 +144,6 @@ end IsTiling
 
 section Transfer
 
-open IntegerCoords
 
 /-- The signed double area of three affine combinations of the corners: `det β · D(p)`. -/
 theorem sda_affine (p : Fin 3 → ℝ × ℝ) (β : Fin 3 → Fin 3 → ℝ)
@@ -233,7 +232,7 @@ theorem transfer_mass_tiling {ι : Type*} {s : Finset ι} {r : ι → Fin 3 → 
   split_ifs <;> ring
 
 /-- **With pieces of the orientation of `p`** (`det β > 0`, as for the faces of the overlay), the
-valuation `pieceMass` of `IntegerCoords/Transfer.lean` sums to `(1 + δ_ab)/12 = pieceMass` of the
+valuation `pieceMass` of `NormalCoords/Transfer.lean` sums to `(1 + δ_ab)/12 = pieceMass` of the
 whole triangle (`pieceMass_one`).
 
 [formula: ic-transfer-mass-integral] -/
@@ -263,6 +262,6 @@ theorem sum_pieceMass_tiling {ι : Type*} {s : Finset ι} {r : ι → Fin 3 → 
 
 end Transfer
 
-end TriangleIntegral
+end FEM
 
 end DDG

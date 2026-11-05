@@ -33,7 +33,7 @@ def angleAt (v P Q : Pt) : ℝ := cornerAngle (dist2 P Q) (dist2 v P) (dist2 v Q
 
 theorem angleAt_comm (v P Q : Pt) : angleAt v P Q = angleAt v Q P := by
   unfold angleAt
-  rw [dist2_comm, Intrinsic.cornerAngle_swap]
+  rw [dist2_comm, DDG.cornerAngle_swap]
 
 theorem angleAt_nonneg (v P Q : Pt) : 0 ≤ angleAt v P Q := arccos_nonneg _
 

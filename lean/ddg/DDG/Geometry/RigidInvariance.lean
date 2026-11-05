@@ -24,7 +24,6 @@ noncomputable section
 
 namespace DDG
 
-namespace Dev
 
 open Real Filter Topology
 
@@ -176,6 +175,5 @@ theorem gradient_invariance (hE : HasFDerivAt E E' f) (g : Positions n)
 
 end
 
-end Dev
 
 end DDG

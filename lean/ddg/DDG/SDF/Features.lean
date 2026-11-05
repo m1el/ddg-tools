@@ -30,8 +30,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 /-! ## The median -/
 
@@ -153,7 +151,7 @@ theorem refFrame_spec (c : V3) (hc : c ⬝ᵥ c = 1) :
   have hpos := cross_pickU_dot c hc
   have hv : 0 < vnorm (c ⨯₃ pickU c) := Real.sqrt_pos.mpr hpos
   have hss : frameS c ⬝ᵥ frameS c = 1 := by
-    have := RC.unit_dot_self (v := c ⨯₃ pickU c) (fun h => by rw [h] at hpos; simp at hpos)
+    have := DDG.unit_dot_self (v := c ⨯₃ pickU c) (fun h => by rw [h] at hpos; simp at hpos)
     exact this
   have hsc : frameS c ⬝ᵥ c = 0 := by
     rw [dotProduct_comm]

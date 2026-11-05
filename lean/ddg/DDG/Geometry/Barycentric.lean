@@ -74,7 +74,6 @@ def baryInner (lab lbc lca da db dc ea eb ec : ℝ) : ℝ :=
 `⟨y − x, z − x⟩ / (2 · area)`. -/
 def cotFromInner (inner area : ℝ) : ℝ := inner / (2 * area)
 
-namespace Cuts
 
 open Real
 
@@ -477,6 +476,5 @@ theorem cutFace_det_sum_bq (t s : ℝ) :
     t * s + (1 - t) * s + (1 - s) = 1 := by
   refine ⟨?_, ?_, ?_, ?_⟩ <;> (try unfold det3) <;> ring
 
-end Cuts
 
 end DDG

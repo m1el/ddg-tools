@@ -66,9 +66,9 @@ def liftPotential (T : Finset (Finset (ℝ × ℝ))) : ℝ := ∑ t ∈ T, liftW
 
 /-- The area of a triangle is half the absolute signed double area. -/
 theorem area_triple {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) : area {a, b, c} = |sda a b c| / 2 := by
-  have e := TriangleIntegral.volume_real_triangle (p := ![a, b, c]) h
-  rw [TriangleIntegral.triangle_eq_convexHull] at e
-  simpa [area, hull_triple, TriangleIntegral.D] using e
+  have e := FEM.volume_real_triangle (p := ![a, b, c]) h
+  rw [FEM.triangle_eq_convexHull] at e
+  simpa [area, hull_triple, FEM.D] using e
 
 theorem liftWeight_triple {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) :
     liftWeight {a, b, c} = liftTri a b c := by

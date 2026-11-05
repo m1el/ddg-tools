@@ -36,8 +36,7 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff
-  dot_self_nonneg unit_dot_self cross_vnorm_sq posSemidef_of_form)
+open RC (cross_vnorm_sq posSemidef_of_form)
 
 /-! ## The P1 gradient `D_f` -/
 
@@ -150,7 +149,7 @@ theorem dfGrad_unique {f : V → V3} {fv : F → Fin 3 → V} {S : F} (hS : Nond
     rw [nvec, cross_cross_eq_smul_sub_smul', hd2, dotProduct_comm _ d, hd1]; simp
   have hdn' : d ⬝ᵥ nvec f fv S = 0 := by rw [dotProduct_comm]; exact hdn
   have hlag := cross_vnorm_sq d (nvec f fv S)
-  rw [hx, show vnorm (0 : V3) = 0 by simp [RC.vnorm], hdn'] at hlag
+  rw [hx, show vnorm (0 : V3) = 0 by simp [DDG.vnorm], hdn'] at hlag
   have hnn : 0 < nvec f fv S ⬝ᵥ nvec f fv S := by
     rw [← vnorm_mul_self]; have := vnorm_pos_iff.mpr hS; positivity
   have hdd : d ⬝ᵥ d = 0 := by
@@ -168,7 +167,7 @@ def dfGradUnit (f : V → V3) (fv : F → Fin 3 → V) (u : V → ℝ) (S : F) :
     (normal f fv S ⨯₃ ∑ a, u (fv S a) • ((vnorm (opp f fv S a))⁻¹ • opp f fv S a))
 
 theorem vnorm_eq_of_dot {v : V3} {c : ℝ} (hc : 0 ≤ c) (h : v ⬝ᵥ v = c ^ 2) : vnorm v = c := by
-  rw [RC.vnorm, h, Real.sqrt_sq hc]
+  rw [DDG.vnorm, h, Real.sqrt_sq hc]
 
 /-- **The unit-edge form is not the gradient** (SPEC D2): on the triangle `(0,0,0), (2,0,0),
 (0,1,0)` with `u = (0, 0, 1)`, `D_f u · (f₂ − f₀) = 1` (the P1 gradient) while the unit-edge form

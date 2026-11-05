@@ -29,8 +29,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 variable {ι : Type*} [Fintype ι]
 
@@ -349,7 +347,7 @@ theorem blend_laplacian [Nonempty ι] (p : ι → V3) {g : ι → V3 → ℝ} {G
   intro w W A B φ
   have hρ : ∀ i, 0 < vnorm (x - p i) := fun i => vnorm_pos_iff.mpr (sub_ne_zero.mpr (hx i))
   have hr1 : ∀ i, rhat (p i) x ⬝ᵥ rhat (p i) x = 1 := by
-    intro i; rw [rhat]; exact RC.unit_dot_self (sub_ne_zero.mpr (hx i))
+    intro i; rw [rhat]; exact DDG.unit_dot_self (sub_ne_zero.mpr (hx i))
   -- weights
   have hw : ∀ i, HasFDerivAt (fun y => Real.exp (-lam * (vnorm (y - p i) - σ)))
       (dualOf ((-lam * w i) • rhat (p i) x)) x := by

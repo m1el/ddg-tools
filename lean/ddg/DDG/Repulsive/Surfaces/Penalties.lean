@@ -31,8 +31,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_pos_iff hasDerivAt_dot hasDerivAt_len hasDerivAt_tangent
-  tangent len sgn)
 
 /-! ## Scalar chain rules -/
 
@@ -177,15 +175,15 @@ omit [Fintype E] in
 /-- **Boundary turning angle at a vertex** (Sec. 7.3.4): with the incoming boundary edge `I` and
 the outgoing one `J` (positive lengths, `T_I·T_J ∈ (−1, 1)`), `θ = arccos(T_I·T_J)` and
 `ℓ_v = (ℓ_I + ℓ_J)/2`, `d/ds θ²/ℓ_v` is given by `hasDerivAt_turning` with
-`c' = T_I'·T_J + T_I·T_J'` (`T'` of `RC.hasDerivAt_tangent`) and `ℓ_v' = (ℓ_I' + ℓ_J')/2`.
+`c' = T_I'·T_J + T_I·T_J'` (`T'` of `DDG.hasDerivAt_tangent`) and `ℓ_v' = (ℓ_I' + ℓ_J')/2`.
 
 [formula: rs-penalties] -/
 theorem hasDerivAt_turningPenalty (hΓ : ∀ v, HasDerivAt (fun s => Γ s v) (Γ' v) t) {I J : E}
     (hI : 0 < len (Γ t) ep I) (hJ : 0 < len (Γ t) ep J)
     (h1 : -1 < tangent (Γ t) ep I ⬝ᵥ tangent (Γ t) ep J)
     (h2 : tangent (Γ t) ep I ⬝ᵥ tangent (Γ t) ep J < 1) :
-    let TI' := (len (Γ t) ep I)⁻¹ • ∑ a, sgn a • RC.proj (tangent (Γ t) ep I) (Γ' (ep I a))
-    let TJ' := (len (Γ t) ep J)⁻¹ • ∑ a, sgn a • RC.proj (tangent (Γ t) ep J) (Γ' (ep J a))
+    let TI' := (len (Γ t) ep I)⁻¹ • ∑ a, sgn a • DDG.proj (tangent (Γ t) ep I) (Γ' (ep I a))
+    let TJ' := (len (Γ t) ep J)⁻¹ • ∑ a, sgn a • DDG.proj (tangent (Γ t) ep J) (Γ' (ep J a))
     let c' := TI' ⬝ᵥ tangent (Γ t) ep J + tangent (Γ t) ep I ⬝ᵥ TJ'
     let ℓ' := ((∑ a, sgn a * (tangent (Γ t) ep I ⬝ᵥ Γ' (ep I a))) +
       ∑ a, sgn a * (tangent (Γ t) ep J ⬝ᵥ Γ' (ep J a))) / 2

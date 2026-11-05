@@ -17,9 +17,9 @@ import DDG.NormalCoords.Complex.Quad
   `jil` and of `ijk` and `n⁻_ij` between them (and the same at `l`, `j`).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
+open DDG.NormalCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
 
 namespace Glue
 
@@ -124,4 +124,4 @@ theorem Hyp.em_j (h : Hyp nA nB m) (hD : Dkl nA nB ≤ 1) :
 
 end Glue
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

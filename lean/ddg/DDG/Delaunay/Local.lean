@@ -553,7 +553,7 @@ theorem isLocallyDelaunay_comm :
 theorem isLocallyDelaunay_mirror :
     IsLocallyDelaunay a c b e d ↔ IsLocallyDelaunay a b c d e := by
   unfold IsLocallyDelaunay
-  rw [Intrinsic.cornerAngle_swap a b c, Intrinsic.cornerAngle_swap a d e]
+  rw [DDG.cornerAngle_swap a b c, DDG.cornerAngle_swap a d e]
 
 /-! ### The empty circumcircle in the planar layout -/
 
@@ -573,7 +573,7 @@ theorem layout_isometric (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
 
 private theorem sq_of_dist2 {p q : ℝ × ℝ} {r : ℝ} (h : dist2 p q = r) :
     r ^ 2 = (q.1 - p.1) ^ 2 + (q.2 - p.2) ^ 2 := by
-  rw [← h, Intrinsic.dist2_sq']
+  rw [← h, DDG.dist2_sq']
 
 /-- The squared distances of the layout as polynomial identities in its coordinates. -/
 private theorem layout_sq (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
@@ -900,9 +900,9 @@ theorem layout_coords (hk : IsTriangle a b c) (hl : IsTriangle a d e)
   obtain ⟨c1, c2⟩ := Intrinsic.diamondConvex_sda hconv'
   have t1 := abs_sda_eq_two_mul_triArea (0, 0) (Intrinsic.apexL a d e) (Intrinsic.apexK a b c)
   have t2 := abs_sda_eq_two_mul_triArea (a, 0) (Intrinsic.apexK a b c) (Intrinsic.apexL a d e)
-  rw [abs_of_pos c1, Intrinsic.dist2_comm (Intrinsic.apexL a d e) (Intrinsic.apexK a b c),
-    Intrinsic.dist2_apex, Intrinsic.dist2_comm (Intrinsic.apexK a b c) (0, 0), e2, e4] at t1
-  rw [abs_of_pos c2, Intrinsic.dist2_apex, Intrinsic.dist2_comm (Intrinsic.apexL a d e) (a, 0),
+  rw [abs_of_pos c1, DDG.dist2_comm (Intrinsic.apexL a d e) (Intrinsic.apexK a b c),
+    Intrinsic.dist2_apex, DDG.dist2_comm (Intrinsic.apexK a b c) (0, 0), e2, e4] at t1
+  rw [abs_of_pos c2, Intrinsic.dist2_apex, DDG.dist2_comm (Intrinsic.apexL a d e) (a, 0),
     e5, e3] at t2
   rw [← flipLength_eq_flippedLengthFromLengths hk hl] at t1 t2
   have f1 := Intrinsic.dist2_apex a b c d e

@@ -2,7 +2,7 @@ import DDG.NormalCoords.Complex.QuadSide
 
 /-! # `ic-flip-normal` (C part), outer side `ki`: see `Complex/Quad.lean`. -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 namespace Glue
 
@@ -17,4 +17,4 @@ theorem Hyp.outer_ki (h : Hyp nA nB m) (hD : Dkl nA nB ≤ 1) {p : ℕ} (hp : p 
 
 end Glue
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

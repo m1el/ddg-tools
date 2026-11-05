@@ -37,9 +37,9 @@ spoke next to `m` from the half `m X0` or the corner `X0` to the half `m X2` or 
   `n = −1` exactly when both halves run along an input edge. [formula: ic-merge-edge-normal]
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (faceValid nPlus nMinus)
+open DDG.NormalCoords.Formulas (faceValid nPlus nMinus)
 
 namespace Merge
 
@@ -190,4 +190,4 @@ theorem merge_normal {nA nB nA' nB' : Fin 3 → ℕ} {mS mS' : ℕ}
 
 end Merge
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

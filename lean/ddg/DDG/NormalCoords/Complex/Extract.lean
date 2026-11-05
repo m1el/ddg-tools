@@ -24,7 +24,7 @@ through crossing `p`; two crossings on the same curve get the same input edge (t
 exact). The positions along the edge are the strip geometry (`ic-strip-intersection`).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 namespace Cx
 
@@ -138,4 +138,4 @@ theorem Valid.end_is_arc (hC : C.Valid) {e : Xing F} (he : C.IsX e) (hee : C.IsE
 
 end Cx
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

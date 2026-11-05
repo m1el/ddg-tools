@@ -35,7 +35,7 @@ noncomputable section
 
 namespace DDG
 
-namespace TriangleIntegral
+namespace FEM
 
 open MeasureTheory Set Real
 open scoped Nat
@@ -442,6 +442,6 @@ theorem integral_bary_monomial_area {p : Fin 3 → ℝ × ℝ} (hD : D p ≠ 0) 
   rw [integral_bary_monomial hD, volume_real_triangle hD]
   ring
 
-end TriangleIntegral
+end FEM
 
 end DDG

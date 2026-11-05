@@ -32,7 +32,7 @@ noncomputable section
 
 namespace DDG.Delaunay.Surface
 
-open DDG.Intrinsic (apexK diamond_isometric diamond_sda dist2_comm)
+open DDG.Intrinsic (apexK diamond_isometric diamond_sda)
 open DDG.Delaunay.Planar
 open Set
 open scoped Classical

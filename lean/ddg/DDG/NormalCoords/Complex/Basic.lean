@@ -44,9 +44,9 @@ them (`ic-trace-terminates`). Disjointness of arcs is inherited from the face mo
 (combinatorial, by non-interleaving: no Jordan curve theorem is needed anywhere).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord cornerNumerator emanating faceValid nPlus nMinus traceStep)
+open DDG.NormalCoords.Formulas (cornerCoord cornerNumerator emanating faceValid nPlus nMinus traceStep)
 
 /-! ## The face model of side counts -/
 
@@ -315,4 +315,4 @@ theorem Valid.next_eq_oracle (hC : C.Valid) {z : Xing F} (hz : C.IsX z) :
 
 end Cx
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

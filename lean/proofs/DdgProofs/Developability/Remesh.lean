@@ -129,7 +129,7 @@ theorem cornerAngleAt_eq_cornerAngle (p q r : V3) (hn : faceNormal p q r ≠ zer
 triangle inequalities. -/
 theorem isTriangle_of_faceNormal (p q r : V3) (hn : faceNormal p q r ≠ zero) :
     IsTriangle (norm (sub r q)) (norm (sub p r)) (norm (sub q p)) := by
-  apply Intrinsic.isTriangle_of_heron_pos (norm_nonneg' _) (norm_nonneg' _) (norm_nonneg' _)
+  apply DDG.isTriangle_of_heron_pos (norm_nonneg' _) (norm_nonneg' _) (norm_nonneg' _)
   set x := norm (sub r q)
   set y := norm (sub p r)
   set z := norm (sub q p)

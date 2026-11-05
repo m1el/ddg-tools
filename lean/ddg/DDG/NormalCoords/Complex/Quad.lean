@@ -45,9 +45,9 @@ and the definitions of `D_kl` (`min`/`max`) are cleared or made linear before `o
 (`QuadCount.kinds_cases`).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
+open DDG.NormalCoords.Formulas (cornerCoord emanating faceValid nPlus nMinus flipNormal flipDoubled iabs)
 
 namespace Glue
 
@@ -258,4 +258,4 @@ lemma modelB : (model nB).partner = canon nB (y nB) := rfl
 
 end Glue
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

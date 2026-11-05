@@ -48,7 +48,7 @@ unfolds into such a star is SPEC N19.
 (Library step S2b: assembled from `DDG/Intrinsic/Move.lean` § `it-odt-update`,
 `DDG/FEM/Elements.lean` § `it-odt-interpolation-error` and
 `DDG/FEM/Tiling.lean` § `it-odt-energy`; the declarations keep their
-namespaces `DDG.Intrinsic` and `DDG.TriangleIntegral` until the renames of step S4.)
+namespaces `DDG.Intrinsic` and `DDG.FEM` until the renames of step S4.)
 
 Own definitions: `circumVec`, `odtEnergy`, `odtGradient`, `starArea`, `odtInterp`, `starAreaOf`,
 `fan`.
@@ -414,7 +414,7 @@ theorem odtEnergy_step_le {p : ℕ → ℝ × ℝ} {n : ℕ} (hp : p n = p 0) (x
 
 end Intrinsic
 
-namespace TriangleIntegral
+namespace FEM
 
 open MeasureTheory Set Real
 
@@ -579,7 +579,7 @@ theorem IsTiling.integral_abs_odt_error (h : IsTiling s q Ω) {g : ℝ × ℝ �
   rw [h.integral_abs_odt_error_eq_sum hg, h.integral_eq_sum_of_continuous continuous_nsq,
     ← Finset.sum_sub_distrib]
   exact Finset.sum_congr rfl fun k hk =>
-    _root_.DDG.TriangleIntegral.integral_abs_odt_error (h.nondeg k hk)
+    _root_.DDG.FEM.integral_abs_odt_error (h.nondeg k hk)
 
 /-- **The interpolation error is a function of the edge lengths**:
 `E = Σ_k (|T_k|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)` over a tiling.
@@ -711,6 +711,6 @@ theorem odt_error_step_le {κ : Type*} {n : ℕ} {t : Finset κ} {r : κ → Fin
 
 end Odt
 
-end TriangleIntegral
+end FEM
 
 end DDG

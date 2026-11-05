@@ -32,9 +32,9 @@ whose ends interleave with the chord from rank `r` to corner `k`.
 The two new faces and the merge back are in `SplitAtCrossingFaces.lean`.
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
-open DDG.IntegerCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
+open DDG.NormalCoords.Formulas (cornerNumerator cornerCoord emanating nPlus faceValid)
 
 /-- Decidability of interleaving (named, to stay out of the way of other instances). -/
 instance decInterleaveSAC (a b x y : ℕ) : Decidable (Interleave a b x y) := by
@@ -372,4 +372,4 @@ theorem splitSideAtCrossingR_eq_none (n : Fin 3 → ℤ) (s : Fin 3) (j : ℤ) :
   · simp only [Bool.not_eq_true] at hv
     simp only [splitSideAtCrossingR, hv, Bool.false_eq_true, ↓reduceIte, true_or]
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

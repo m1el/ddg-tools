@@ -27,9 +27,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff
-  dot_self_nonneg unit_dot_self proj hasDerivAt_dot hasDerivAt_cross hasDerivAt_vnorm
-  hasDerivAt_unit)
 
 /-- `P_N(e × w) = (N·w)(e × N)` for a unit `N` with `N ⊥ e`. -/
 theorem proj_cross {N e : V3} (hN : N ⬝ᵥ N = 1) (he : N ⬝ᵥ e = 0) (w : V3) :

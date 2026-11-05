@@ -51,7 +51,7 @@ counter-clockwise after it in both numberings.
 * `cone_of_hit`, `cone_of_bary`: the hypothesis on `d` is what the strip gives. If the edge
   crosses an input edge (`n ≥ 1`), its segment from the corner `p` crosses the side opposite `p`
   (tail `b = p + x` below, head `c = p + y` above, `Chord::hit`) at a positive segment parameter
-  (`ic-strip-intersection`, `Strip.hit_point`, `Strip.hit_mem`); if it crosses none (`n = 0`), its
+  (`ic-strip-intersection`, `Intrinsic.Strip.hit_point`, `Intrinsic.Strip.hit_mem`); if it crosses none (`n = 0`), its
   head lies in the corner's face (barycentric coordinates `≥ 0`).
 * `rustAlong_eq` (`n = −1`): the Rust value is `frameAngle` of the polar angle of the input
   halfedge `r` (`π` for the arriving boundary edge, whose polar angle is `Θ`).
@@ -65,7 +65,7 @@ crossings' input edges by `ic-extract-intrinsic-edge`).
 
 noncomputable section
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 namespace Frames
 
@@ -253,17 +253,17 @@ theorem cornerAngle_eq_angleFrom {x y : ℝ × ℝ} (hxy : 0 < cross x y) {lo lx
 `b` strictly below the segment's line, head `c` strictly above, at a positive segment parameter;
 `ic-strip-intersection`) **leaves the corner into it**: `d = λ(b − p) + μ(c − p)`, `λ, μ ≥ 0`.
 At the head of the edge the same holds for the reversed segment and the last crossing
-(`Strip.hit_reverse`). [formula: ic-input-aligned-frame] -/
+(`Intrinsic.Strip.hit_reverse`). [formula: ic-input-aligned-frame] -/
 theorem cone_of_hit {p d b c : ℝ × ℝ} {len : ℝ} (hlen : 0 < len) (hd : len ^ 2 = d.1 ^ 2 + d.2 ^ 2)
-    (ha : (Strip.frame p d len b).2 < 0) (hb : 0 < (Strip.frame p d len c).2)
-    (hs : 0 < Strip.hitS len (Strip.frame p d len b) (Strip.frame p d len c)) :
+    (ha : (Intrinsic.Strip.frame p d len b).2 < 0) (hb : 0 < (Intrinsic.Strip.frame p d len c).2)
+    (hs : 0 < Intrinsic.Strip.hitS len (Intrinsic.Strip.frame p d len b) (Intrinsic.Strip.frame p d len c)) :
     ∃ l m : ℝ, 0 ≤ l ∧ 0 ≤ m ∧
       d = (l * (b - p).1 + m * (c - p).1, l * (b - p).2 + m * (c - p).2) := by
-  have hne : (Strip.frame p d len b).2 ≠ (Strip.frame p d len c).2 := by intro e; linarith
-  obtain ⟨e1, e2⟩ := Strip.hit_point hlen hd hne
-  obtain ⟨t0, t1⟩ := Strip.hit_mem ha hb
-  set t := Strip.hitT (Strip.frame p d len b) (Strip.frame p d len c)
-  set s := Strip.hitS len (Strip.frame p d len b) (Strip.frame p d len c)
+  have hne : (Intrinsic.Strip.frame p d len b).2 ≠ (Intrinsic.Strip.frame p d len c).2 := by intro e; linarith
+  obtain ⟨e1, e2⟩ := Intrinsic.Strip.hit_point hlen hd hne
+  obtain ⟨t0, t1⟩ := Intrinsic.Strip.hit_mem ha hb
+  set t := Intrinsic.Strip.hitT (Intrinsic.Strip.frame p d len b) (Intrinsic.Strip.frame p d len c)
+  set s := Intrinsic.Strip.hitS len (Intrinsic.Strip.frame p d len b) (Intrinsic.Strip.frame p d len c)
   refine ⟨(1 - t) / s, t / s, div_nonneg (by linarith) hs.le, div_nonneg t0.le hs.le, ?_⟩
   simp only [Prod.fst_sub, Prod.snd_sub]
   ext
@@ -312,4 +312,4 @@ end Star
 
 end Frames
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

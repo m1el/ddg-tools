@@ -45,7 +45,7 @@ minimizer `f̂` of `‖f − f̂‖² = (P₁f − P₀f̂)ᵀ M (P₁f − P₀
 
 namespace DDG
 
-namespace IntegerCoords
+namespace FEM
 
 open Matrix
 
@@ -276,6 +276,6 @@ theorem pieceMass_fan_apex {N : ℕ} (p : Fin (N + 1) → Fin 3 → ℝ)
   simp only [hsplit, Finset.sum_add_distrib, hopp, Finset.sum_neg_distrib, hrot]
   ring
 
-end IntegerCoords
+end FEM
 
 end DDG

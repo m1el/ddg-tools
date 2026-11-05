@@ -31,8 +31,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff
-  dot_self_nonneg unit_dot_self)
 
 /-! ## Exponents -/
 

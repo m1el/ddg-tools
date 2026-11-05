@@ -8,7 +8,7 @@ import DDG.NormalCoords.Complex.QuadAdm2
 analyses build in parallel).
 -/
 
-namespace DDG.IntegerCoords
+namespace DDG.NormalCoords
 
 namespace Glue
 
@@ -40,4 +40,4 @@ macro "glue_side" : tactic =>
 
 end Glue
 
-end DDG.IntegerCoords
+end DDG.NormalCoords

@@ -20,8 +20,6 @@ namespace DDG
 namespace PAT
 
 open Matrix Real
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff vnorm_smul
-  dot_self_nonneg)
 
 /-! ## The orientation metric (SPEC §8.4) -/
 
@@ -254,7 +252,7 @@ theorem sphere_trace_step_safe {φ : V3 → ℝ} {L ℓ : ℝ} (hL : 0 < L)
     (hy : vnorm (y - x) < |φ x - ℓ| / L) : φ y ≠ ℓ := by
   intro h
   have h1 := hφ x y
-  rw [RC.vnorm_sub_comm x y, h] at h1
+  rw [DDG.vnorm_sub_comm x y, h] at h1
   have h2 : L * vnorm (y - x) < |φ x - ℓ| := by
     rwa [lt_div_iff₀ hL, mul_comm] at hy
   linarith

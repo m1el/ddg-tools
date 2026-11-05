@@ -19,8 +19,8 @@ the sides `b` and `c`.
   (`angle_eq_cornerAngle`, `half_mul_sin_angle_eq_triArea`);
 * behaviour under uniform scaling (`cornerAngle_smul`, `cornerCot_smul`, `triArea_smul`);
 * symmetry in the two sides adjacent to the corner (`IsTriangle.swap`,
-  `Intrinsic.cornerAngle_swap`), and the strict triangle inequalities from a positive Heron
-  product (`Intrinsic.isTriangle_of_heron_pos`).
+  `DDG.cornerAngle_swap`), and the strict triangle inequalities from a positive Heron
+  product (`DDG.isTriangle_of_heron_pos`).
 -/
 
 noncomputable section
@@ -282,7 +282,6 @@ end
 
 /-! ## Recognizing a triangle; the corner angle is symmetric in the adjacent sides -/
 
-namespace Intrinsic
 
 /-- Nonnegative numbers whose Heron product is positive satisfy the strict triangle
 inequalities. -/
@@ -324,7 +323,6 @@ theorem cornerAngle_swap (a b c : ℝ) : cornerAngle a c b = cornerAngle a b c :
   congr 1
   ring
 
-end Intrinsic
 
 /-! ## Link with Euclidean geometry (Mathlib) -/
 

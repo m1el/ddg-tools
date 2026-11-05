@@ -23,7 +23,7 @@ noncomputable section
 
 namespace DDG
 
-namespace TriangleIntegral
+namespace FEM
 
 /-- The outward normal of the side `k` (from `p_k` to `p_{k+1}`) times its length:
 `sign(D) · (e₂, −e₁)` with `e = p_{k+1} − p_k`. -/
@@ -139,6 +139,6 @@ theorem side_flux_add_twin {p p' : Fin 3 → ℝ × ℝ} {k k' : Fin 3} (h0 : p'
   simp only [dot2, Prod.fst_sub, Prod.snd_sub, Prod.fst_neg, Prod.snd_neg]
   ring
 
-end TriangleIntegral
+end FEM
 
 end DDG

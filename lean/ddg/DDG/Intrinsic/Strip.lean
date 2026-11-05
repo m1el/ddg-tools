@@ -35,7 +35,7 @@ face sequence of the geodesic with exact lengths; with rounding the code clamps 
 
 noncomputable section
 
-namespace DDG.IntegerCoords
+namespace DDG.Intrinsic
 
 namespace Strip
 
@@ -149,4 +149,4 @@ theorem hit_reverse (hlen : 0 < len) (hd : len ^ 2 = d.1 ^ 2 + d.2 ^ 2)
 
 end Strip
 
-end DDG.IntegerCoords
+end DDG.Intrinsic

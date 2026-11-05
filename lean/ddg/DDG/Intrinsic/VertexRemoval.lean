@@ -45,7 +45,7 @@ the angle statement, which is what is proved here, exactly as the paper's proof 
 
 namespace DDG
 
-namespace IntegerCoords
+namespace Intrinsic
 
 open Finset Real
 
@@ -219,6 +219,6 @@ theorem cross_star_no_strict : ¬ ∃ k, crossStar.inner k < π ∧ crossStar.ou
   simp only [FlatStar.inner, crossStar] at h
   linarith
 
-end IntegerCoords
+end Intrinsic
 
 end DDG

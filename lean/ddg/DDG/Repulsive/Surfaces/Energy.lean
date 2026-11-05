@@ -30,9 +30,6 @@ namespace DDG
 namespace RS
 
 open Matrix Real Finset Filter Topology
-open RC (V3 vnorm vnorm_nonneg vnorm_sq vnorm_mul_self vnorm_eq_zero_iff vnorm_pos_iff
-  dot_self_nonneg unit_dot_self proj hasDerivAt_dot hasDerivAt_cross hasDerivAt_vnorm
-  hasDerivAt_unit orth_dot orth_vnorm vnorm_smul vnorm_neg)
 
 variable {V F : Type*} [Fintype V] [Fintype F] [DecidableEq V] [DecidableEq F]
 
