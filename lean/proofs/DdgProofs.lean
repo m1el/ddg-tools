@@ -38,3 +38,10 @@ import DdgProofs.Developability.RegularCone
 import DdgProofs.IntrinsicSimplification
 import DdgProofs.Core.Fields
 import DdgProofs.Cuts.WeightedEntries
+import DdgProofs.PointsAsTori.Baselines
+import DdgProofs.PointsAsTori.Loss
+import DdgProofs.RepulsiveCurves.NearPair
+import DdgProofs.RepulsiveCurves.NearPairSecond
+import DdgProofs.RepulsiveCurves.Schedule
+import DdgProofs.RepulsiveSurfaces.Remesh
+import DdgProofs.RepulsiveSurfaces.Step
