@@ -1701,7 +1701,7 @@ open DDG
 #print axioms TriangleIntegral.norm_betaExpTerm_succ_le
 #print axioms TriangleIntegral.norm_tail_betaExp_le
 
--- oriented meshes (DdgProofs/Orientation.lean), bff-conformal-energy, app-vector-singularity-index
+-- oriented meshes (DDG/Mesh/Orientation.lean), bff-conformal-energy, app-vector-singularity-index
 #print axioms TriMesh.twin_twin
 #print axioms TriMesh.not_hasTwin_iff
 #print axioms TriMesh.hasTwin_of_closed

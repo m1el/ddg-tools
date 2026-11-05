@@ -1,5 +1,5 @@
 import DdgProofs.TriangleIntegral.Basic
-import DdgProofs.Cotan
+import DDG.Mesh.TriMesh
 import DdgProofs.Cuts.Weighted
 import DdgProofs.IntrinsicApps.HeatFem
 import DDG.Geometry.PlaneLemmas

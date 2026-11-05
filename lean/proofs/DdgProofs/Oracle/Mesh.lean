@@ -1,5 +1,5 @@
 import DdgProofs.Oracle.Problem
-import DdgProofs.GaussBonnet
+import DDG.Mesh.GaussBonnet
 import DdgProofs.Laplace.Cotan
 
 /-!

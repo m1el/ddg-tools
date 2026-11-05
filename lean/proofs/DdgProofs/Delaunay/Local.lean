@@ -1,5 +1,5 @@
 import DdgProofs.Intrinsic.FlipAngles
-import DdgProofs.Cotan
+import DDG.Mesh.TriMesh
 import DdgProofs.Laplace.Cotan
 
 /-!
@@ -396,7 +396,7 @@ section Laplacian
 variable {V F : Type*} [DecidableEq V] [Fintype F]
 
 /-- **The entry of the cotan Laplacian is minus the cotan weight `w`, i.e. minus half
-`cotanWeight`** (`cotan-laplacian`, `DdgProofs/Cotan.lean`; `L` positive semidefinite):
+`cotanWeight`** (`cotan-laplacian`, `DDG/Mesh/TriMesh.lean`; `L` positive semidefinite):
 if only the two faces `f₁ ≠ f₂` of a mesh have the edge `{i, j}`, then
 `L_ij = −½ (cot θ_k + cot θ_l) = −w`, with the two cotangents those of the corners opposite the
 edge.

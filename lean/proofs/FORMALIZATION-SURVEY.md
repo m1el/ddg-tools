@@ -83,7 +83,7 @@ These come first because they may be bugs or wrong statements, independent of wh
     the gauge model and the Eq. 17 closed forms.
   - `cut-weighted-fem-stiffness`: **done, CITED entry removed** (per triangle and `Σ_f ∫ a∇u·∇w = uᵀL_ā w`).
   - `bff-conformal-energy`: **done, CITED entry removed** (2026-11-05): face orientation added
-    (`DdgProofs/Orientation.lean`, `TriMesh.Oriented`, twins, boundary halfedges); shoelace over the mesh and
+    (`DDG/Mesh/Orientation.lean`, `TriMesh.Oriented`, twins, boundary halfedges); shoelace over the mesh and
     `2Σ_f∫|∂̄f|² = ½(aᵀLa + bᵀLb) − 𝒜(a, b)` in `Bff/ConformalEnergy.lean`; per triangle `bff-conformal-energy-triangle`.
   - `it-odt-energy`: **partial**, Lemma 4.1 per triangle and for a star as `it-odt-interpolation-error`
     (also `∫_T|u_I − u| = (A/12)Σℓ²`); the tiling of `Ω` and Thm 2.3 stay cited.

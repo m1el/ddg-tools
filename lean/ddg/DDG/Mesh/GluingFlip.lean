@@ -1,11 +1,11 @@
-import DdgProofs.Delaunay.Complex
+import DDG.Mesh.Gluing
 
 /-!
 # The edge flip of gluing data
 
 The flip of an edge of a triangulated surface (Sharp–Soliman–Crane 2019, Sec. 2.1 and Alg. 5;
 Bobenko–Springborn 2007, Sec. 2; Indermitte–Liebling–Troyanov–Clémençon 2001, Sec. 4), on the
-gluing data of `DdgProofs/Delaunay/Complex.lean`, exactly as `Complex::flip_edge` of
+gluing data of `DDG/Mesh/Gluing.lean`, exactly as `Complex::flip_edge` of
 `crates/ddg-intrinsic/src/complex.rs` does it.
 
 **Setting.** `h₀ = (f₀, a)` runs `i → j` in `f₀ = (i, j, k)`, its twin `h₁ = (f₁, b)` runs `j → i`

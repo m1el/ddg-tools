@@ -879,7 +879,7 @@ an earlier version with another title, were read).
   `DdgProofs/Delaunay/PlanarFlipCount.lean` (`planar-flip-count`; Edelsbrunner, *Geometry and
   Topology for Mesh Generation*, Sec. 1.3). Fortune's note was not used.
 - **Proved (trimmed, 2026-11-05, layer 3).** Everything but the finiteness, on the gluing data of
-  `DdgProofs/Delaunay/Complex.lean` (self-loops, multiple edges, faces glued to themselves):
+  `DDG/Mesh/Gluing.lean` (self-loops, multiple edges, faces glued to themselves):
   `DdgProofs/Delaunay/Termination.lean` (`it-delaunay-self-glued`, `it-delaunay-potential`,
   `it-delaunay-flip-algorithm`) and `DdgProofs/Delaunay/FlipQueue.lean` (`it-delaunay-flip-loop`).
   Every non-Delaunay interior edge can be flipped (an edge with one face on both sides is always
@@ -1539,7 +1539,7 @@ rotation (numerical devices); anything about rounding.
   surfaces is the flip of `it-delaunay-flip-termination` above (signpost paper Sec. 3.3).
 - **Source check.** Not re-read for this entry; the statement is elementary combinatorics.
 - **Proved (trimmed, 2026-11-05).** The topological part, for the flip on gluing data
-  (`DdgProofs/Delaunay/Flip.lean`, `it-complex-flip`) and hence for an oriented mesh whose vertex
+  (`DDG/Mesh/GluingFlip.lean`, `it-complex-flip`) and hence for an oriented mesh whose vertex
   stars are single fans (`DdgProofs/Delaunay/FromTriMesh.lean`, `it-complex-from-mesh`): the flip
   of an interior edge whose two triangles are distinct keeps the vertices (each with its class, also
   when `i, j, k, l` coincide), the number of edges and faces, the boundary halfedges with their end

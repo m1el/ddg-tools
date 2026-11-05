@@ -1,5 +1,5 @@
-import DdgProofs.Cotan
-import DdgProofs.GaussBonnet
+import DDG.Mesh.TriMesh
+import DDG.Mesh.GaussBonnet
 
 /-!
 # The cotan formula, the cotan Laplacian and the lumped mass

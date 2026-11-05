@@ -1,11 +1,11 @@
-import DdgProofs.Delaunay.Flip
+import DDG.Mesh.GluingFlip
 import DdgProofs.Delaunay.Local
 
 /-!
 # Edge-length metrics on gluing data, cone angles, and the flip
 
 A **piecewise flat metric** on a triangulated surface given by gluing data
-(`DdgProofs/Delaunay/Complex.lean`) is a length for every edge such that every face satisfies the
+(`DDG/Mesh/Gluing.lean`) is a length for every edge such that every face satisfies the
 strict triangle inequalities (Bobenko–Springborn 2007, Sec. 2; Fisher–Springborn–Bobenko–Schröder
 2007, Sec. 2; Sharp–Soliman–Crane 2019, Sec. 2.1): `IsMetric ℓ`, with `ℓ : Halfedge F → ℝ` equal on
 twins. Every face is then a Euclidean triangle and the surface is flat away from the vertices.

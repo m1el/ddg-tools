@@ -1,4 +1,4 @@
-import DdgProofs.Cotan
+import DDG.Mesh.TriMesh
 
 /-!
 # Discrete curvature and discrete Gauss–Bonnet

@@ -1,4 +1,4 @@
-import DdgProofs.Orientation
+import DDG.Mesh.Orientation
 import DdgProofs.Intrinsic.AppsAmrVector
 
 /-!

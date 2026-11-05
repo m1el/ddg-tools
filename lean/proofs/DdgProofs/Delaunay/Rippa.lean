@@ -1,5 +1,5 @@
 import DdgProofs.Delaunay.Local
-import DdgProofs.Cotan
+import DDG.Mesh.TriMesh
 import DdgProofs.Laplace.Cotan
 
 /-!
@@ -7,7 +7,7 @@ import DdgProofs.Laplace.Cotan
 
 For vertex values `u_i, u_j, u_k, u_l` on the diamond `(a, b, c, d, e)` of
 `DdgProofs/Delaunay/Local.lean`, the Dirichlet energy of the piecewise linear interpolant on the
-two triangles `ijk`, `jil` is the cotan energy (`cotEnergy`, `DdgProofs/Cotan.lean`, which
+two triangles `ijk`, `jil` is the cotan energy (`cotEnergy`, `DDG/Mesh/TriMesh.lean`, which
 `cotan_formula` identifies with `∫ |∇u|²` over each triangle)
 `diamondEnergy a b c d e u_i u_j u_k u_l`. After the flip it is the energy of the new diamond
 `(f, c, e, b, d)` with the values read in its order `(u_k, u_l, u_j, u_i)`.

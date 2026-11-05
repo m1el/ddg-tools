@@ -14,7 +14,7 @@ Laplace–Beltrami operator for simplicial surfaces*, DCG 38, 2007, Sec. 2–3, 
 Fisher, Springborn, Bobenko, Schröder, *An algorithm for the construction of intrinsic Delaunay
 triangulations with applications to digital geometry processing*, Computing 81, 2007, Sec. 2):
 *while some interior edge is not locally Delaunay, flip it.* The triangulations are the gluing
-data of `DdgProofs/Delaunay/Complex.lean` (self-loops, multiple edges and faces glued to
+data of `DDG/Mesh/Gluing.lean` (self-loops, multiple edges and faces glued to
 themselves allowed), with an edge-length metric (`DdgProofs/Delaunay/Metric.lean`).
 
 ## Main results

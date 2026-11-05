@@ -1,4 +1,4 @@
-import DdgProofs.GaussBonnet
+import DDG.Mesh.GaussBonnet
 
 /-!
 # Consistent orientation of the faces of a `TriMesh`

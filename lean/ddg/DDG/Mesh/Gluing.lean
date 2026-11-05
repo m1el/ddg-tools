@@ -60,9 +60,9 @@ faces glued to themselves (`twin (f, 0) = (f, 1)`), vertices with a single corne
 * `Iso`: a relabelling of the faces with a rotation of each face that carries one twin map to the
   other; it preserves `V`, `E`, `F` and `χ` (`Iso.eulerChar_eq`).
 
-The edge flip and its invariants are in `DdgProofs/Delaunay/Flip.lean`, edge lengths, corner and
+The edge flip and its invariants are in `DDG/Mesh/GluingFlip.lean`, edge lengths, corner and
 cone angles in `DdgProofs/Delaunay/Metric.lean`, the simplicial `TriMesh` of
-`DdgProofs/GaussBonnet.lean` as gluing data in `DdgProofs/Delaunay/FromTriMesh.lean`.
+`DDG/Mesh/GaussBonnet.lean` as gluing data in `DdgProofs/Delaunay/FromTriMesh.lean`.
 -/
 
 namespace DDG.Delaunay

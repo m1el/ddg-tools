@@ -10,8 +10,8 @@ import DdgProofs.Solver
 import DDG.Geometry.Triangle
 import DDG.Geometry.PlaneLemmas
 import DDG.Geometry.Barycentric
-import DdgProofs.Cotan
-import DdgProofs.GaussBonnet
+import DDG.Mesh.TriMesh
+import DDG.Mesh.GaussBonnet
 import DdgProofs.Yamabe
 import DDG.Geometry.Stable
 import DdgProofs.Oracle.Scalar
@@ -51,8 +51,8 @@ import DdgProofs.Delaunay.Local
 import DdgProofs.Delaunay.Rippa
 import DdgProofs.Delaunay.Potential
 import DdgProofs.Delaunay.Encroachment
-import DdgProofs.Delaunay.Complex
-import DdgProofs.Delaunay.Flip
+import DDG.Mesh.Gluing
+import DDG.Mesh.GluingFlip
 import DdgProofs.Delaunay.Metric
 import DdgProofs.Delaunay.FromTriMesh
 import DdgProofs.Delaunay.Termination
@@ -105,7 +105,7 @@ import DdgProofs.IntegerCoords
 import DdgProofs.IntrinsicSimplification
 import DdgProofs.PointsAsTori
 import DdgProofs.TriangleIntegral
-import DdgProofs.Orientation
+import DDG.Mesh.Orientation
 import DdgProofs.Bff.ConformalEnergy
 import DdgProofs.Intrinsic.SingularityIndex
 import DdgProofs.Conformal.Distortion

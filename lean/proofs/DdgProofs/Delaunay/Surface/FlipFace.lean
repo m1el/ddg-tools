@@ -4,7 +4,7 @@ import DdgProofs.Delaunay.Surface.Quad
 /-!
 # Delaunay layer 4: the flip of an overlaid triangulation, face level
 
-The flip of the edge `h₀ = (f₀, a)` of `t` (`DdgProofs/Delaunay/Flip.lean`, `Metric.lean`) on an
+The flip of the edge `h₀ = (f₀, a)` of `t` (`DDG/Mesh/GluingFlip.lean`, `Metric.lean`) on an
 overlay `O : Overlay s t` whose two faces `f₀ = (i, j, k)` and `f₁ = (j, i, l)` are laid out
 **in one plane** (`FlipOK.coplanar`: the motion `layΔ` matching the two copies of the edge `ij`
 is the identity, so `lay f₁` is the triangle `j, i, l` next to `lay f₀ = i, j, k`). With the

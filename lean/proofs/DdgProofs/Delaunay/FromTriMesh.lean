@@ -1,12 +1,12 @@
 import DdgProofs.Delaunay.Metric
-import DdgProofs.Orientation
+import DDG.Mesh.Orientation
 
 /-!
 # A simplicial `TriMesh` as gluing data
 
-The simplicial meshes of `DdgProofs/GaussBonnet.lean` (`TriMesh`: faces as vertex triples) with
-a consistent orientation (`TriMesh.Oriented`, `DdgProofs/Orientation.lean`) are gluing data in the
-sense of `DdgProofs/Delaunay/Complex.lean`: the halfedges are the same pairs `(f, k)`, and the twin
+The simplicial meshes of `DDG/Mesh/GaussBonnet.lean` (`TriMesh`: faces as vertex triples) with
+a consistent orientation (`TriMesh.Oriented`, `DDG/Mesh/Orientation.lean`) are gluing data in the
+sense of `DDG/Mesh/Gluing.lean`: the halfedges are the same pairs `(f, k)`, and the twin
 is `TriMesh.twin` (the reversed halfedge, or the halfedge itself on the boundary). This is Rust
 `Complex::from_tri_mesh` (`crates/ddg-intrinsic/src/complex.rs`): same faces, halfedges, edges and
 vertices, with the same ids.

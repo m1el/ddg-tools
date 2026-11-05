@@ -5,7 +5,7 @@ import DdgProofs.Delaunay.Surface.Relayout
 # Delaunay layer 4: the flip of an overlaid triangulation, edge level and assembly
 
 Continues `FlipFace.lean`. The halfedges of the flipped triangulation `t'` are those of `t`
-renamed by the 4-cycle `σ = flipPerm h₀` (`DdgProofs/Delaunay/Flip.lean`): `σ h₀ = h₀.next` is
+renamed by the 4-cycle `σ = flipPerm h₀` (`DDG/Mesh/GluingFlip.lean`): `σ h₀ = h₀.next` is
 the new edge `l → k`, and every **outer** side of the diamond (`h₀.next = j→k`, `h₀.prev = k→i`,
 `(twin h₀).next = i→l`, `(twin h₀).prev = l→j`) keeps its two end points under the new layouts
 (`outer_lay`); the cells of the new face at a point of an outer side are the cells of the old

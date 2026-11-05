@@ -1,5 +1,5 @@
 import DdgProofs.Oracle.Geometry
-import DdgProofs.Cotan
+import DDG.Mesh.TriMesh
 
 /-!
 # Cut flow: the clamp of the crossing parameter

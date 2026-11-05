@@ -1,7 +1,7 @@
 import DdgProofs.Certificate
 import DdgProofs.Problem
-import DdgProofs.GaussBonnet
-import DdgProofs.Cotan
+import DDG.Mesh.GaussBonnet
+import DDG.Mesh.TriMesh
 import DdgProofs.Laplace.Cotan
 
 /-!
