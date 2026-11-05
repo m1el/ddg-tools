@@ -183,7 +183,7 @@ theorem cornerAngleAt_toGluing (f : F) :
     exact Intrinsic.cornerAngle_swap _ _ _
 
 omit [Fintype F] in
-theorem angleAt_eq_sum (hM : M.Valid) (f : F) (v : V) :
+theorem angleAt_eq_sum_corners (hM : M.Valid) (f : F) (v : V) :
     ((if M.tail (f, 0) = v then M.angleA f else 0) + (if M.tail (f, 1) = v then M.angleB f else 0) +
       (if M.tail (f, 2) = v then M.angleC f else 0)) = M.angleAt f v := by
   have hab := hM.ab f
@@ -210,7 +210,7 @@ theorem coneAngle_toGluing (hM : M.Valid) (hfan : M.FansConnected hO)
   refine Finset.sum_congr rfl fun f _ => ?_
   obtain ⟨c0, c1, c2⟩ := M.cornerAngleAt_toGluing f
   rw [Fin.sum_univ_three, c0, c1, c2]
-  exact M.angleAt_eq_sum hM f (M.tail h)
+  exact M.angleAt_eq_sum_corners hM f (M.tail h)
 
 end TriMesh
 
