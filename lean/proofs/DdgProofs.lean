@@ -18,6 +18,7 @@ import DdgProofs.Oracle.Problem
 import DdgProofs.Oracle.Regularized
 import DdgProofs.Oracle.Unbounded
 import DdgProofs.Oracle.Mesh
+import DdgProofs.Oracle.Intrinsic
 import DdgProofs.Bff.Laplace
 import DdgProofs.Bff.Cut
 import DdgProofs.Bff.Curve
@@ -42,7 +43,7 @@ import DdgProofs.ConeFeedback
 import DdgProofs.Cuts.VertexLimit
 import DdgProofs.Cuts.Stop
 import DdgProofs.Intrinsic.Diamond
-import DdgProofs.Intrinsic.Delaunay
+import DdgProofs.Intrinsic.FlipAngles
 import DdgProofs.Delaunay.Local
 import DdgProofs.Delaunay.Rippa
 import DdgProofs.Delaunay.Potential

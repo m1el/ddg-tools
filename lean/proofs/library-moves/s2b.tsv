@@ -6,4 +6,19 @@
 #   Intrinsic/Delaunay.lean -> Triangle.lean: DDG.Intrinsic.cornerAngle_swap
 #   Intrinsic/Diamond.lean -> Geometry/PlaneLemmas.lean: DDG.Intrinsic.dist2_comm, dist2_nonneg,
 #     dist2_sq', dist2_pos_of_sda_ne, isTriangle_of_sda_ne, two_mul_triArea_dist2
+#   Intrinsic/Delaunay.lean -> Intrinsic/FlipAngles.lean (git mv; the rest cut out):
+#     DDG.Intrinsic.quad_angle_sum, flip_angle_i, flip_angle_j, flip_convex, flip_angle_sums
+#   Intrinsic/Delaunay.lean -> Delaunay/Local.lean (criterion, section in namespace DDG.Intrinsic):
+#     DDG.Intrinsic.cot_add_cot, sin_nonneg_iff_le_pi, div_nonneg_iff_of_pos, cotanWeight_eq_sin_div,
+#     cotanWeight_nonneg_iff, cotanWeight_pos_iff, cotanWeight_eq_zero_iff, half_cotanWeight_sign,
+#     cotanWeightFromLengths_eq_cot, delaunay_iff_cotanWeight_nonneg,
+#     angle_sum_le_pi_iff_cotanWeight_nonneg, pi_lt_angle_sum_iff_cotanWeight_neg,
+#     delaunay_of_same_triangle, diamondConvex_of_pi_le, diamondConvex_of_not_delaunay,
+#     diamondConvex_of_cotanWeight_neg, flip_delaunayExcess, flip_of_not_delaunay, flip_of_tie,
+#     offDiag_eq_neg_half_cotanWeight, cotanWeight_eq_neg_two_mul_offDiag, offDiag_nonpos_iff
+#   Intrinsic/Delaunay.lean -> Oracle/Intrinsic.lean (app, oracle bridges):
+#     DDG.Intrinsic.delaunayExcess_eq, delaunayHolds_iff, cotanWeight_eq, cotanWeightFromLengths_eq,
+#     oppositeAngles_eq, delaunayExcess_eq'
 DdgProofs.Geometry.PlaneLemmas	DDG.Geometry.PlaneLemmas
+DdgProofs.Intrinsic.FlipAngles	DDG.Intrinsic.FlipAngles
+DdgProofs.Oracle.Intrinsic	DdgProofs.Oracle.Intrinsic

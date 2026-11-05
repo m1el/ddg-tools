@@ -1,4 +1,5 @@
-import DdgProofs.Intrinsic.Delaunay
+import DdgProofs.Intrinsic.FlipAngles
+import DdgProofs.Oracle.Intrinsic
 
 /-!
 # Delaunay triangulations of piecewise flat surfaces, layer 1: one diamond
@@ -75,15 +76,320 @@ against the works here.
 
 Mathlib, `DdgProofs/Triangle.lean` (the corner angle, cotangent and area from three lengths)
 and, for the proofs only, the planar layout of a diamond in `DdgProofs/Intrinsic/Diamond.lean`
-and `DdgProofs/Intrinsic/Delaunay.lean` (which are stated about the oracle's `Ddg.*`
-definitions). The statements of this file mention only `Triangle.lean` definitions and the plane
-`ℝ × ℝ` with `dist2` (`DdgProofs/Bff/Quality.lean`); `flipLength_eq_flippedLengthFromLengths`
-is the bridge to the oracle's flipped length.
+and `DdgProofs/Intrinsic/FlipAngles.lean` (which are stated about the oracle's `Ddg.*`
+definitions). The statements of the `Delaunay` part of this file mention only `Triangle.lean` definitions and
+the plane `ℝ × ℝ` with `dist2` (`DdgProofs/Bff/Quality.lean`);
+`flipLength_eq_flippedLengthFromLengths` is the bridge to the oracle's flipped length. The
+section on the intrinsic criterion (namespace `DDG.Intrinsic`, moved here from
+`DdgProofs/Intrinsic/Delaunay.lean`) is still stated about the oracle's `cotanWeight` and
+`delaunayExcess`, with the bridges in `DdgProofs/Oracle/Intrinsic.lean`.
 -/
 
 noncomputable section
 
 namespace DDG
+
+/-! ## The intrinsic Delaunay criterion of one diamond, on the oracle's definitions
+
+(Moved here from `DdgProofs/Intrinsic/Delaunay.lean` in library step S2b; the names keep the
+`DDG.Intrinsic` namespace until step S4.)
+
+* **`it-delaunay-condition`**, **`it-cotan-weight`** — the oracle's `cotanWeight` (and the Rust
+  function with this tag) is the sum `cot θ_k + cot θ_l`: twice the cotan weight
+  `w = ½ (cot θ_k + cot θ_l)` of the edge (SPEC N6, N17), and minus twice the entry of the cotan
+  Laplacian, `L_ij = −w` (`offDiag_eq_neg_half_cotanWeight`, `cotanWeight_eq_neg_two_mul_offDiag`).
+  For two angles in `(0, π)`: `cot θ_k + cot θ_l = sin(θ_k + θ_l)/(sin θ_k sin θ_l)`, so the sum,
+  and with it `w`, is `≥ 0`, `> 0`, `= 0` exactly when `θ_k + θ_l` is `≤ π`, `< π`, `= π`
+  (`cotanWeight_nonneg_iff`, `cotanWeight_pos_iff`, `cotanWeight_eq_zero_iff`,
+  `half_cotanWeight_sign`); the same from the five lengths
+  (`delaunay_iff_cotanWeight_nonneg`). An edge that violates the condition
+  has a strictly convex diamond (`diamondConvex_of_not_delaunay`); two corners of one triangle
+  never violate it (`delaunay_of_same_triangle`). A flip of a strictly convex diamond negates
+  the excess `θ_k + θ_l − π` (`flip_delaunayExcess`), so the flip of a violating edge gives an
+  edge that satisfies the condition strictly (`flip_of_not_delaunay`).
+
+Termination of the flipping algorithm, existence and uniqueness of the intrinsic Delaunay
+triangulation and Rippa's theorem are cited (`CITED.md`).
+-/
+
+namespace Intrinsic
+
+open scoped DDG.Oracle
+open Real
+
+/-! ### Cotangents of two angles -/
+
+/-- `cot x + cot y = sin(x + y)/(sin x sin y)`. -/
+theorem cot_add_cot {x y : ℝ} (hx : sin x ≠ 0) (hy : sin y ≠ 0) :
+    cot x + cot y = sin (x + y) / (sin x * sin y) := by
+  rw [cot_eq_cos_div_sin, cot_eq_cos_div_sin, sin_add]
+  field_simp
+  ring
+
+/-- For `0 < z < 2π`: `sin z ≥ 0 ⟺ z ≤ π`. -/
+theorem sin_nonneg_iff_le_pi {z : ℝ} (h0 : 0 < z) (h2 : z < 2 * π) : 0 ≤ sin z ↔ z ≤ π := by
+  constructor
+  · intro h
+    by_contra hcon
+    have h1 := Real.sin_pos_of_pos_of_lt_pi (sub_pos.mpr (not_le.mp hcon))
+      (by linarith : z - π < π)
+    rw [Real.sin_sub_pi] at h1
+    linarith
+  · exact fun h => Real.sin_nonneg_of_nonneg_of_le_pi h0.le h
+
+theorem div_nonneg_iff_of_pos {x y : ℝ} (hy : 0 < y) : 0 ≤ x / y ↔ 0 ≤ x := by
+  constructor
+  · intro h
+    have := mul_nonneg h hy.le
+    rwa [div_mul_cancel₀ _ hy.ne'] at this
+  · exact fun h => div_nonneg h hy.le
+
+/-- **The sum of the two cotangents has the sign of `π − (θ_k + θ_l)`**: for angles in `(0, π)`
+the oracle's `cotanWeight` (`cot θ_k + cot θ_l`, twice the weight `w` of SPEC N6) is
+`sin(θ_k + θ_l)/(sin θ_k sin θ_l)` with a positive denominator.
+
+[formula: it-cotan-weight] -/
+theorem cotanWeight_eq_sin_div {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
+    (hl : θl < π) :
+    Ddg.cotanWeight (cot θk) (cot θl) = sin (θk + θl) / (sin θk * sin θl) ∧
+      0 < sin θk * sin θl := by
+  have s1 := Real.sin_pos_of_pos_of_lt_pi hk0 hk
+  have s2 := Real.sin_pos_of_pos_of_lt_pi hl0 hl
+  exact ⟨by rw [cotanWeight_eq, cot_add_cot s1.ne' s2.ne'], mul_pos s1 s2⟩
+
+/-- **The Delaunay condition is the nonnegativity of the cotan weight**: for two angles in
+`(0, π)`, `cot θ_k + cot θ_l ≥ 0 ⟺ θ_k + θ_l ≤ π`. (The oracle's `cotanWeight` is `2w`; for the
+weight `w` itself see `half_cotanWeight_sign`.)
+
+[formula: it-cotan-weight] -/
+theorem cotanWeight_nonneg_iff {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
+    (hl : θl < π) :
+    0 ≤ Ddg.cotanWeight (cot θk) (cot θl) ↔ Ddg.delaunayExcess θk θl ≤ 0 := by
+  obtain ⟨e, hpos⟩ := cotanWeight_eq_sin_div hk0 hk hl0 hl
+  rw [e, delaunayExcess_eq, div_nonneg_iff_of_pos hpos,
+    sin_nonneg_iff_le_pi (by linarith) (by linarith)]
+  constructor <;> intro h <;> linarith
+
+/-- The strict form: `cot θ_k + cot θ_l > 0 ⟺ θ_k + θ_l < π`.
+
+[formula: it-cotan-weight] -/
+theorem cotanWeight_pos_iff {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
+    (hl : θl < π) :
+    0 < Ddg.cotanWeight (cot θk) (cot θl) ↔ Ddg.delaunayExcess θk θl < 0 := by
+  obtain ⟨e, hpos⟩ := cotanWeight_eq_sin_div hk0 hk hl0 hl
+  rw [e, delaunayExcess_eq, div_pos_iff_of_pos_right hpos,
+    sin_pos_iff_lt_pi (by linarith) (by linarith)]
+  constructor <;> intro h <;> linarith
+
+/-- The weight vanishes exactly at a tie, `θ_k + θ_l = π` (the four points are cocircular). -/
+theorem cotanWeight_eq_zero_iff {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
+    (hl : θl < π) :
+    Ddg.cotanWeight (cot θk) (cot θl) = 0 ↔ Ddg.delaunayExcess θk θl = 0 := by
+  have h1 := cotanWeight_nonneg_iff hk0 hk hl0 hl
+  have h2 := cotanWeight_pos_iff hk0 hk hl0 hl
+  constructor
+  · intro h
+    have a1 := h1.mp h.ge
+    have a2 : ¬ Ddg.delaunayExcess θk θl < 0 := fun hlt => (h2.mpr hlt).ne' h
+    linarith [not_lt.mp a2]
+  · intro h
+    have a1 := h1.mpr h.le
+    have a2 : ¬ 0 < Ddg.cotanWeight (cot θk) (cot θl) := fun hpos => (h2.mp hpos).ne h
+    linarith [not_lt.mp a2]
+
+/-- **The weight `w = ½ (cot θ_k + cot θ_l)` of SPEC N6 is half the oracle's `cotanWeight` and
+has the same sign**: `w ≥ 0 ⟺ θ_k + θ_l ≤ π`, `w > 0 ⟺ θ_k + θ_l < π`,
+`w = 0 ⟺ θ_k + θ_l = π`, for two angles in `(0, π)`.
+
+[formula: it-cotan-weight] -/
+theorem half_cotanWeight_sign {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
+    (hl : θl < π) :
+    (0 ≤ Ddg.cotanWeight (cot θk) (cot θl) / 2 ↔ Ddg.delaunayExcess θk θl ≤ 0) ∧
+      (0 < Ddg.cotanWeight (cot θk) (cot θl) / 2 ↔ Ddg.delaunayExcess θk θl < 0) ∧
+      (Ddg.cotanWeight (cot θk) (cot θl) / 2 = 0 ↔ Ddg.delaunayExcess θk θl = 0) := by
+  rw [← cotanWeight_nonneg_iff hk0 hk hl0 hl, ← cotanWeight_pos_iff hk0 hk hl0 hl,
+    ← cotanWeight_eq_zero_iff hk0 hk hl0 hl]
+  refine ⟨?_, ?_, ?_⟩ <;> constructor <;> intro h <;> linarith
+
+/-! ### From the five lengths -/
+
+/-- The oracle's weight from the lengths is the sum of the cotangents of the two opposite
+angles. -/
+theorem cotanWeightFromLengths_eq_cot {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    Ddg.cotanWeightFromLengths a b c d e =
+      Ddg.cotanWeight (cot (cornerAngle a b c)) (cot (cornerAngle a d e)) := by
+  rw [cotanWeightFromLengths_eq, cotanWeight_eq, cornerCot_eq_cot hk, cornerCot_eq_cot hl]
+
+/-- **The Delaunay condition from the five lengths**: the oracle's test with tolerance `0` on
+its `oppositeAngles` holds exactly when its `cotanWeightFromLengths` is nonnegative.
+
+[formula: it-delaunay-condition] -/
+theorem delaunay_iff_cotanWeight_nonneg {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    Ddg.delaunayHolds 0 (Ddg.oppositeAngles a b c d e).1 (Ddg.oppositeAngles a b c d e).2 =
+        true ↔ 0 ≤ Ddg.cotanWeightFromLengths a b c d e := by
+  rw [delaunayHolds_iff, oppositeAngles_eq hk hl, cotanWeightFromLengths_eq_cot hk hl,
+    cotanWeight_nonneg_iff (cornerAngle_pos hk) (cornerAngle_lt_pi hk) (cornerAngle_pos hl)
+      (cornerAngle_lt_pi hl)]
+
+/-- The same as a statement about the angles: `θ_k + θ_l ≤ π ⟺` weight `≥ 0`.
+
+[formula: it-delaunay-condition] -/
+theorem angle_sum_le_pi_iff_cotanWeight_nonneg {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    cornerAngle a b c + cornerAngle a d e ≤ π ↔ 0 ≤ Ddg.cotanWeightFromLengths a b c d e := by
+  rw [cotanWeightFromLengths_eq_cot hk hl,
+    cotanWeight_nonneg_iff (cornerAngle_pos hk) (cornerAngle_lt_pi hk) (cornerAngle_pos hl)
+      (cornerAngle_lt_pi hl), delaunayExcess_eq]
+  constructor <;> intro h <;> linarith
+
+/-- An edge violates the condition exactly when its cotan weight is negative. -/
+theorem pi_lt_angle_sum_iff_cotanWeight_neg {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    π < cornerAngle a b c + cornerAngle a d e ↔ Ddg.cotanWeightFromLengths a b c d e < 0 := by
+  rw [← not_le, angle_sum_le_pi_iff_cotanWeight_nonneg hk hl, not_le]
+
+/-- **Two corners of one triangle sum to less than `π`**: an edge with the same triangle on both
+sides (an endpoint of degree one) satisfies the condition strictly (the paper's remark in
+Sec. 4.1). -/
+theorem delaunay_of_same_triangle {a b c : ℝ} (h : IsTriangle a b c) :
+    Ddg.delaunayExcess (cornerAngle a b c) (cornerAngle b c a) < 0 := by
+  have h1 := cornerAngle_add_cornerAngle_add_cornerAngle h
+  have h2 := cornerAngle_pos h.rotate.rotate
+  rw [delaunayExcess_eq]
+  linarith
+
+/-- An edge whose opposite angles sum to `π` or more (a violation, or a tie) has a strictly
+convex diamond. -/
+theorem diamondConvex_of_pi_le {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) (h : π ≤ cornerAngle a b c + cornerAngle a d e) :
+    DiamondConvex a b c d e := by
+  have hq := quad_angle_sum hk hl
+  have a1 := cornerAngle_pos hk.rotate.rotate
+  have a3 := cornerAngle_pos hl.rotate.rotate
+  have b1 := cornerAngle_pos hk.rotate
+  have b3 := cornerAngle_pos hl.rotate
+  rw [diamondConvex_iff_angles hk hl]
+  constructor <;> linarith
+
+/-- **An edge that violates the Delaunay condition can be flipped**: if `θ_k + θ_l > π` the
+diamond is strictly convex (the paper's remark in Sec. 4.1).
+
+[formula: it-delaunay-condition] -/
+theorem diamondConvex_of_not_delaunay {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) (h : π < cornerAngle a b c + cornerAngle a d e) :
+    DiamondConvex a b c d e :=
+  diamondConvex_of_pi_le hk hl h.le
+
+/-- The same from the weight: an edge with a negative cotan weight can be flipped.
+
+[formula: it-cotan-weight] -/
+theorem diamondConvex_of_cotanWeight_neg {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) (h : Ddg.cotanWeightFromLengths a b c d e < 0) :
+    DiamondConvex a b c d e :=
+  diamondConvex_of_not_delaunay hk hl ((pi_lt_angle_sum_iff_cotanWeight_neg hk hl).mpr h)
+
+/-! ### The flip of a violating edge -/
+
+/-- **A flip negates the Delaunay excess**: for a strictly convex diamond, the opposite angles
+of the new edge `kl` (at `j` and at `i`) sum to `2π − (θ_k + θ_l)`.
+
+[formula: it-delaunay-condition] -/
+theorem flip_delaunayExcess {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e)
+    (hconv : DiamondConvex a b c d e) :
+    Ddg.delaunayExcess (cornerAngle (Ddg.flippedLengthFromLengths a b c d e) c e)
+        (cornerAngle (Ddg.flippedLengthFromLengths a b c d e) b d) =
+      -Ddg.delaunayExcess (cornerAngle a b c) (cornerAngle a d e) := by
+  obtain ⟨h1, h2, -, -⟩ := flip_angle_sums hk hl hconv
+  have hq := quad_angle_sum hk hl
+  rw [delaunayExcess_eq, delaunayExcess_eq, h1, h2]
+  linarith
+
+/-- **After the flip of a violating edge the new edge satisfies the condition strictly**: if
+`θ_k + θ_l > π`, the diamond is strictly convex, the two new triangles satisfy the strict
+triangle inequalities, the oracle's excess of the new diamond `(f, c, e, b, d)` is negative and
+its cotan weight positive.
+
+[formula: it-delaunay-condition] -/
+theorem flip_of_not_delaunay {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e)
+    (h : π < cornerAngle a b c + cornerAngle a d e) :
+    DiamondConvex a b c d e ∧
+      Ddg.delaunayExcess
+          (Ddg.oppositeAngles (Ddg.flippedLengthFromLengths a b c d e) c e b d).1
+          (Ddg.oppositeAngles (Ddg.flippedLengthFromLengths a b c d e) c e b d).2 < 0 ∧
+      0 < Ddg.cotanWeightFromLengths (Ddg.flippedLengthFromLengths a b c d e) c e b d := by
+  have hconv := diamondConvex_of_not_delaunay hk hl h
+  obtain ⟨t1, t2⟩ := flip_isTriangle hk hl hconv
+  have hk' := t2.swap
+  have hx := flip_delaunayExcess hk hl hconv
+  have hneg : Ddg.delaunayExcess
+      (cornerAngle (Ddg.flippedLengthFromLengths a b c d e) c e)
+      (cornerAngle (Ddg.flippedLengthFromLengths a b c d e) b d) < 0 := by
+    rw [hx, delaunayExcess_eq]
+    linarith
+  refine ⟨hconv, ?_, ?_⟩
+  · rw [oppositeAngles_eq hk' t1]
+    exact hneg
+  · rw [cotanWeightFromLengths_eq_cot hk' t1]
+    exact (cotanWeight_pos_iff (cornerAngle_pos hk') (cornerAngle_lt_pi hk') (cornerAngle_pos t1)
+      (cornerAngle_lt_pi t1)).mpr hneg
+
+/-- At a tie (`θ_k + θ_l = π`) both diagonals satisfy the condition with equality: the flip
+gives the excess `0` again (SPEC N6). -/
+theorem flip_of_tie {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e)
+    (h : cornerAngle a b c + cornerAngle a d e = π) :
+    DiamondConvex a b c d e ∧
+      Ddg.delaunayExcess (cornerAngle (Ddg.flippedLengthFromLengths a b c d e) c e)
+        (cornerAngle (Ddg.flippedLengthFromLengths a b c d e) b d) = 0 := by
+  have hconv := diamondConvex_of_pi_le hk hl h.ge
+  refine ⟨hconv, ?_⟩
+  rw [flip_delaunayExcess hk hl hconv, delaunayExcess_eq]
+  linarith
+
+/-! ### The entry of the cotan Laplacian -/
+
+section Laplacian
+
+variable {V F : Type*} [DecidableEq V] [Fintype F]
+
+/-- **The entry of the cotan Laplacian is minus the cotan weight `w`, i.e. minus half the
+oracle's `cotanWeight`** (`cotan-laplacian`, `DdgProofs/Cotan.lean`; `L` positive semidefinite):
+if only the two faces `f₁ ≠ f₂` of a mesh have the edge `{i, j}`, then
+`L_ij = −½ (cot θ_k + cot θ_l) = −w`, with the two cotangents those of the corners opposite the
+edge.
+
+[formula: it-cotan-weight] -/
+theorem offDiag_eq_neg_half_cotanWeight (M : TriMesh V F) {i j : V} {f₁ f₂ : F} (hne : f₁ ≠ f₂)
+    (h : ∀ f, f ≠ f₁ → f ≠ f₂ → M.cotOpp f i j = 0) :
+    M.offDiag i j = -(Ddg.cotanWeight (M.cotOpp f₁ i j) (M.cotOpp f₂ i j)) / 2 := by
+  unfold TriMesh.offDiag
+  rw [cotanWeight_eq, Finset.sum_eq_add f₁ f₂ hne (fun f _ hf => h f hf.1 hf.2)
+    (fun hf => absurd (Finset.mem_univ _) hf) (fun hf => absurd (Finset.mem_univ _) hf)]
+
+/-- **The function tagged `it-cotan-weight` returns `2w = −2 L_ij`**: the sum of the two
+cotangents is twice the weight of SPEC N6 and minus twice the entry of the cotan Laplacian.
+
+[formula: it-cotan-weight] -/
+theorem cotanWeight_eq_neg_two_mul_offDiag (M : TriMesh V F) {i j : V} {f₁ f₂ : F}
+    (hne : f₁ ≠ f₂) (h : ∀ f, f ≠ f₁ → f ≠ f₂ → M.cotOpp f i j = 0) :
+    Ddg.cotanWeight (M.cotOpp f₁ i j) (M.cotOpp f₂ i j) = -2 * M.offDiag i j := by
+  rw [offDiag_eq_neg_half_cotanWeight M hne h]
+  ring
+
+/-- **The off-diagonal entry is nonpositive exactly when the cotan weight of the edge is
+nonnegative**, that is (by `cotanWeight_nonneg_iff`) when the edge satisfies the Delaunay
+condition: the Laplacian of a Delaunay triangulation has no positive off-diagonal entry
+(SPEC §5 item 4, N6). -/
+theorem offDiag_nonpos_iff (M : TriMesh V F) {i j : V} {f₁ f₂ : F} (hne : f₁ ≠ f₂)
+    (h : ∀ f, f ≠ f₁ → f ≠ f₂ → M.cotOpp f i j = 0) :
+    M.offDiag i j ≤ 0 ↔ 0 ≤ Ddg.cotanWeight (M.cotOpp f₁ i j) (M.cotOpp f₂ i j) := by
+  rw [offDiag_eq_neg_half_cotanWeight M hne h]
+  constructor <;> intro h' <;> linarith
+
+end Laplacian
+
+end Intrinsic
 
 namespace Delaunay
 
