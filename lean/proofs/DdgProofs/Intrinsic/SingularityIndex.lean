@@ -18,20 +18,28 @@ valid mesh, in exact arithmetic. The model, halfedge `h = (f, k)` from corner `k
   `Complex.arg` has the same range as `f64::atan2`);
 * `index f = (Σ_k ω_(f,k) + n Ω_f) / 2π`.
 
-Proved:
+Proved, for `ω` evaluated by `arg` on **both** halfedges (the code before the fix):
 
 * `faceIndex_isInt`: every `index f` is an integer (so the code's `round` returns it);
 * `omega_twin`: `ω_{twin h} = −ω_h`, **except** `ω_{twin h} = π` when `ω_h = π`;
-* `sum_faceIndex`: `Σ_f index f = n χ + #{h : ω_h = π} / 2`, i.e. `n χ` plus the number of edges
-  at which the transported values are exactly opposite (`u_j = −c·r_ij u_i`, `c > 0`): each such
-  edge adds `+1`;
-* `sum_round_faceIndex`: the same for the sum of the rounded indices, the code's `index_sum`;
-* `sum_faceIndex_of_ne_pi`: if no `ω_h` equals `π`, `Σ_f index f = n χ` (discrete
-  Poincaré–Hopf).
+* `sum_faceIndex`, `sum_round_faceIndex`: `Σ_f index f = n χ + #{h : ω_h = π} / 2`: every edge
+  at which the transported values are exactly opposite (`u_j = −c·r_ij u_i`, `c > 0`) adds `+1`;
+* `sum_faceIndex_of_ne_pi`: if no `ω_h` equals `π`, `Σ_f index f = n χ`.
 
-So with the half-open range `(−π, π]` the sum the code reports is `n χ` only under the
-hypothesis "no edge at exactly `π`"; `crates/ddg-intrinsic-apps/tests/vector_pi_tie.rs` builds
-such fields in floating point (where the twin's `ω` is `±π` by the sign of a rounding error).
+The code now (`singularities`) shifts `ω` on the halfedge with the higher index by `∓2π` when
+the pair sum lies outside `[−π, π]` (`omegaCode`); in exact arithmetic that is `omegaFixed`:
+`−ω_{twin h}` on the higher halfedge, at a tie `+π` on the lower and `−π` on the higher
+(`omegaCode_eq_omegaFixed`). For that rule:
+
+* `omegaFixed_add_twin`: the two halfedges of an edge have opposite angles, exactly;
+* `faceIndexFixed_isInt`: every face index is still an integer (`omegaFixed ≡ ω` mod `2π`);
+* `sum_faceIndexFixed`, `sum_round_faceIndexFixed`: **`index_sum = n χ` unconditionally** (discrete
+  Poincaré–Hopf, GODF Eq. 19, App. B), on a closed valid oriented manifold mesh in which every
+  vertex is a corner of some face (so `Θ_v > 0` and `s_v = 2π/Θ_v` is what the code computes;
+  an isolated vertex would have `Θ_v = 0`).
+
+`crates/ddg-intrinsic-apps/tests/vector_pi_tie.rs` is the regression test in floating point
+(before the fix 25 of 240 single ties on icosphere(1) gave `index_sum = 3 ≠ 2`).
 -/
 
 noncomputable section
@@ -213,9 +221,7 @@ theorem sum_faceHolonomy (hM : M.Valid) (hman : M.Manifold) (hclosed : M.boundar
 /-- **The index sum, exactly** (`singularities` with `ω ∈ (−π, π]`): on a closed valid oriented
 manifold mesh with signpost frames and a field without zeros,
 `Σ_f index f = n χ + #{h : ω_h = π}/2`; each edge with `ω = π` (both of its halfedges, by
-`omega_twin`) adds `+1` to the Poincaré–Hopf value `n χ`.
-
-[formula: app-vector-singularity-index] -/
+`omega_twin`) adds `+1` to the Poincaré–Hopf value `n χ`. -/
 theorem sum_faceIndex (hM : M.Valid) (hman : M.Manifold) (hclosed : M.boundaryVertices = ∅)
     (hO : M.Oriented) (hΘ : ∀ v, M.angleSum v ≠ 0) (n : ℕ) {φ : F × Fin 3 → ℝ}
     {u : V → ℂ} (hu : ∀ v, u v ≠ 0) :
@@ -244,11 +250,9 @@ theorem sum_faceIndex (hM : M.Valid) (hman : M.Manifold) (hclosed : M.boundaryVe
   rw [div_eq_iff hπ]
   linear_combination hpair / 2
 
-/-- **What `singularities` reports as `index_sum`**: the sum of the rounded indices. With
+/-- **What `singularities` reported as `index_sum` before the fix**: the sum of the rounded indices. With
 signpost frames every index is an integer (`faceIndex_isInt`), so rounding changes nothing and
-`index_sum = n χ + #{h : ω_h = π}/2`.
-
-[formula: app-vector-singularity-index] -/
+`index_sum = n χ + #{h : ω_h = π}/2`. -/
 theorem sum_round_faceIndex (hM : M.Valid) (hman : M.Manifold) (hclosed : M.boundaryVertices = ∅)
     (hO : M.Oriented) (hΘ : ∀ v, M.angleSum v ≠ 0) (n : ℕ) {φ : F × Fin 3 → ℝ}
     (hφ : M.SignpostFrames φ) {u : V → ℂ} (hu : ∀ v, u v ≠ 0) :
@@ -260,15 +264,180 @@ theorem sum_round_faceIndex (hM : M.Valid) (hman : M.Manifold) (hclosed : M.boun
   rw [hm, round_intCast]
 
 /-- **Discrete Poincaré–Hopf** (GODF Eq. 19, App. B): if no halfedge has `ω = π` exactly, the
-indices add up to `n χ`.
-
-[formula: app-vector-singularity-index] -/
+indices add up to `n χ`. -/
 theorem sum_faceIndex_of_ne_pi (hM : M.Valid) (hman : M.Manifold)
     (hclosed : M.boundaryVertices = ∅) (hO : M.Oriented) (hΘ : ∀ v, M.angleSum v ≠ 0) (n : ℕ)
     {φ : F × Fin 3 → ℝ} {u : V → ℂ} (hu : ∀ v, u v ≠ 0) (hπ : ∀ h, M.omega n φ u h ≠ π) :
     ∑ f, M.faceIndex n φ u f = n * M.eulerChar := by
   rw [M.sum_faceIndex hM hman hclosed hO hΘ n hu]
   simp [hπ]
+
+/-! ## The rule of the code: the twin gets `−ω`
+
+`singularities` evaluates `ω` on the halfedge with the lower index and gives its twin `−ω`
+(`Some(t) if t < h => -omega(t)`). `idx` is the numbering of the halfedges (`3f + k` in the
+code; any injective numbering). -/
+
+open Classical in
+/-- `ω` as the code uses it: `−ω_{twin h}` if the twin has the lower index, else `ω_h`. -/
+def omegaFixed (idx : F × Fin 3 → ℕ) (n : ℕ) (φ : F × Fin 3 → ℝ) (u : V → ℂ)
+    (h : F × Fin 3) : ℝ :=
+  if M.HasTwin h ∧ idx (M.twin h) < idx h then -M.omega n φ u (M.twin h) else M.omega n φ u h
+
+/-- The index of `f` with `omegaFixed`. -/
+def faceIndexFixed (idx : F × Fin 3 → ℕ) (n : ℕ) (φ : F × Fin 3 → ℝ) (u : V → ℂ) (f : F) : ℝ :=
+  (∑ k, M.omegaFixed idx n φ u (f, k) + n * M.faceHolonomy f) / (2 * π)
+
+omit [DecidableEq V] [Fintype V] [Fintype F] in
+/-- The two halfedges of an edge get opposite angles (exactly, also at a tie). -/
+theorem omegaFixed_add_twin (hM : M.Valid) (hO : M.Oriented) {idx : F × Fin 3 → ℕ}
+    (hidx : Function.Injective idx) (n : ℕ) (φ : F × Fin 3 → ℝ) (u : V → ℂ) {h : F × Fin 3}
+    (ht : M.HasTwin h) : M.omegaFixed idx n φ u h + M.omegaFixed idx n φ u (M.twin h) = 0 := by
+  have htt := M.hasTwin_twin ht
+  have hne : idx (M.twin h) ≠ idx h := fun e => M.twin_ne hM ht (hidx e)
+  unfold omegaFixed
+  rw [M.twin_twin hO]
+  rcases lt_or_gt_of_ne hne with hl | hl
+  · rw [ite_eq_left ⟨ht, hl⟩, ite_eq_right (fun hc => absurd hc.2 (lt_asymm hl))]
+    ring
+  · rw [ite_eq_right (fun hc => absurd hc.2 (lt_asymm hl)), ite_eq_left ⟨htt, hl⟩]
+    ring
+
+open Classical in
+/-- `ω` literally as `singularities` evaluates it: `arg` on every halfedge; on the halfedge with
+the higher index of a twin pair, shifted by `∓2π` when the pair sum `ω_h + ω_{twin h}` lies
+outside `[−π, π]` (`if pair > PI { w - TAU } else if pair < -PI { w + TAU } else { w }`). -/
+def omegaCode (idx : F × Fin 3 → ℕ) (n : ℕ) (φ : F × Fin 3 → ℝ) (u : V → ℂ)
+    (h : F × Fin 3) : ℝ :=
+  if M.HasTwin h ∧ idx (M.twin h) < idx h then
+    (if π < M.omega n φ u h + M.omega n φ u (M.twin h) then M.omega n φ u h - 2 * π
+      else if M.omega n φ u h + M.omega n φ u (M.twin h) < -π then M.omega n φ u h + 2 * π
+      else M.omega n φ u h)
+  else M.omega n φ u h
+
+omit [DecidableEq V] [Fintype V] [Fintype F] in
+/-- **The code's rule is `omegaFixed`** (in exact arithmetic): the shift happens exactly at a
+tie, and there it turns `+π` into `−π = −ω_{twin h}`.
+
+[formula: app-vector-singularity-index] -/
+theorem omegaCode_eq_omegaFixed (hO : M.Oriented) (idx : F × Fin 3 → ℕ) (n : ℕ)
+    (φ : F × Fin 3 → ℝ) {u : V → ℂ} (hu : ∀ v, u v ≠ 0) (h : F × Fin 3) :
+    M.omegaCode idx n φ u h = M.omegaFixed idx n φ u h := by
+  unfold omegaCode omegaFixed
+  split_ifs with hc h1 h2
+  · have e := M.omega_twin hO n φ hu hc.1
+    split_ifs at e with hπ
+    · rw [e, hπ]; ring
+    · rw [e] at h1; linarith [Real.pi_pos]
+  · have e := M.omega_twin hO n φ hu hc.1
+    split_ifs at e with hπ
+    · rw [e, hπ] at h2; linarith [Real.pi_pos]
+    · rw [e] at h2; linarith [Real.pi_pos]
+  · have e := M.omega_twin hO n φ hu hc.1
+    split_ifs at e with hπ
+    · rw [e, hπ] at h1; linarith [Real.pi_pos]
+    · rw [e]; ring
+  · rfl
+
+omit [DecidableEq V] [Fintype V] [Fintype F] in
+/-- `omegaFixed` differs from `ω` by full turns (by `−2π` exactly at a tie on the higher
+halfedge). -/
+theorem omegaFixed_eq (hO : M.Oriented) (idx : F × Fin 3 → ℕ) (n : ℕ) (φ : F × Fin 3 → ℝ)
+    {u : V → ℂ} (hu : ∀ v, u v ≠ 0) (h : F × Fin 3) :
+    ∃ m : ℤ, M.omegaFixed idx n φ u h = M.omega n φ u h + 2 * π * m := by
+  unfold omegaFixed
+  split_ifs with hc
+  · have htt := M.hasTwin_twin hc.1
+    have e := M.omega_twin hO n φ hu htt
+    rw [M.twin_twin hO] at e
+    -- `e : ω h = if ω (twin h) = π then π else −ω (twin h)`
+    split_ifs at e with hπ
+    · exact ⟨-1, by rw [hπ, e]; push_cast; ring⟩
+    · exact ⟨0, by rw [e]; push_cast; ring⟩
+  · exact ⟨0, by push_cast; ring⟩
+
+omit [Fintype V] in
+/-- With the code's rule every face index is still an integer. -/
+theorem faceIndexFixed_isInt (hM : M.Valid) (hO : M.Oriented) (idx : F × Fin 3 → ℕ) (n : ℕ)
+    {φ : F × Fin 3 → ℝ} (hφ : M.SignpostFrames φ) {u : V → ℂ} (hu : ∀ v, u v ≠ 0) (f : F) :
+    ∃ m : ℤ, M.faceIndexFixed idx n φ u f = m := by
+  obtain ⟨m, hm⟩ := M.faceIndex_isInt hM n hφ hu f
+  obtain ⟨m0, h0⟩ := M.omegaFixed_eq hO idx n φ hu (f, 0)
+  obtain ⟨m1, h1⟩ := M.omegaFixed_eq hO idx n φ hu (f, 1)
+  obtain ⟨m2, h2⟩ := M.omegaFixed_eq hO idx n φ hu (f, 2)
+  refine ⟨m + m0 + m1 + m2, ?_⟩
+  unfold faceIndexFixed
+  unfold faceIndex at hm
+  rw [Fin.sum_univ_three] at hm ⊢
+  rw [h0, h1, h2]
+  have hπ : (2 * π) ≠ 0 := by positivity
+  rw [div_eq_iff hπ] at hm ⊢
+  push_cast
+  linear_combination hm
+
+omit [DecidableEq V] [Fintype V] [Fintype F] in
+theorem cornerAngleAt_pos (hM : M.Valid) (f : F) (k : Fin 3) : 0 < M.cornerAngleAt f k := by
+  fin_cases k
+  · exact cornerAngle_pos (hM.tri f)
+  · exact cornerAngle_pos (hM.tri f).rotate
+  · exact cornerAngle_pos (hM.tri f).rotate.rotate
+
+omit [Fintype V] in
+/-- A vertex that is a corner of some face has a positive angle sum. -/
+theorem angleSum_pos_of_corner (hM : M.Valid) {v : V} (hv : ∃ f k, M.corner f k = v) : 0 < M.angleSum v := by
+  obtain ⟨f, k, hk⟩ := hv
+  unfold angleSum
+  simp only [M.angleAt_eq_sum hM]
+  have hnn : ∀ g (l : Fin 3), 0 ≤ if M.corner g l = v then M.cornerAngleAt g l else 0 := by
+    intro g l
+    split_ifs
+    · exact (M.cornerAngleAt_pos hM g l).le
+    · exact le_rfl
+  refine Finset.sum_pos' (fun g _ => Finset.sum_nonneg fun l _ => hnn g l) ⟨f, Finset.mem_univ _, ?_⟩
+  refine Finset.sum_pos' (fun l _ => hnn f l) ⟨k, Finset.mem_univ _, ?_⟩
+  rw [ite_eq_left hk]
+  exact M.cornerAngleAt_pos hM f k
+
+/-- **Poincaré–Hopf for the code's rule, unconditionally**: on a closed valid oriented manifold
+mesh in which every vertex is a corner of some face, for a field without zeros and any
+injective numbering of the halfedges, `Σ_f index f = n χ` — ties at `ω = π` included.
+
+[formula: app-vector-singularity-index] -/
+theorem sum_faceIndexFixed (hM : M.Valid) (hman : M.Manifold) (hclosed : M.boundaryVertices = ∅)
+    (hO : M.Oriented) (hcorner : ∀ v, ∃ f k, M.corner f k = v) {idx : F × Fin 3 → ℕ}
+    (hidx : Function.Injective idx) (n : ℕ) (φ : F × Fin 3 → ℝ) (u : V → ℂ) :
+    ∑ f, M.faceIndexFixed idx n φ u f = n * M.eulerChar := by
+  have hΘ : ∀ v, M.angleSum v ≠ 0 := fun v => (M.angleSum_pos_of_corner hM (hcorner v)).ne'
+  unfold faceIndexFixed
+  rw [← Finset.sum_div, Finset.sum_add_distrib, ← Finset.mul_sum, ← Fintype.sum_prod_type',
+    M.sum_faceHolonomy hM hman hclosed hΘ]
+  set ω := M.omegaFixed idx n φ u
+  have hzero : ∑ h, ω h = 0 := by
+    have hc : ∑ h, ω (M.twinPerm hO h) = ∑ h, ω h := Equiv.sum_comp _ ω
+    have : ∑ h, (ω h + ω (M.twinPerm hO h)) = 0 :=
+      Finset.sum_eq_zero fun h _ =>
+        M.omegaFixed_add_twin hM hO hidx n φ u (M.hasTwin_of_closed hM hO hclosed h)
+    rw [Finset.sum_add_distrib, hc] at this
+    linarith
+  simp only [Prod.mk.eta]
+  rw [hzero, zero_add]
+  have hπ : (2 * π) ≠ 0 := by positivity
+  rw [div_eq_iff hπ]
+  ring
+
+/-- **What `singularities` reports as `index_sum`** (with the fix): the sum of the rounded
+indices, which are integers for signpost frames (`faceIndexFixed_isInt`), is `n χ`.
+
+[formula: app-vector-singularity-index] -/
+theorem sum_round_faceIndexFixed (hM : M.Valid) (hman : M.Manifold)
+    (hclosed : M.boundaryVertices = ∅) (hO : M.Oriented) (hcorner : ∀ v, ∃ f k, M.corner f k = v)
+    {idx : F × Fin 3 → ℕ} (hidx : Function.Injective idx) (n : ℕ) {φ : F × Fin 3 → ℝ}
+    (hφ : M.SignpostFrames φ) {u : V → ℂ} (hu : ∀ v, u v ≠ 0) :
+    ∑ f, ((round (M.faceIndexFixed idx n φ u f) : ℤ) : ℝ) = n * M.eulerChar := by
+  rw [← M.sum_faceIndexFixed hM hman hclosed hO hcorner hidx n φ u]
+  refine Finset.sum_congr rfl fun f _ => ?_
+  obtain ⟨m, hm⟩ := M.faceIndexFixed_isInt hM hO idx n hφ hu f
+  rw [hm, round_intCast]
 
 end TriMesh
 

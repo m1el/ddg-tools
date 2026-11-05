@@ -114,6 +114,14 @@ theorem halfedge_ne_swap (hM : M.Valid) (f : F) (k l : Fin 3) :
     halfedge_two, Prod.swap_prod_mk, ne_eq, Prod.mk.injEq, not_and] <;>
   intros <;> simp_all [eq_comm]
 
+omit [DecidableEq V] in
+/-- In a valid mesh no halfedge is its own twin. -/
+theorem twin_ne (hM : M.Valid) {h : F × Fin 3} (ht : M.HasTwin h) : M.twin h ≠ h := by
+  intro e
+  have := M.halfedge_twin ht
+  rw [e] at this
+  exact M.halfedge_ne_swap hM h.1 h.2 h.2 this
+
 variable [Fintype F]
 
 /-- **A halfedge has no twin iff its edge is a boundary edge** (lies in exactly one face), on a

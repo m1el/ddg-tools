@@ -28,11 +28,11 @@ These come first because they may be bugs or wrong statements, independent of wh
    was not checked.
 4. **`app-vector-singularity-index` interval mismatch**: CITED says ω ∈ (−π, π), the code uses (−π, π]; an edge at
    exactly π breaks the twin cancellation, so the index sum needs a "no edge at π" hypothesis.
-   **Status (2026-11-05): confirmed, proved, Rust behaviour unchanged (reported).** `Intrinsic/SingularityIndex.lean`:
-   `Σ_f index = nχ + #{edges with ω = π}` exactly (`sum_faceIndex`, `sum_round_faceIndex`), `= nχ` without ties
-   (`sum_faceIndex_of_ne_pi`). In f64 `tests/vector_pi_tie.rs` (ignored) puts one exact tie `u_j = −r_h u_i` on each
-   halfedge of icosphere(1): `index_sum = 3 ≠ 2` for 25 of 240 (the twin's ω is ±π by the sign of a rounding error).
-   Only hand-made fields hit it; CITED entry moved to the machine-checked note with the (−π, π] wording.
+   **Status (2026-11-05): confirmed and fixed.** `Intrinsic/SingularityIndex.lean`: with `arg` on both halfedges
+   `Σ_f index = nχ + #{edges with ω = π}` exactly (`sum_faceIndex`); in f64 one exact tie `u_j = −r_h u_i` on each
+   halfedge of icosphere(1) gave `index_sum = 3 ≠ 2` in 25 of 240 cases. `singularities` now shifts the higher
+   halfedge of a pair by `∓2π` when `|ω_h + ω_t| > π` (tie: `+π`/`−π`; bitwise unchanged elsewhere, pins pass); proved `index_sum = nχ` unconditionally for that rule
+   (`sum_round_faceIndexFixed`; closed, oriented, every vertex in a face); `tests/vector_pi_tie.rs` passes (n = 1, 2).
 5. **`rc-ncg`** convergence claim needs strong Wolfe conditions; the crate's Armijo-only search does not provide them.
 
 ## Ranked candidates (value to library correctness × feasibility)

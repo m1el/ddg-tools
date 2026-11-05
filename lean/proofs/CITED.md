@@ -1121,11 +1121,13 @@ at an interior vertex add up to its angle defect), `app-vector-fd-connection-lap
 edge's contribution to `u* L u` is `w |u_j − r u_i|²`; the entries are Hermitian),
 `app-amr-map-distortion` (singular values from the conformal and anticonformal parts);
 `app-vector-singularity-index` (`DdgProofs/Intrinsic/SingularityIndex.lean`, GODF Sec. 6.1.3,
-Eq. 19, App. B): with `ω_ij ∈ (−π, π]` (the range of `arg`/`atan2` the code uses) and
-`u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|`, on a closed valid oriented mesh with signpost frames
-every face index `(ω_ij + ω_jk + ω_ki + nΩ_ijk)/2π` is an integer, and the indices add up to
-`nχ + #{edges with ω_ij = π}` — both halfedges of such an edge get `+π`, so the twin terms do not
-cancel; the sum is `nχ` (discrete Poincaré–Hopf) only when no `ω` is exactly `π`. Not
+Eq. 19, App. B): `ω_ij ∈ (−π, π]` (the range of `arg`/`atan2`) with
+`u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|` on every halfedge, except that at a tie (both halfedges of an
+edge at `+π`) the halfedge with the higher index takes `−π`; on a closed valid oriented mesh with signpost frames, every vertex in some face,
+every face index `(ω_ij + ω_jk + ω_ki + nΩ_ijk)/2π` is an integer and the indices add up to `nχ`
+(discrete Poincaré–Hopf) unconditionally. (Evaluating `arg` on both halfedges, as the code did
+before, gives `+π` twice at an edge with exactly opposite transported values, and the sum
+`nχ + #such edges`.) Not
 machine-checked: the entries below, and everything about rounding and the solvers.
 
 ### [formula: app-vector-transport] Transport of tangent vectors along an edge

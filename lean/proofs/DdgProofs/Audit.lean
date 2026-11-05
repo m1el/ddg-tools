@@ -1502,3 +1502,11 @@ open DdgProofs
 #print axioms TriMesh.sum_faceIndex
 #print axioms TriMesh.sum_round_faceIndex
 #print axioms TriMesh.sum_faceIndex_of_ne_pi
+#print axioms TriMesh.twin_ne
+#print axioms TriMesh.omegaCode_eq_omegaFixed
+#print axioms TriMesh.omegaFixed_add_twin
+#print axioms TriMesh.omegaFixed_eq
+#print axioms TriMesh.faceIndexFixed_isInt
+#print axioms TriMesh.angleSum_pos_of_corner
+#print axioms TriMesh.sum_faceIndexFixed
+#print axioms TriMesh.sum_round_faceIndexFixed
