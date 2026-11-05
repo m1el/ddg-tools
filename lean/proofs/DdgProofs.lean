@@ -88,7 +88,7 @@ import DdgProofs.IntrinsicApps.HeatFem
 import DdgProofs.Intrinsic.AppsAmrVector
 import DdgProofs.Developability.Vec
 import DdgProofs.Developability.Basic
-import DdgProofs.Developability.Invariance
+import DdgProofs.Geometry.RigidInvariance
 import DdgProofs.Developability.Combinatorial
 import DdgProofs.Developability.Covariance
 import DdgProofs.Developability.MaxCovariance
@@ -108,3 +108,17 @@ import DdgProofs.TriangleIntegral
 import DdgProofs.Orientation
 import DdgProofs.Bff.ConformalEnergy
 import DdgProofs.Intrinsic.SingularityIndex
+import DdgProofs.Conformal.Distortion
+import DdgProofs.Geometry.SignedAngle
+import DdgProofs.Geometry.SegmentCrossing
+import DdgProofs.Geometry.SimilarityFit
+import DdgProofs.Intrinsic.Mollification
+import DdgProofs.Core.Fields
+import DdgProofs.Laplace.Cotan
+import DdgProofs.Laplace.Kernel
+import DdgProofs.Optimization.PiecewiseAffine
+import DdgProofs.Optimization.Wolfe
+import DdgProofs.Repulsive.Curves.DualLengths
+import DdgProofs.Cuts.WeightedEntries
+import DdgProofs.Laplace.Dirichlet
+import DdgProofs.Laplace.Poisson

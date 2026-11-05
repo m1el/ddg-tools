@@ -1,4 +1,6 @@
 import DdgProofs.Intrinsic.FlipAngles
+import DdgProofs.Cotan
+import DdgProofs.Laplace.Cotan
 
 /-!
 # Delaunay triangulations of piecewise flat surfaces, layer 1: one diamond

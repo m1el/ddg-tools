@@ -1,0 +1,2 @@
+# S3': current module	final module
+# No moves in S3'. The library-bound modules of Repulsive, SDF and FEM already had no oracle import (closure checked) and no Oracle/Ddg constant use (lean-uses); the only change is that the global simp lemmas Oracle.{zero,one,two,three,four,sqrt,atan,pi,abs}_eq in DdgProofs.Oracle.Scalar are now @[scoped simp] in DDG.Oracle.

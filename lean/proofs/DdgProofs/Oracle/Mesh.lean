@@ -1,5 +1,6 @@
 import DdgProofs.Oracle.Problem
 import DdgProofs.GaussBonnet
+import DdgProofs.Laplace.Cotan
 
 /-!
 # The mesh formulas of the oracle: cotan Laplacian, curvature, lumped mass

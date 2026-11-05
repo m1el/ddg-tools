@@ -1,5 +1,6 @@
 import DdgOracle.Formulas
-import DdgProofs.Newton
+import DdgProofs.Optimization.PiecewiseAffine
+import DdgProofs.SoftThreshold
 import DdgProofs.Triangle
 
 /-!
@@ -37,21 +38,21 @@ scoped instance instScalarReal : Ddg.Scalar ℝ where
 
 theorem ofNat_eq (n : ℕ) : (@OfNat.ofNat ℝ n Ddg.instOfNatScalar) = (n : ℝ) := rfl
 
-@[simp] theorem zero_eq : (@OfNat.ofNat ℝ 0 Ddg.instOfNatScalar) = (0 : ℝ) := by
+@[scoped simp] theorem zero_eq : (@OfNat.ofNat ℝ 0 Ddg.instOfNatScalar) = (0 : ℝ) := by
   rw [ofNat_eq]; norm_num
-@[simp] theorem one_eq : (@OfNat.ofNat ℝ 1 Ddg.instOfNatScalar) = (1 : ℝ) := by
+@[scoped simp] theorem one_eq : (@OfNat.ofNat ℝ 1 Ddg.instOfNatScalar) = (1 : ℝ) := by
   rw [ofNat_eq]; norm_num
-@[simp] theorem two_eq : (@OfNat.ofNat ℝ 2 Ddg.instOfNatScalar) = (2 : ℝ) := by
+@[scoped simp] theorem two_eq : (@OfNat.ofNat ℝ 2 Ddg.instOfNatScalar) = (2 : ℝ) := by
   rw [ofNat_eq]
-@[simp] theorem three_eq : (@OfNat.ofNat ℝ 3 Ddg.instOfNatScalar) = (3 : ℝ) := by
+@[scoped simp] theorem three_eq : (@OfNat.ofNat ℝ 3 Ddg.instOfNatScalar) = (3 : ℝ) := by
   rw [ofNat_eq]
-@[simp] theorem four_eq : (@OfNat.ofNat ℝ 4 Ddg.instOfNatScalar) = (4 : ℝ) := by
+@[scoped simp] theorem four_eq : (@OfNat.ofNat ℝ 4 Ddg.instOfNatScalar) = (4 : ℝ) := by
   rw [ofNat_eq]
 
-@[simp] theorem sqrt_eq (x : ℝ) : Ddg.Scalar.sqrt x = √x := rfl
-@[simp] theorem atan_eq (x : ℝ) : Ddg.Scalar.atan x = Real.arctan x := rfl
-@[simp] theorem pi_eq : (Ddg.Scalar.pi : ℝ) = Real.pi := rfl
-@[simp] theorem abs_eq (x : ℝ) : Ddg.Scalar.abs x = |x| := (abs_eq_max_neg (a := x)).symm
+@[scoped simp] theorem sqrt_eq (x : ℝ) : Ddg.Scalar.sqrt x = √x := rfl
+@[scoped simp] theorem atan_eq (x : ℝ) : Ddg.Scalar.atan x = Real.arctan x := rfl
+@[scoped simp] theorem pi_eq : (Ddg.Scalar.pi : ℝ) = Real.pi := rfl
+@[scoped simp] theorem abs_eq (x : ℝ) : Ddg.Scalar.abs x = |x| := (abs_eq_max_neg (a := x)).symm
 
 /-! ## Soft threshold, clamp, bounded threshold -/
 

@@ -1,4 +1,4 @@
-import DdgProofs.PointsAsTori.Loss
+import DdgProofs.PointsAsTori.Torus
 
 /-!
 # Points as Tori: the 2D variant with circles (Fig. 10; SPEC §8.7, D15 (a))
