@@ -1,4 +1,5 @@
 import DdgProofs.Delaunay.PlanarFlip
+import DdgProofs.TriangleIntegral.Basic
 
 /-!
 # Planar Delaunay triangulations, part 3: termination of Lawson's flip algorithm

@@ -1,4 +1,4 @@
-import DdgProofs.Intrinsic.Barycentric
+import DdgProofs.Bff.Quality
 
 /-!
 # Intrinsic simplification: anisotropy, Galerkin coarsening, distortion, quadrics

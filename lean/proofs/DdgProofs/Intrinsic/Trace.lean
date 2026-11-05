@@ -1,5 +1,4 @@
 import DdgProofs.Intrinsic.Diamond
-import DdgProofs.Cuts.Crossing
 
 /-!
 # Intrinsic triangulations: one step of a tracing query

@@ -1,4 +1,4 @@
-import DdgProofs.TriangleIntegral.Basic
+import DdgProofs.Bff.Quality
 
 /-!
 # Planar Delaunay triangulations, part 1: triangles, circles and the lifting map in coordinates
