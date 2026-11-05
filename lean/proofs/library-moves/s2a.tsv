@@ -1,0 +1,18 @@
+# S2a: module moves for the base splits. Columns: current module <TAB> final module.
+# Declarations moved between files (old file -> new file; full names unchanged):
+#   Bff/Quality -> Bff/Quality (kept as Geometry/Plane): dot2..layout_isometric, sda_layout; toC_injective, toC_sub (from the signed-angle section)
+#   Bff/Quality -> Conformal/Distortion: layoutX/Y stay in Plane; jacS .. qcErrorEval_eq, sda_eq_jacDet_mul_area, sda_neg_iff_jacDet_neg, logScaleFactor*
+#   Bff/Quality -> Geometry/SignedAngle: signedCornerAngle*, conj_toC_mul_toC
+#   Bff/Quality -> Geometry/SegmentCrossing: strictlyOpposite*, crossingParam, crossingPoint, sda_sub_sda, properCrossing*
+#   Bff/Quality -> Geometry/SimilarityFit: centroid, simFit*, fit*, fit_similarity_*
+#   Bff/Quality -> Intrinsic/Mollification: MarginHolds, mollify*, isTriangle_of_margin, isTriangle_mollified
+#   Evaluated -> Evaluated (kept as Geometry/Stable): atan2, IsRearrangement, kahan*, sixteen_mul_triArea_sq_eq, ...
+#   Evaluated -> Core/Fields (app): TriMesh.angleDefectField, geodesicCurvatureField, gauss_bonnet_fields, laplacian_apply_of_ne, laplacian_apply_self
+DdgProofs.Bff.Quality	DDG.Geometry.Plane
+DdgProofs.Conformal.Distortion	DDG.Conformal.Distortion
+DdgProofs.Geometry.SignedAngle	DDG.Geometry.SignedAngle
+DdgProofs.Geometry.SegmentCrossing	DDG.Geometry.SegmentCrossing
+DdgProofs.Geometry.SimilarityFit	DDG.Geometry.SimilarityFit
+DdgProofs.Intrinsic.Mollification	DDG.Intrinsic.Mollification
+DdgProofs.Evaluated	DDG.Geometry.Stable
+DdgProofs.Core.Fields	DdgProofs.Core.Fields

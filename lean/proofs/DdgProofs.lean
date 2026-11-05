@@ -102,3 +102,9 @@ import DdgProofs.TriangleIntegral
 import DdgProofs.Orientation
 import DdgProofs.Bff.ConformalEnergy
 import DdgProofs.Intrinsic.SingularityIndex
+import DdgProofs.Conformal.Distortion
+import DdgProofs.Geometry.SignedAngle
+import DdgProofs.Geometry.SegmentCrossing
+import DdgProofs.Geometry.SimilarityFit
+import DdgProofs.Intrinsic.Mollification
+import DdgProofs.Core.Fields
