@@ -66,3 +66,4 @@ import DdgProofs.RepulsiveSurfaces
 import DdgProofs.IntegerCoords
 import DdgProofs.IntrinsicSimplification
 import DdgProofs.PointsAsTori
+import DdgProofs.TriangleIntegral
