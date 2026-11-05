@@ -794,6 +794,14 @@ an earlier version with another title, were read).
   triangulation (`existsUnique_delaunay`), `DdgProofs/Delaunay/PlanarUniqueness.lean`
   (`planar-delaunay-uniqueness`; the lifting argument, de Berg et al. Thm. 9.6–9.7). Only the
   surface case of this entry stays cited.
+- **Planar existence unconditional (2026-11-05).** Every finite `S ⊂ ℝ²` that is not collinear
+  (three points with `sda ≠ 0`; necessary for `S ≠ ∅`) has a triangulation
+  (`exists_triangulation`, `planar-triangulation-existence`; by induction, removing a
+  lexicographically extreme point that keeps the rest non-collinear and coning it back to the
+  visible boundary edges, `isTriangulation_insert`, `planar-triangulation-insertion`), hence a
+  Delaunay triangulation (`exists_delaunay`, `planar-delaunay-existence`),
+  `DdgProofs/Delaunay/Planar{Insertion,Existence}.lean`. The hypothesis of
+  `exists_delaunay_of_triangulation` is discharged.
 - **Why not formalized.** It is a global statement about all geodesic triangulations of a
   surface; neither piecewise flat surfaces nor immersed disks are in Mathlib.
 - **What depends on it.** That the result of Delaunay flipping is *the* Delaunay triangulation up

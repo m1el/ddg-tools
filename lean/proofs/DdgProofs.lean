@@ -60,6 +60,8 @@ import DdgProofs.Delaunay.PlanarBridge
 import DdgProofs.Delaunay.BoundaryFan
 import DdgProofs.Delaunay.PlanarUniqueness
 import DdgProofs.Delaunay.PlanarFlipCount
+import DdgProofs.Delaunay.PlanarInsertion
+import DdgProofs.Delaunay.PlanarExistence
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric
