@@ -63,7 +63,8 @@ pub fn closest_point_on_segment(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> [f64; 
 
 /// The closest point of the triangle `abc` to `p` (Ericson 2004, §5.1.5: the Voronoi regions of
 /// the corners, then of the edges, then the interior). A degenerate triangle is measured by its
-/// edges.
+/// edges. In exact arithmetic the result is the closest point of every triangle
+/// (`DdgProofs.RC.closestPtTri_isClosest` in `lean/proofs`, `RepulsiveCurves/ClosestPoints.lean`).
 ///
 /// [formula: pat-truth-closest-point]
 pub fn closest_point_on_triangle(p: [f64; 3], a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> [f64; 3] {

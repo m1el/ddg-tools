@@ -1110,7 +1110,7 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rc-penalty-hencky` | ″ | `penalties` | proved, `Penalties.lean` |
 | `rc-penalty-surface` | chain rule given `∇δ` | `penalties::surface` | proved, `Penalties.lean` |
 | `rc-distance-gradient` | distance to a closed convex set is `C¹` outside it, `∇δ = (x − π(x))/δ` | `obstacle` | cited (Bauschke & Combettes 2017, Ch. 12: `½δ²` of a closed convex set is differentiable with gradient `x − π(x)`; Ericson §5.1.5 for the closest point) |
-| `rc-closest-points` | segment–segment and point–triangle closest points (Ericson §5.1.9, §5.1.5) | `ccd`, `obstacle` | cited |
+| `rc-closest-points` | segment–segment and point–triangle closest points (Ericson §5.1.9, §5.1.5) | `ccd`, `obstacle` | proved, `ClosestPoints.lean` (exact distances = `primDist`, CCD safety end to end; the near-parallel overestimate of the former segment–segment routine, survey finding 1, is fixed) |
 | `rc-length-schedule` | common factor keeps ratios; total target formula | `step::schedule` | proved, `Schedule.lean` |
 | `rc-subdivision-constraints` | §5.4 mapping keeps every constraint but new surface rows | `subdivide` | proved, `Schedule.lean` |
 | `rc-armijo` | finite termination for a descent direction | `step::line_search` | cited (Nocedal & Wright §3.1 and Alg. 3.1; Boyd & Vandenberghe Alg. 9.2) |

@@ -471,9 +471,9 @@ theorem segSegCode_eq : segSegCode p1 q1 p2 q2 = segSegDist p1 q1 p2 q2 := by
         have e2 : (ssB p1 q1 p2 q2 * ssT p1 q1 p2 q2 - ssC p1 q1 p2) / ssA p1 q1 =
             ssS p1 q1 p2 q2 := valley_s_aux _ _ _ _ _ ha hD
         rw [clamp01_of_mem hS, e1, clamp01_of_mem hT, e2, clamp01_of_mem hS]
-        unfold segSegDist; rw [if_pos ⟨ha, he, hD, hi⟩]
-      · unfold segSegDist; rw [if_neg (fun h => hi h.2.2.2)]; exact min_le_left _ _
-    · unfold segSegDist; rw [if_neg (fun h => hc ⟨h.1, h.2.1, h.2.2.1⟩)]
+        unfold segSegDist; rw [ite_eq_left ⟨ha, he, hD, hi⟩]
+      · unfold segSegDist; rw [ite_eq_right (fun h => hi h.2.2.2)]; exact min_le_left _ _
+    · unfold segSegDist; rw [ite_eq_right (fun h => hc ⟨h.1, h.2.1, h.2.2.1⟩)]
   · unfold segSegCode
     split_ifs
     · exact le_min ssBest_ge (segSegDist_le ⟨clamp01_mem _, clamp01_mem _⟩)
@@ -490,7 +490,7 @@ theorem segSegDist_le_thr {ε : ℝ} (hε : 0 ≤ ε) :
   · obtain ⟨ha, he, hD, hi⟩ := hc
     have : 0 < ssDen p1 q1 p2 q2 :=
       lt_of_le_of_lt (mul_nonneg (mul_nonneg hε ssA_nonneg) ssE_nonneg) hD
-    unfold segSegDist; rw [if_pos ⟨ha, he, this, hi⟩]
+    unfold segSegDist; rw [ite_eq_left ⟨ha, he, this, hi⟩]
   · exact ssBest_ge
 
 theorem valley_aux (d1 d2 : E) (l : ℝ) (he : 0 < ⟪d2, d2⟫) :
@@ -536,7 +536,7 @@ theorem segSegThr_sq_le {ε : ℝ} (hε : 0 ≤ ε) :
     have hdist : segSegDist p1 q1 p2 q2 =
         ‖ssVec p1 q1 p2 q2 (ssS p1 q1 p2 q2) (ssT p1 q1 p2 q2)‖ := by
       apply le_antisymm
-      · unfold segSegDist; rw [if_pos ⟨ha, he, hD, hi⟩]; exact min_le_right _ _
+      · unfold segSegDist; rw [ite_eq_left ⟨ha, he, hD, hi⟩]; exact min_le_right _ _
       · obtain ⟨s, t, h, e⟩ := segSegDist_attained (p1 := p1) (q1 := q1) (p2 := p2) (q2 := q2)
         rw [e]
         refine norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) ?_
@@ -545,11 +545,11 @@ theorem segSegThr_sq_le {ε : ℝ} (hε : 0 ≤ ε) :
           (t - ssT p1 q1 p2 q2) • (q2 - p2)‖]
     by_cases hthr : ε * ssA p1 q1 * ssE p2 q2 < ssDen p1 q1 p2 q2
     · have : segSegThr p1 q1 p2 q2 ε = segSegDist p1 q1 p2 q2 := by
-        unfold segSegThr segSegDist; rw [if_pos ⟨ha, he, hthr, hi⟩, if_pos ⟨ha, he, hD, hi⟩]
+        unfold segSegThr segSegDist; rw [ite_eq_left ⟨ha, he, hthr, hi⟩, ite_eq_left ⟨ha, he, hD, hi⟩]
       rw [this]; nlinarith
     · have hthr' : ssDen p1 q1 p2 q2 ≤ ε * ssA p1 q1 * ssE p2 q2 := not_lt.1 hthr
       have hval : segSegThr p1 q1 p2 q2 ε = ssBest p1 q1 p2 q2 := by
-        unfold segSegThr; rw [if_neg (fun h => hthr h.2.2.1)]
+        unfold segSegThr; rw [ite_eq_right (fun h => hthr h.2.2.1)]
       rw [hval, hdist]
       -- walk along the valley towards the nearer end of the first segment
       have key : ∃ l : ℝ, l ^ 2 ≤ 1 / 4 ∧ ssBest p1 q1 p2 q2 ≤
@@ -589,7 +589,7 @@ theorem segSegThr_sq_le {ε : ℝ} (hε : 0 ≤ ε) :
   · have : segSegThr p1 q1 p2 q2 ε = segSegDist p1 q1 p2 q2 := by
       apply le_antisymm
       · unfold segSegThr segSegDist
-        rw [if_neg hc]
+        rw [ite_eq_right hc]
         split_ifs with h
         · exact (hc ⟨h.1, h.2.1, lt_of_le_of_lt (mul_nonneg (mul_nonneg hε ssA_nonneg)
             ssE_nonneg) h.2.2.1, h.2.2.2⟩).elim
@@ -753,7 +753,7 @@ theorem tN_nonneg : 0 ≤ tN a b c := by
 theorem ptTriDist_le {v w : ℝ} (h : InTri v w) : ptTriDist p a b c ≤ ‖p - triPt a b c v w‖ := by
   by_cases hN : tN a b c ≤ 0
   · -- collinear corners: slide along an affine dependence to an edge
-    unfold ptTriDist; rw [if_pos hN]
+    unfold ptTriDist; rw [ite_eq_left hN]
     have hN0 : tN a b c = 0 := le_antisymm hN tN_nonneg
     by_cases hA : 0 < tA a b
     · have hpar : tA a b • (c - a) - tB a b c • (b - a) = 0 := by
@@ -785,7 +785,7 @@ theorem ptTriDist_le {v w : ℝ} (h : InTri v w) : ptTriDist p a b c ≤ ‖p - 
       rw [← hconst l]
       exact ptEdges_le_of_bdry hin hbd
   · have hN' : tN a b c ≠ 0 := by intro h0; exact hN h0.le
-    unfold ptTriDist; rw [if_neg hN]
+    unfold ptTriDist; rw [ite_eq_right hN]
     split_ifs with hi
     · refine (min_le_right _ _).trans (norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) ?_)
       rw [triPt_sq_split hN' v w]
@@ -1020,13 +1020,13 @@ theorem voronoi_cover_real {A B C P Q v₀ w₀ : ℝ} (hA : 0 ≤ A) (hC : 0 �
   rcases hw.eq_or_lt with hw0 | hw0
   · -- on the edge `ab` (w₀ = 0)
     subst hw0
-    simp only [zero_mul, add_zero, sub_zero, mul_zero] at *
+    simp only [zero_mul, add_zero, sub_zero] at *
     rcases hv.eq_or_lt with hv0 | hv0
-    · subst hv0; simp only [zero_mul, sub_zero, one_mul, zero_sub] at *
+    · subst hv0; simp only [zero_mul, sub_zero, one_mul] at *
       exact absurd ⟨by linarith, by linarith⟩ t1
     rcases hα.eq_or_lt with hα0 | hα0
     · have : v₀ = 1 := by linarith
-      subst this; simp only [one_mul, sub_self, zero_mul, zero_sub, neg_mul, one_mul] at *
+      subst this; simp only [one_mul, sub_self, zero_mul, neg_mul] at *
       exact absurd ⟨by linarith, by linarith⟩ t2
     · have hY1z : Y1 = 0 := by
         have : (1 - v₀) * (-(v₀ * Y1)) = 0 := za
@@ -1042,10 +1042,10 @@ theorem voronoi_cover_real {A B C P Q v₀ w₀ : ℝ} (hA : 0 ≤ A) (hC : 0 �
   rcases hv.eq_or_lt with hv0 | hv0
   · -- on the edge `ac` (v₀ = 0, w₀ > 0)
     subst hv0
-    simp only [zero_mul, add_zero, sub_zero, mul_zero, zero_add, one_mul, neg_mul] at *
+    simp only [zero_mul, add_zero, sub_zero, zero_add, one_mul, neg_mul] at *
     rcases hα.eq_or_lt with hα0 | hα0
     · have : w₀ = 1 := by linarith
-      subst this; simp only [one_mul, sub_self, zero_mul, add_zero, zero_sub] at *
+      subst this; simp only [one_mul, sub_self, zero_mul, add_zero] at *
       exact absurd ⟨by linarith, by linarith⟩ t4
     · have hY2z : Y2 = 0 := by
         have h' : (1 - w₀) * (-(w₀ * Y2)) = 0 := by linarith
@@ -1148,24 +1148,27 @@ theorem closest_of_scalars {A B C P Q v₀ w₀ : ℝ} (eA : tA a b = A) (eB : t
   rw [eA, eB, eC, eP, eQ] at ea eb ec
   exact ⟨⟨v₀, w₀, h₀, rfl⟩, fun v w h => vi_suff rfl (ea ▸ hIa) (eb ▸ hIb) (ec ▸ hIc) h⟩
 
+omit [InnerProductSpace ℝ E] in
 theorem nearer_le_left (p x y : E) : ‖p - nearer p x y‖ ≤ ‖p - x‖ := by
   unfold nearer; split_ifs with h
   · exact norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) h.le
   · exact le_rfl
 
+omit [InnerProductSpace ℝ E] in
 theorem nearer_le_right (p x y : E) : ‖p - nearer p x y‖ ≤ ‖p - y‖ := by
   unfold nearer; split_ifs with h
   · exact le_rfl
   · exact norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) (not_lt.1 h)
 
+omit [InnerProductSpace ℝ E] in
 theorem nearer_cases (p x y : E) : nearer p x y = x ∨ nearer p x y = y := by
   unfold nearer; split_ifs <;> simp
 
 theorem cpSeg_eq (p a b : E) : cpSeg p a b = segPt a b (psParam p a b) := by
   unfold cpSeg psParam segPt
   by_cases h : ⟪b - a, b - a⟫ = 0
-  · rw [if_pos h, if_neg (by rw [h]; exact lt_irrefl 0)]; simp
-  · rw [if_neg h, if_pos (lt_of_le_of_ne real_inner_self_nonneg (Ne.symm h))]
+  · rw [ite_eq_left h, ite_eq_right (by rw [h]; exact lt_irrefl 0)]; simp
+  · rw [ite_eq_right h, ite_eq_left (lt_of_le_of_ne real_inner_self_nonneg (Ne.symm h))]
 
 theorem vden_eq : vVa p a b c + vVb p a b c + vVc p a b c = tN a b c := by
   obtain ⟨e1, e2, e3, e4, e5, e6⟩ := vd_eqs (p := p) (a := a) (b := b) (c := c)
@@ -1229,7 +1232,7 @@ theorem closestPtTri_isClosest :
       rw [add_zero, div_le_one hA]; linarith⟩ (by rw [hY1]; simp) (by rw [hY1]; simp) ?_
     rw [hY1]
     have : Q - P / A * B - 0 * C = (A * Q - B * P) / A := by field_simp; ring
-    rw [this]; simp only [mul_zero, neg_zero, zero_add, sub_zero, one_mul]
+    rw [this]; simp only [mul_zero, zero_add, sub_zero, one_mul]
     exact div_nonpos_of_nonpos_of_nonneg (by linarith) hA.le
   · -- the corner `c`
     have h := closest_of_scalars (p := p) rfl rfl rfl rfl rfl (v₀ := 0) (w₀ := 1)
@@ -1320,7 +1323,7 @@ theorem closestPtTri_isClosest :
       have := vden_eq (p := p) (a := a) (b := b) (c := c)
       unfold vVa vVb vVc at this; rw [e1, e2, e3, e4, e5, e6] at this
       rw [← this]; linarith [not_lt.1 t7]
-    have hdist : ptTriDist p a b c = ptEdges p a b c := by unfold ptTriDist; rw [if_pos hN]
+    have hdist : ptTriDist p a b c = ptEdges p a b c := by unfold ptTriDist; rw [ite_eq_left hN]
     -- the three candidates are points of the triangle at the edge distances
     have q1 : ∃ v w, InTri v w ∧ cpSeg p a b = triPt a b c v w ∧
         ‖p - cpSeg p a b‖ = psDist p a b := by
@@ -1383,9 +1386,281 @@ theorem closestPtTriRC_eq (hN : 0 < tN a b c) : closestPtTriRC p a b c = closest
     nlinarith [sq_nonneg (tA a b - tC a c), sq_nonneg (tA a b + tC a c - 2 * tB a b c)]
   have g7 : 0 < vVa p a b c + vVb p a b c + vVc p a b c := hden ▸ hN
   unfold closestPtTri closestPtTriRC
-  simp only [g3, g5, g6, g7, and_true, if_true, mul_one_div]
+  simp only [g3, g5, g6, g7, and_true, ite_true, mul_one_div]
 
 end Voronoi
+
+/-! ## The distances are `primDist` of `Ccd.lean`; safety of the advancement -/
+
+section Prim
+
+theorem weights2_point (P : Fin 2 → E)
+    (w : Weights (Fin 2)) : ∑ i, w.1 i • P i = segPt (P 0) (P 1) (w.1 1) := by
+  have h := w.2.2
+  rw [Fin.sum_univ_two] at h
+  rw [Fin.sum_univ_two]; unfold segPt
+  have : w.1 0 = 1 - w.1 1 := by linarith
+  rw [this]; module
+
+theorem weights2_mem (w : Weights (Fin 2)) : w.1 1 ∈ Icc (0 : ℝ) 1 := by
+  have h := w.2.2
+  rw [Fin.sum_univ_two] at h
+  exact ⟨w.2.1 1, by linarith [w.2.1 0]⟩
+
+/-- The weights `(1 − s, s)`. -/
+def weights2 {s : ℝ} (hs : s ∈ Icc (0 : ℝ) 1) : Weights (Fin 2) :=
+  ⟨![1 - s, s], fun i => by fin_cases i <;> simp [hs.1, hs.2], by simp [Fin.sum_univ_two]⟩
+
+theorem weights3_point (P : Fin 3 → E)
+    (w : Weights (Fin 3)) : ∑ i, w.1 i • P i = triPt (P 0) (P 1) (P 2) (w.1 1) (w.1 2) := by
+  have h := w.2.2
+  rw [Fin.sum_univ_three] at h
+  rw [Fin.sum_univ_three]; unfold triPt
+  have : w.1 0 = 1 - w.1 1 - w.1 2 := by linarith
+  rw [this]; module
+
+theorem weights3_mem (w : Weights (Fin 3)) : InTri (w.1 1) (w.1 2) := by
+  have h := w.2.2
+  rw [Fin.sum_univ_three] at h
+  exact ⟨w.2.1 1, w.2.1 2, by linarith [w.2.1 0]⟩
+
+/-- The weights `(1 − v − w, v, w)`. -/
+def weights3 {v w : ℝ} (h : InTri v w) : Weights (Fin 3) :=
+  ⟨![1 - v - w, v, w], fun i => by
+    obtain ⟨h1, h2, h3⟩ := h
+    fin_cases i <;> simp <;> linarith, by simp [Fin.sum_univ_three]; ring⟩
+
+theorem weights1_point (P : Fin 1 → E)
+    (w : Weights (Fin 1)) : ∑ i, w.1 i • P i = P 0 := by
+  have h := w.2.2
+  rw [Fin.sum_univ_one] at h ⊢
+  rw [h, one_smul]
+
+/-- The corner positions at time `τ`: `p_i − τ a_i`. -/
+def posAt {ι F : Type*} [AddCommGroup F] [Module ℝ F] (p a : ι → F) (τ : ℝ) : ι → F :=
+  fun i => p i - τ • a i
+
+theorem primPoint_eq_sum {ι F : Type*} [Fintype ι] [NormedAddCommGroup F] [NormedSpace ℝ F]
+    (p a : ι → F) (w : Weights ι) (τ : ℝ) : primPoint p a w τ = ∑ i, w.1 i • posAt p a τ i := rfl
+
+theorem primDist_bdd {ι κ F : Type*} [Fintype ι] [Fintype κ] [NormedAddCommGroup F]
+    [NormedSpace ℝ F] (p a : ι → F) (q b : κ → F) (τ : ℝ) :
+    BddBelow (Set.range fun x : Weights ι × Weights κ =>
+      ‖primPoint p a x.1 τ - primPoint q b x.2 τ‖) :=
+  ⟨0, by rintro _ ⟨x, rfl⟩; exact norm_nonneg _⟩
+
+/-- **The computed segment–segment distance is `primDist`** (exact arithmetic): for two
+linearly moving segments, `segment_segment_distance` of the corner positions at time `τ` is the
+infimum over the barycentric weights.
+
+[formula: rc-closest-points] -/
+theorem primDist_segSeg (p a q b : Fin 2 → E) (τ : ℝ) :
+    primDist p a q b τ = segSegCode (posAt p a τ 0) (posAt p a τ 1) (posAt q b τ 0)
+      (posAt q b τ 1) := by
+  rw [segSegCode_eq]
+  apply le_antisymm
+  · obtain ⟨s, t, h, e⟩ := segSegDist_attained (p1 := posAt p a τ 0) (q1 := posAt p a τ 1)
+      (p2 := posAt q b τ 0) (q2 := posAt q b τ 1)
+    rw [e]
+    refine (ciInf_le (primDist_bdd p a q b τ) (weights2 h.1, weights2 h.2)).trans (le_of_eq ?_)
+    simp only [primPoint_eq_sum, weights2_point, ssVec]
+    rfl
+  · refine le_ciInf fun x => ?_
+    simp only [primPoint_eq_sum, weights2_point]
+    exact segSegDist_le ⟨weights2_mem x.1, weights2_mem x.2⟩
+
+/-- **The computed point–triangle distance is `primDist`** (a moving point against a moving
+triangle).
+
+[formula: rc-closest-points] -/
+theorem primDist_ptTri (p a : Fin 1 → E) (q b : Fin 3 → E) (τ : ℝ) :
+    primDist p a q b τ = ptTriDist (posAt p a τ 0) (posAt q b τ 0) (posAt q b τ 1)
+      (posAt q b τ 2) := by
+  apply le_antisymm
+  · obtain ⟨v, w, h, e⟩ := ptTriDist_attained (p := posAt p a τ 0) (a := posAt q b τ 0)
+      (b := posAt q b τ 1) (c := posAt q b τ 2)
+    rw [e]
+    have w1 : Weights (Fin 1) := ⟨fun _ => 1, fun _ => zero_le_one, by simp⟩
+    refine (ciInf_le (primDist_bdd p a q b τ) (w1, weights3 h)).trans (le_of_eq ?_)
+    simp only [primPoint_eq_sum, weights1_point, weights3_point]
+    rfl
+  · refine le_ciInf fun x => ?_
+    simp only [primPoint_eq_sum, weights1_point, weights3_point]
+    exact ptTriDist_le (weights3_mem x.2)
+
+theorem primPoint_sub_common {ν : Type*} [Fintype ν] (r c : ν → E) (m : E) (w : Weights ν)
+    (τ : ℝ) : primPoint r (fun i => c i - m) w τ = primPoint r c w τ + τ • m := by
+  unfold primPoint
+  have : ∑ i, w.1 i • (r i - τ • (c i - m)) = ∑ i, w.1 i • (r i - τ • c i) +
+      (∑ i, w.1 i) • (τ • m) := by
+    rw [Finset.sum_smul, ← Finset.sum_add_distrib]
+    refine Finset.sum_congr rfl fun i _ => ?_
+    module
+  rw [this, w.2.2, one_smul]
+
+/-- `primDist` does not change when the same velocity `m` is subtracted from every corner
+(`ccd.rs` measures the corner speeds relative to the mean velocity of the pair). -/
+theorem primDist_sub_common {ι κ : Type*} [Fintype ι] [Fintype κ] (p a : ι → E) (q b : κ → E)
+    (m : E) (τ : ℝ) :
+    primDist p (fun i => a i - m) q (fun j => b j - m) τ = primDist p a q b τ := by
+  unfold primDist
+  congr 1; ext x
+  rw [primPoint_sub_common, primPoint_sub_common]; congr 1; abel
+
+/-- **CCD safety for two moving segments, end to end** (exact arithmetic): corner velocities
+`−a_i`, `−b_j` (positions `p − τ a`), measured relative to a common velocity `m` with speeds
+`≤ l_A`, `≤ l_B`; if the computed distance at `τ_k` exceeds the target `g > 0`, then on
+`[τ_k, τ_k + (d_k − g)/(l_A + l_B)]` the computed distance stays `≥ g` and the segments are
+disjoint. This is the advance of `ccd.rs` (and of the repulsive-surfaces CCD for edge pairs).
+
+[formula: rc-closest-points] -/
+theorem segSeg_advance_safe (p a q b : Fin 2 → E) (m : E) {lA lB : ℝ}
+    (ha : ∀ i, ‖a i - m‖ ≤ lA) (hb : ∀ j, ‖b j - m‖ ≤ lB) (hl : 0 < lA + lB) {τk g : ℝ}
+    (hg0 : 0 < g)
+    (hg : g < segSegCode (posAt p a τk 0) (posAt p a τk 1) (posAt q b τk 0) (posAt q b τk 1)) :
+    ∀ τ, τk ≤ τ → τ ≤ τk + (segSegCode (posAt p a τk 0) (posAt p a τk 1) (posAt q b τk 0)
+        (posAt q b τk 1) - g) / (lA + lB) →
+      g ≤ segSegCode (posAt p a τ 0) (posAt p a τ 1) (posAt q b τ 0) (posAt q b τ 1) ∧
+      ∀ s t, InSq s t → segPt (posAt p a τ 0) (posAt p a τ 1) s ≠
+        segPt (posAt q b τ 0) (posAt q b τ 1) t := by
+  intro τ h1 h2
+  have hf : ∀ σ, primDist p (fun i => a i - m) q (fun j => b j - m) σ =
+      segSegCode (posAt p a σ 0) (posAt p a σ 1) (posAt q b σ 0) (posAt q b σ 1) := fun σ => by
+    rw [primDist_sub_common, primDist_segSeg]
+  have hlip : ∀ σ, τk ≤ σ → primDist p (fun i => a i - m) q (fun j => b j - m) τk -
+      (lA + lB) * (σ - τk) ≤ primDist p (fun i => a i - m) q (fun j => b j - m) σ := by
+    intro σ hσ
+    have := primDist_lipschitz p (fun i => a i - m) q (fun j => b j - m) ha hb τk σ
+    rwa [abs_of_nonneg (by linarith), mul_comm] at this
+  have hsafe := (advance_safe hl hlip (by rw [hf]; exact hg)).2 τ h1 (by rw [hf]; exact h2)
+  rw [hf] at hsafe
+  refine ⟨hsafe.1, fun s t hst he => ?_⟩
+  have := (segSegCode_eq (p1 := posAt p a τ 0) (q1 := posAt p a τ 1) (p2 := posAt q b τ 0)
+    (q2 := posAt q b τ 1)) ▸ segSegDist_le hst
+  unfold ssVec at this
+  rw [he, sub_self, norm_zero] at this
+  linarith [hsafe.1]
+
+/-- **CCD safety for a moving point and a moving triangle, end to end** (exact arithmetic), as
+`segSeg_advance_safe` (for `ccd.rs` the triangle is a rigid obstacle, `b = m`).
+
+[formula: rc-closest-points] -/
+theorem ptTri_advance_safe (p a : Fin 1 → E) (q b : Fin 3 → E) (m : E) {lA lB : ℝ}
+    (ha : ∀ i, ‖a i - m‖ ≤ lA) (hb : ∀ j, ‖b j - m‖ ≤ lB) (hl : 0 < lA + lB) {τk g : ℝ}
+    (hg0 : 0 < g)
+    (hg : g < ptTriDist (posAt p a τk 0) (posAt q b τk 0) (posAt q b τk 1) (posAt q b τk 2)) :
+    ∀ τ, τk ≤ τ → τ ≤ τk + (ptTriDist (posAt p a τk 0) (posAt q b τk 0) (posAt q b τk 1)
+        (posAt q b τk 2) - g) / (lA + lB) →
+      g ≤ ptTriDist (posAt p a τ 0) (posAt q b τ 0) (posAt q b τ 1) (posAt q b τ 2) ∧
+      ∀ v w, InTri v w → posAt p a τ 0 ≠
+        triPt (posAt q b τ 0) (posAt q b τ 1) (posAt q b τ 2) v w := by
+  intro τ h1 h2
+  have hf : ∀ σ, primDist p (fun i => a i - m) q (fun j => b j - m) σ =
+      ptTriDist (posAt p a σ 0) (posAt q b σ 0) (posAt q b σ 1) (posAt q b σ 2) := fun σ => by
+    rw [primDist_sub_common, primDist_ptTri]
+  have hlip : ∀ σ, τk ≤ σ → primDist p (fun i => a i - m) q (fun j => b j - m) τk -
+      (lA + lB) * (σ - τk) ≤ primDist p (fun i => a i - m) q (fun j => b j - m) σ := by
+    intro σ hσ
+    have := primDist_lipschitz p (fun i => a i - m) q (fun j => b j - m) ha hb τk σ
+    rwa [abs_of_nonneg (by linarith), mul_comm] at this
+  have hsafe := (advance_safe hl hlip (by rw [hf]; exact hg)).2 τ h1 (by rw [hf]; exact h2)
+  rw [hf] at hsafe
+  refine ⟨hsafe.1, fun v w hvw he => ?_⟩
+  have := ptTriDist_le (p := posAt p a τ 0) (a := posAt q b τ 0) (b := posAt q b τ 1)
+    (c := posAt q b τ 2) hvw
+  rw [← he, sub_self, norm_zero] at this
+  linarith [hsafe.1]
+
+end Prim
+
+/-! ## The cross-product forms of the Rust code (`ℝ³`, Lagrange's identity) -/
+
+section Cross
+
+/-- `cross(a, b)` of the Rust code. -/
+def cross3 (u v : EuclideanSpace ℝ (Fin 3)) : EuclideanSpace ℝ (Fin 3) :=
+  !₂[u 1 * v 2 - u 2 * v 1, u 2 * v 0 - u 0 * v 2, u 0 * v 1 - u 1 * v 0]
+
+theorem inner3 (u v : EuclideanSpace ℝ (Fin 3)) : ⟪u, v⟫ = u 0 * v 0 + u 1 * v 1 + u 2 * v 2 := by
+  simp [PiLp.inner_apply, Fin.sum_univ_three, mul_comm]
+
+/-- `N x − (PC − QB) u − (QA − PB) z = (x·(u × z)) (u × z)` in `ℝ³` (`N = AC − B²`): the
+component of `x` orthogonal to the plane of `u, z`. -/
+theorem plane_dist_key (x u z : EuclideanSpace ℝ (Fin 3)) :
+    (⟪u, u⟫ * ⟪z, z⟫ - ⟪u, z⟫ ^ 2) • x - (⟪x, u⟫ * ⟪z, z⟫ - ⟪x, z⟫ * ⟪u, z⟫) • u -
+      (⟪x, z⟫ * ⟪u, u⟫ - ⟪x, u⟫ * ⟪u, z⟫) • z = ⟪x, cross3 u z⟫ • cross3 u z := by
+  simp only [inner3]
+  ext i
+  fin_cases i <;> simp [cross3] <;> ring
+
+/-- Lagrange's identity `(u × v)·(w × x) = (u·w)(v·x) − (u·x)(v·w)`. -/
+theorem inner_cross3 (u v w x : EuclideanSpace ℝ (Fin 3)) :
+    ⟪cross3 u v, cross3 w x⟫ = ⟪u, w⟫ * ⟪v, x⟫ - ⟪u, x⟫ * ⟪v, w⟫ := by
+  simp only [inner3, cross3]; simp; ring
+
+/-- **The cross-product scalars of `segment_segment_distance`**: `|d₁ × d₂|² = ae − b²` and
+`((p₂ − p₁) × d₂)·(d₁ × d₂) / |d₁ × d₂|² = (bf − ce)/(ae − b²) = s*`.
+
+[formula: rc-closest-points] -/
+theorem cross_formulas_segSeg (p1 q1 p2 q2 : EuclideanSpace ℝ (Fin 3)) :
+    ⟪cross3 (q1 - p1) (q2 - p2), cross3 (q1 - p1) (q2 - p2)⟫ = ssDen p1 q1 p2 q2 ∧
+      ⟪cross3 (p2 - p1) (q2 - p2), cross3 (q1 - p1) (q2 - p2)⟫ /
+          ⟪cross3 (q1 - p1) (q2 - p2), cross3 (q1 - p1) (q2 - p2)⟫ = ssS p1 q1 p2 q2 := by
+  have e : p2 - p1 = -(p1 - p2) := by abel
+  refine ⟨?_, ?_⟩
+  · rw [inner_cross3]; unfold ssDen ssA ssE ssB; rw [real_inner_comm (q1 - p1) (q2 - p2)]; ring
+  · rw [inner_cross3, inner_cross3, e, inner_neg_left, inner_neg_left]
+    unfold ssS ssDen ssA ssE ssB ssC ssF
+    rw [real_inner_comm (q1 - p1) (q2 - p2), real_inner_comm (p1 - p2) (q1 - p1),
+      real_inner_comm (p1 - p2) (q2 - p2)]
+    congr 1 <;> ring
+
+/-- **The cross-product formulas of `point_triangle_distance`**: with `n = ab × ac`,
+`|n|² = AC − B²`, `(ap × ac)·n/|n|² = v*`, `(ab × ap)·n/|n|² = w*`, and for `|n|² > 0` the plane
+distance `|ap·n|/|n|` is `‖p − π‖`.
+
+[formula: rc-closest-points] -/
+theorem cross_formulas_ptTri (p a b c : EuclideanSpace ℝ (Fin 3)) :
+    ⟪cross3 (b - a) (c - a), cross3 (b - a) (c - a)⟫ = tN a b c ∧
+      ⟪cross3 (p - a) (c - a), cross3 (b - a) (c - a)⟫ /
+          ⟪cross3 (b - a) (c - a), cross3 (b - a) (c - a)⟫ = tV p a b c ∧
+      ⟪cross3 (b - a) (p - a), cross3 (b - a) (c - a)⟫ /
+          ⟪cross3 (b - a) (c - a), cross3 (b - a) (c - a)⟫ = tW p a b c ∧
+      (0 < tN a b c → |⟪p - a, cross3 (b - a) (c - a)⟫| /
+          √⟪cross3 (b - a) (c - a), cross3 (b - a) (c - a)⟫ =
+        ‖p - triPt a b c (tV p a b c) (tW p a b c)‖) := by
+  have hN : ⟪cross3 (b - a) (c - a), cross3 (b - a) (c - a)⟫ = tN a b c := by
+    rw [inner_cross3]; unfold tN tA tB tC; rw [real_inner_comm (b - a) (c - a)]; ring
+  refine ⟨hN, ?_, ?_, fun hpos => ?_⟩
+  · rw [inner_cross3, hN]; unfold tV tP tQ tB tC
+    rw [real_inner_comm (b - a) (c - a)]
+  · rw [inner_cross3, hN]; unfold tW tP tQ tA tB
+    congr 1; ring
+  · -- `N (p − π) = (ap·n) n`, a polynomial identity in the coordinates
+    set n := cross3 (b - a) (c - a)
+    have hv : tV p a b c * tN a b c = tP p a b * tC a c - tQ p a c * tB a b c :=
+      div_mul_cancel₀ _ hpos.ne'
+    have hw : tW p a b c * tN a b c = tQ p a c * tA a b - tP p a b * tB a b c :=
+      div_mul_cancel₀ _ hpos.ne'
+    have key : tN a b c • (p - triPt a b c (tV p a b c) (tW p a b c)) = ⟪p - a, n⟫ • n := by
+      rw [triPt_sub]
+      have : tN a b c • ((p - a) - tV p a b c • (b - a) - tW p a b c • (c - a)) =
+          tN a b c • (p - a) - (tV p a b c * tN a b c) • (b - a) -
+            (tW p a b c * tN a b c) • (c - a) := by module
+      rw [this, hv, hw]
+      unfold tN tA tB tC tP tQ
+      exact plane_dist_key (p - a) (b - a) (c - a)
+    have hn : ‖n‖ = √(tN a b c) := by rw [← hN, norm_eq_sqrt_real_inner]
+    have := congrArg norm key
+    rw [norm_smul, norm_smul, Real.norm_eq_abs, Real.norm_eq_abs, abs_of_pos hpos, hn] at this
+    have hs : 0 < √(tN a b c) := Real.sqrt_pos.2 hpos
+    have hsq : √(tN a b c) * √(tN a b c) = tN a b c := Real.mul_self_sqrt hpos.le
+    have h3 : √(tN a b c) * (√(tN a b c) * ‖p - triPt a b c (tV p a b c) (tW p a b c)‖) =
+        √(tN a b c) * |⟪p - a, n⟫| := by rw [← mul_assoc, hsq, this, mul_comm]
+    have h4 := mul_left_cancel₀ hs.ne' h3
+    rw [hN, div_eq_iff hs.ne']; linarith [h4]
+
+end Cross
 
 end RC
 

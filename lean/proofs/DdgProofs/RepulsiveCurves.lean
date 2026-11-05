@@ -8,6 +8,7 @@ import DdgProofs.RepulsiveCurves.Constraints
 import DdgProofs.RepulsiveCurves.Penalties
 import DdgProofs.RepulsiveCurves.Schedule
 import DdgProofs.RepulsiveCurves.Ccd
+import DdgProofs.RepulsiveCurves.ClosestPoints
 import DdgProofs.RepulsiveCurves.Hierarchy
 import DdgProofs.RepulsiveCurves.Multigrid
 import DdgProofs.RepulsiveCurves.BarnesHutAdjoint

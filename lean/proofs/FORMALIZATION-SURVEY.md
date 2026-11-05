@@ -16,6 +16,11 @@ These come first because they may be bugs or wrong statements, independent of wh
 1. **Segment–segment distance in `ccd.rs` can overestimate** (`rc-closest-points`). For nearly parallel lines
    (`0 < denom ≤ 1e-14·a·e`) the interior pair is skipped; an overestimate is the unsafe direction for CCD. Expected
    but unproved bound: `cand² ≤ d² + 1e-14·|q₁−p₁|²`. Prove the bound or fix the code.
+   **Status (2026-11-05): confirmed and fixed.** Proved bound `cand² ≤ d² + ¼·1e-14·|q₁−p₁|²`, tight (`segSegThr_sq_le`);
+   in f64 the closed form above the threshold was worse (up to ≈3e-6·L near θ = 1e-6, vs 80-digit references), and a
+   near-parallel segment could pass through another without a contact. `ccd.rs` now takes `s` from the cross-product
+   form and re-projects `t(s)`, `s(t)` (exact in exact arithmetic, f64 error ≈3e-15·L); regression tests in
+   `tests/ccd.rs`. The RS CCD uses the same functions.
 2. **`rc-accd` termination claim is false in exact arithmetic.** The step `τ += (d−g)/l` can converge to the contact
    time without reaching it; only the `1e-9·d₀` slack makes it finite (up to ~10⁹ steps), so the cap of 100 matters.
 3. **`discrete-minimizer-existence` is false as stated**: it fails when the problem is infeasible (closed mesh, every
@@ -44,7 +49,7 @@ These come first because they may be bugs or wrong statements, independent of wh
 
 | id | class | what it takes |
 |---|---|---|
-| `rc-closest-points` + `pat-truth-closest-point` | A-M | links the proved `primDist_advance` to the distances `ccd.rs` computes; same lemmas serve the PAT ground truth; settles finding 1 |
+| `rc-closest-points` + `pat-truth-closest-point` | A-M | links the proved `primDist_advance` to the distances `ccd.rs` computes; same lemmas serve the PAT ground truth; settles finding 1. **Status (2026-11-05): done**, `RepulsiveCurves/ClosestPoints.lean` (~1650 lines), both moved out of CITED |
 | `semismooth-newton-convergence` (local) | A-M | one Newton step from a nearby iterate lands on the exact zero, plus Stage II nonsingularity; builds on `IsPiecewiseAffine`, `newton_stageII_exact`; the only route to a termination statement |
 | `optimality-system-necessary-closed` | A-M | exchange variations + 1-D Helly; with existence gives a KKT triple on closed meshes |
 | `dev-simple-eigenvalue-derivative` | A-M | smallest eigenvalue only: proved supergradient + eigenbasis/gap lower bound (`Developability/Covariance.lean`) |
@@ -431,6 +436,10 @@ S < 300 lines, M 300–1500, L > 1500.
   `truth.rs` each carry their own copy of Ericson's Voronoi routine. For a nondegenerate triangle the final branch has
   `va+vb+vc = |ab×ac|²` (Lagrange identity), and the edge denominators are `|ab|²`, `|ac|²`, `|bc|²`. The RC copy has
   no degenerate guards, but `PreparedObstacle::new` rejects degenerate triangles, so that is fine.
+  **Status (2026-11-05): done** (`ClosestPoints.lean`): exact distances = `primDist`, end-to-end CCD safety
+  (`segSeg_advance_safe`, `ptTri_advance_safe`), the Voronoi routine of `truth.rs` for every triangle
+  (`closestPtTri_isClosest`, via the variational inequality and region coverage), the `obstacle.rs` copy equal to it
+  for non-degenerate triangles (`closestPtTriRC_eq`).
 - **rc-distance-gradient.** The proof is short. Let `f = ½‖x−π x‖²`. Upper bound: `f(x+h) ≤ ½‖x+h−πx‖²`.
   Lower bound: `f(x) ≤ ½‖x−π(x+h)‖²` together with nonexpansiveness of `π`, which follows from the variational inequality. Both sides
   are `f(x)+⟨x−πx,h⟩ ± O(‖h‖²)`. Then `δ = √(2f)` follows by `HasFDerivAt.sqrt`. Mathlib has **no convex-projection map**,

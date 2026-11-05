@@ -1627,18 +1627,6 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
 - **What depends on it.** The gradient of the surface potential (D19); its chain rule given `∇δ`
   is machine-checked (`rc-penalty-surface`), and the Rust test compares it with finite differences.
 
-### [formula: rc-closest-points] Closest points of segment–segment and point–triangle pairs
-
-- **Statement.** The algorithms return a closest pair of points of two segments, and the closest
-  point of a triangle to a point (with the degenerate cases handled), hence the exact distances.
-- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.9
-  (closest points of two segments) and §5.1.5 (closest point on a triangle to a point).
-- **Why not formalized.** Case analyses of an algorithm; the code is tested against brute-force
-  minimization (SPEC §13.5).
-- **What depends on it.** The distances used by the CCD (SPEC §7.4), the validation
-  `EdgesIntersect` (§2.3) and the surface potential; the conservative advancement built on them is
-  machine-checked (`rc-ccd-advancement`) for whatever distance satisfies the Lipschitz bound.
-
 ### [formula: rc-near-cos-series] The two series of `S(θ) = ∫_0^θ cos^m φ dφ` (WP16, SPEC §3.4)
 
 - **Statement.** For `m > 0` and `|θ| ≤ π/4`, with `s = sin θ`, `a = (m − 1)/2`:
@@ -2462,20 +2450,6 @@ network and everything learned; neighbor search; the clamps of D9 beyond the sta
 - **Source check.** Not re-read.
 - **Why not formalized.** A heuristic quadrature weight; no exact property is claimed.
 - **What depends on it.** The area weights of GWN, FWN, SHC and SSPD (baselines only).
-
-### [formula: pat-truth-closest-point] The closest point of a triangle
-
-- **Statement.** The point of the triangle `abc` closest to `p` is found by classifying `p` into the
-  Voronoi regions of the three corners, then the three edges, then the interior (the barycentric
-  coordinates of the projection onto the plane); the closest point is the corner, the projection
-  onto the edge, or the projection onto the plane respectively.
-- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.5
-  ("Closest point on triangle to point", `ClosestPtPointTriangle`).
-- **Source check.** Not re-read. `tests/baselines.rs` compares the function with the distance to
-  the mesh computed from the segments and with fixed cases.
-- **Why not formalized.** A case analysis of a convex quadratic minimization over a triangle; it
-  only produces the ground-truth distance of the mesh baseline (SPEC §9), never a result of the method.
-- **What depends on it.** The ground truth `|φ|` of the accuracy measurements (`truth::TriMeshTruth`).
 
 ### [formula: pat-solid-angle] The solid angle of a triangle
 

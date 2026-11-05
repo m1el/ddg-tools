@@ -32,7 +32,8 @@ use crate::spatial::bvh::{Bvh, Element};
 /// The default BVH leaf size of an obstacle.
 pub const OBSTACLE_LEAF_SIZE: usize = 4;
 
-/// The closest point of the triangle `a b c` to `p` (Ericson 2004, §5.1.5).
+/// The closest point of the triangle `a b c` to `p` (Ericson 2004, §5.1.5). In exact arithmetic,
+/// for a non-degenerate triangle, it is the closest point (`DdgProofs.RC.closestPtTriRC_eq`).
 ///
 /// [formula: rc-closest-points]
 pub fn closest_point_on_triangle(p: [f64; 3], a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> [f64; 3] {
