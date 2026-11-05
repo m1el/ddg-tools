@@ -785,6 +785,23 @@ an earlier version with another title, were read).
   triangulation, e.g. by a sweep, is a hypothesis), `DdgProofs/Delaunay/PlanarLemma.lean`
   (`delaunay-lemma`). The planar local test equals layer 1's `θ_k + θ_l ≤ π` on the Euclidean
   lengths (`isLocallyDelaunay_dist2_iff`). Not proved: uniqueness up to ties, and the surface case.
+- **Proved, planar case (2026-11-05), uniqueness up to ties.** Two Delaunay triangulations of a
+  finite `S ⊂ ℝ²` differ only in triangles whose circumcircle passes through a fourth point of `S`
+  (`exists_cocircular_of_not_mem`), so they are equal when no four points of `S` are cocircular
+  (`NoFourCocircular`, required only for triples spanning a triangle; `delaunay_unique`); any two
+  locally Delaunay triangulations are then equal whatever the flip order
+  (`eq_of_isLocallyDelaunay`), and the Delaunay triangulation exists and is unique given a
+  triangulation (`existsUnique_delaunay`), `DdgProofs/Delaunay/PlanarUniqueness.lean`
+  (`planar-delaunay-uniqueness`; the lifting argument, de Berg et al. Thm. 9.6–9.7). Only the
+  surface case of this entry stays cited.
+- **Planar existence unconditional (2026-11-05).** Every finite `S ⊂ ℝ²` that is not collinear
+  (three points with `sda ≠ 0`; necessary for `S ≠ ∅`) has a triangulation
+  (`exists_triangulation`, `planar-triangulation-existence`; by induction, removing a
+  lexicographically extreme point that keeps the rest non-collinear and coning it back to the
+  visible boundary edges, `isTriangulation_insert`, `planar-triangulation-insertion`), hence a
+  Delaunay triangulation (`exists_delaunay`, `planar-delaunay-existence`),
+  `DdgProofs/Delaunay/Planar{Insertion,Existence}.lean`. The hypothesis of
+  `exists_delaunay_of_triangulation` is discharged.
 - **Why not formalized.** It is a global statement about all geodesic triangulations of a
   surface; neither piecewise flat surfaces nor immersed disks are in Mathlib.
 - **What depends on it.** That the result of Delaunay flipping is *the* Delaunay triangulation up
@@ -840,8 +857,15 @@ an earlier version with another title, were read).
   triangulations, so the flip relation is well founded and every flip sequence has at most that
   many steps (`wellFounded_flipStep`, `flip_sequence_length_le`, `planar-flip-termination`), and it
   ends in a locally Delaunay — by Delaunay's lemma (`delaunay_lemma`, `delaunay-lemma`) a
-  Delaunay — triangulation (`exists_flips_to_delaunay`). Not proved: the `O(n²)` bound. Planar
-  only; the surface statement and its finiteness hypothesis below are unchanged.
+  Delaunay — triangulation (`exists_flips_to_delaunay`). Planar only; the surface statement and
+  its finiteness hypothesis below are unchanged.
+- **Proved, planar `O(n²)` bound (2026-11-05).** Every sequence of Delaunay flips from a
+  triangulation of `S` has at most `C(|S|, 2)` flips (`flip_count_le`), because an edge flipped
+  away never reappears (`flipped_edge_not_mem`): the lifted surface goes down with every flip
+  (`liftBelow_flip`) and lies strictly below the lifted segment of the flipped edge at the crossing
+  of the diagonals, while on an edge it equals the lifted segment (`liftPlane_eq_of_mem_edge`),
+  `DdgProofs/Delaunay/PlanarFlipCount.lean` (`planar-flip-count`; Edelsbrunner, *Geometry and
+  Topology for Mesh Generation*, Sec. 1.3). Fortune's note was not used.
 - **Proved (trimmed, 2026-11-05, layer 3).** Everything but the finiteness, on the gluing data of
   `DdgProofs/Delaunay/Complex.lean` (self-loops, multiple edges, faces glued to themselves):
   `DdgProofs/Delaunay/Termination.lean` (`it-delaunay-self-glued`, `it-delaunay-potential`,
@@ -1506,8 +1530,11 @@ rotation (numerical devices); anything about rounding.
   and "`kl` is not an edge" enter) and satisfies `TriMesh.Manifold` (every edge in at most two
   faces, every boundary vertex on exactly two boundary edges), i.e. that the remesher's re-listing
   of the two faces as `(a, q, p)`, `(q, b, p)` is the gluing-data flip up to the rotation of the
-  faces. The boundary half of `Manifold` needs that every boundary fan has one boundary halfedge,
-  which is not proved in the gluing model.
+  faces. (That every boundary fan has exactly one boundary halfedge leaving and one entering its
+  vertex is now proved in the gluing model, for any involution `twin`:
+  `Gluing.boundaryCount_le_one`, `boundaryInCount_eq_boundaryCount`,
+  `DdgProofs/Delaunay/BoundaryFan.lean`, `complex-boundary-fan`; what remains is the translation
+  of the flipped gluing data back to a simplicial `TriMesh`.)
 - **Why not formalized.** The remaining step is the simplicial bookkeeping between the two models;
   the Rust code rebuilds and validates the mesh after every remeshing pass (`TriMesh::new`, SPEC
   §5.3), so a violation is an error, never a silent corruption.
