@@ -285,6 +285,8 @@ instance [Finite F] : Finite G.Edge := Quotient.finite _
 instance [Finite F] : Finite G.Vertex := Quotient.finite _
 noncomputable instance [Finite F] : Fintype G.Edge := Fintype.ofFinite _
 noncomputable instance [Finite F] : Fintype G.Vertex := Fintype.ofFinite _
+noncomputable instance : DecidableEq G.Vertex := Classical.decEq _
+noncomputable instance : DecidableEq G.Edge := Classical.decEq _
 
 /-- Number of vertices. -/
 noncomputable def numVertices : ℕ := Nat.card G.Vertex
