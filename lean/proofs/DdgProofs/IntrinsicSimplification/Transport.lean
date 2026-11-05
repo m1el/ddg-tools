@@ -1,4 +1,4 @@
-import DdgProofs.IntrinsicSimplification.Removal
+import DDG.Intrinsic.FlatVertexRemoval
 import DDG.Optimization.Wasserstein
 
 /-!

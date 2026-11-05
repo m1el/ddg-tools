@@ -1,11 +1,11 @@
-import DdgProofs.Intrinsic.Diamond
+import DDG.Intrinsic.Diamond
 
 /-!
 # Intrinsic triangulations: what a flip does to the corner angles
 
 `crates/ddg-intrinsic/SPEC.md` §4 (Delaunay flipping), §5 item 2; the paper Sec. 4.1.
 
-Notation of `DdgProofs/Intrinsic/Diamond.lean`: an edge `ij` of length `a` with the triangles
+Notation of `DDG/Intrinsic/Diamond.lean`: an edge `ij` of length `a` with the triangles
 `ijk` (`b = ℓ_ik`, `c = ℓ_jk`) and `jil` (`d = ℓ_il`, `e = ℓ_jl`); the angles opposite the edge
 are `θ_k = cornerAngle a b c` and `θ_l = cornerAngle a d e`. After a flip the edge `kl` of length
 `f` has the diamond `(f, c, e, b, d)` (apexes `j` and `i`).

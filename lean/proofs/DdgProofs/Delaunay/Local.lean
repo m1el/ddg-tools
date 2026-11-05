@@ -1,6 +1,6 @@
-import DdgProofs.Intrinsic.FlipAngles
+import DDG.Intrinsic.FlipAngles
 import DDG.Mesh.TriMesh
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Delaunay triangulations of piecewise flat surfaces, layer 1: one diamond
@@ -76,8 +76,8 @@ against the works here.
 ## Dependencies
 
 Mathlib, `DDG/Geometry/Triangle.lean` (the corner angle, cotangent and area from three lengths)
-and, for the proofs only, the planar layout of a diamond in `DdgProofs/Intrinsic/Diamond.lean`
-and `DdgProofs/Intrinsic/FlipAngles.lean`. The statements of the `Delaunay` part of this file mention only `Triangle.lean` definitions and
+and, for the proofs only, the planar layout of a diamond in `DDG/Intrinsic/Diamond.lean`
+and `DDG/Intrinsic/FlipAngles.lean`. The statements of the `Delaunay` part of this file mention only `Triangle.lean` definitions and
 the plane `ℝ × ℝ` with `dist2` (`DDG/Geometry/Plane.lean`);
 `flipLength_eq_flippedLengthFromLengths` relates `flipLength` to the flipped length
 `Intrinsic.flippedLengthFromLengths` of the Rust code. The section on the intrinsic criterion

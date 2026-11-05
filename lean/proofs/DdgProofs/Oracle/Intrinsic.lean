@@ -1,7 +1,7 @@
 import DdgProofs.Oracle.Geometry
-import DdgProofs.Intrinsic.Barycentric
-import DdgProofs.Intrinsic.Signpost
-import DdgProofs.Intrinsic.Trace
+import DDG.Intrinsic.Barycentric
+import DDG.Intrinsic.Signpost
+import DDG.Intrinsic.Trace
 import DdgProofs.Delaunay.Local
 import DdgProofs.Delaunay.ODT
 

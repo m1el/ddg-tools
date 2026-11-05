@@ -1,6 +1,6 @@
 import DdgProofs.Oracle.Scalar
-import DdgProofs.Laplace.Dirichlet
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Dirichlet
+import DDG.Laplace.Cotan
 
 /-!
 # Cut flow: the Dirichlet solves in a region

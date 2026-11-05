@@ -1,5 +1,5 @@
-import DdgProofs.Laplace.Kernel
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Kernel
+import DDG.Laplace.Cotan
 
 /-!
 # The Poisson problems of Boundary First Flattening: Dirichlet, Dirichlet-to-Neumann, Neumann

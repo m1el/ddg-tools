@@ -1,5 +1,5 @@
 import DDG.Mesh.GaussBonnet
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Curvature fields and Laplacian entries in the form the Rust code evaluates them

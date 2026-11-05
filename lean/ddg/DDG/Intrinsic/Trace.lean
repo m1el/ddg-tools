@@ -1,4 +1,4 @@
-import DdgProofs.Intrinsic.Diamond
+import DDG.Intrinsic.Diamond
 import DDG.Geometry.Barycentric
 
 /-!
@@ -9,7 +9,7 @@ import DDG.Geometry.Barycentric
 The triangles along a path are unfolded into one plane in which the path is the positive
 x-axis. A triangle is entered through an edge with one end above the axis (`up`, `y > 0`) and
 one below (`down`, `y < 0`); its third vertex `apex` is unfolded to the left of `up → down`
-(`unfoldApex`, `DdgProofs/Intrinsic/Diamond.lean`), and the sign of its `y` decides through which
+(`unfoldApex`, `DDG/Intrinsic/Diamond.lean`), and the sign of its `y` decides through which
 of the two other edges the path leaves.
 
 * **`it-ray-edge-intersection`** — `axisCrossingT y_tail y_head` is the parameter

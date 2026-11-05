@@ -1,5 +1,5 @@
 import DDG.Mesh.Orientation
-import DdgProofs.Intrinsic.AppsAmrVector
+import DDG.VectorFields.Holonomy
 
 /-!
 # The index of a face and the Poincaré–Hopf sum (`app-vector-singularity-index`)

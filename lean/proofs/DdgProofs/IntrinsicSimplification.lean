@@ -2,7 +2,7 @@ import DdgProofs.IntrinsicSimplification.Flatten
 import DdgProofs.IntrinsicSimplification.Monotone
 import DdgProofs.IntrinsicSimplification.Curvature
 import DdgProofs.IntrinsicSimplification.Interpolation
-import DdgProofs.IntrinsicSimplification.Removal
+import DDG.Intrinsic.FlatVertexRemoval
 import DDG.Optimization.Wasserstein
 import DdgProofs.IntrinsicSimplification.Transport
 import DdgProofs.IntrinsicSimplification.Operators

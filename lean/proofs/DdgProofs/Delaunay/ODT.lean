@@ -1,4 +1,4 @@
-import DdgProofs.Intrinsic.Move
+import DDG.Intrinsic.Move
 import DdgProofs.TriangleIntegral.Tiling
 
 /-!
@@ -14,7 +14,7 @@ Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area), `sqDist2`,
 the integrals are those of `DdgProofs/TriangleIntegral/Fem.lean` and `Tiling.lean`.
 
 * **`it-odt-update`** — `weightedBarycenter` is `A (a + b + c)/3` in the frame of the
-  circumcentre vector of `DdgProofs/Intrinsic/Move.lean`
+  circumcentre vector of `DDG/Intrinsic/Move.lean`
   (`weightedBarycenter_eq`). For a vertex `x` with a closed counter-clockwise link
   `p 0, …, p (n−1), p n = p 0` and `|T_k| = sda x (p k) (p (k+1)) / 2`, the energy of Chen and
   Holst (Lemma 4.1 with `d = 2`, the star's part) `S(x) = Σ_k (|x|² + |p_k|² + |p_{k+1}|²) |T_k| / 3`
@@ -45,7 +45,7 @@ Not covered here: what the minimizing triangulations are and the boundary rule a
 (`CITED.md`, `it-odt-delaunay-optimality`). The identities are about a planar star with signed areas; that the star of an intrinsic vertex
 unfolds into such a star is SPEC N19.
 
-(Library step S2b: assembled from `DdgProofs/Intrinsic/Move.lean` § `it-odt-update`,
+(Library step S2b: assembled from `DDG/Intrinsic/Move.lean` § `it-odt-update`,
 `DdgProofs/TriangleIntegral/Fem.lean` § `it-odt-interpolation-error` and
 `DdgProofs/TriangleIntegral/Tiling.lean` § `it-odt-energy`; the declarations keep their
 namespaces `DDG.Intrinsic` and `DDG.TriangleIntegral` until the renames of step S4.)

@@ -1,4 +1,4 @@
-import DdgProofs.Intrinsic.FlipAngles
+import DDG.Intrinsic.FlipAngles
 
 /-!
 # Intrinsic triangulations: angle normalization and the signpost update
@@ -12,7 +12,7 @@ import DdgProofs.Intrinsic.FlipAngles
   (`sum_normalized_interior`, `sum_normalized_boundary`); a vertex with `Θ = 2π` (inserted in
   the interior) or `Θ = π` (inserted on the boundary) has the scale `1`; the scale is undone by
   `Θ/2π` (Alg. 2, `angleScale_undo`). That a flip keeps `Θ` at its four vertices is
-  `flip_angle_sums` in `DdgProofs/Intrinsic/FlipAngles.lean`.
+  `flip_angle_sums` in `DDG/Intrinsic/FlipAngles.lean`.
 * **`it-signpost-update`** — `signpostUpdate` at an interior vertex is
   `φ_ij + (2π/Θ) θ` reduced once by `2π` (`signpostUpdate_interior`): for a signpost in
   `[0, 2π)` and a corner `0 ≤ θ ≤ Θ` the result lies in `[0, 2π)` and is the same direction

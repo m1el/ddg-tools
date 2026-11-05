@@ -1,9 +1,9 @@
 import DdgProofs.TriangleIntegral.Basic
 import DDG.Mesh.TriMesh
-import DdgProofs.Cuts.Weighted
+import DDG.Laplace.Weighted
 import DdgProofs.IntrinsicApps.HeatFem
 import DDG.Geometry.PlaneLemmas
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Finite element integrals over a triangle

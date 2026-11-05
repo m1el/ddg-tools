@@ -1,4 +1,4 @@
-import DdgProofs.Cuts.Weighted
+import DDG.Laplace.Weighted
 import DdgProofs.Oracle.Mesh
 
 /-!

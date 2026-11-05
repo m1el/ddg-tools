@@ -1,6 +1,6 @@
 import DdgProofs.IntegerCoords.Frames.Angle
-import DdgProofs.IntegerCoords.Strip
-import DdgProofs.Intrinsic.Signpost
+import DDG.Intrinsic.Strip
+import DDG.Intrinsic.Signpost
 
 /-!
 # Input-aligned frames at an input vertex (`ic-input-aligned-frame`, part 2 of 4)

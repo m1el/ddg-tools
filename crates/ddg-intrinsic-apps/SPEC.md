@@ -83,7 +83,7 @@ plane); and that every adaptive step reduces the error of a problem with a known
    `Singularities::max_rounding`.
 2. Independent algorithms in the tests (§3).
 3. Lean proofs (`lean/proofs/DdgProofs/IntrinsicApps/HeatFem.lean`,
-   `lean/proofs/DdgProofs/Intrinsic/AppsAmrVector.lean`) and cited results
+   `lean/ddg/DDG/VectorFields/Holonomy.lean`) and cited results
    (`lean/proofs/CITED.md`), tagged `[formula: app-…]`.
 
 ## 5. Formula ids

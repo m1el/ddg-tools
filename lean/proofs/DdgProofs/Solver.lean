@@ -1,4 +1,4 @@
-import DdgProofs.Laplace.Kernel
+import DDG.Laplace.Kernel
 import DdgProofs.Certificate
 import DdgProofs.Newton
 import DdgProofs.Closed

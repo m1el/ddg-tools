@@ -1,5 +1,5 @@
-import DdgProofs.Intrinsic.Barycentric
-import DdgProofs.IntegerCoords.VertexRemoval
+import DDG.Intrinsic.Barycentric
+import DDG.Intrinsic.VertexRemoval
 
 /-!
 # Intrinsic simplification: removing a flat vertex (paper Sec. 4.2, Sec. 7.1 "Vertex removal")
@@ -9,7 +9,7 @@ its insets; Gillespie, Sharp, Crane 2021, App. D, Thm. D.1.
 
 Plane points are pairs of reals; `dist2`, `sda` (twice the signed area) are those of
 `DDG/Geometry/Plane.lean`, `Intrinsic.barycentric` the barycentric coordinates of
-`DdgProofs/Intrinsic/Barycentric.lean` (`it-barycentric-coordinates`).
+`DDG/Intrinsic/Barycentric.lean` (`it-barycentric-coordinates`).
 `polar r t = (r cos t, r sin t)`. The removed vertex `i` is laid out at the origin, its first
 neighbour on the positive `x`-axis, the others at the angles accumulated from the corner angles
 at `i` computed from the lengths (law of cosines).

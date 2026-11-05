@@ -701,7 +701,7 @@ coordinates, the distances of a point to the corners and the lengths of an edge 
 circumcentre in barycentric coordinates; the lengths and areas of a moved vertex's star; the
 circumcentre and barycentre of a triangle times its area; the energy of Chen and Holst of one
 star, its gradient (their Eq. 4.5, as a Fréchet derivative), that it is exactly quadratic, and
-that the update of their Eq. 4.13 is a descent step (`DdgProofs/Intrinsic/Move.lean`). The theory of
+that the update of their Eq. 4.13 is a descent step (`DDG/Intrinsic/Move.lean`). The theory of
 one diamond (`DdgProofs/Delaunay/{Local,Rippa,Potential,Encroachment}.lean`): the equivalent local
 Delaunay criteria (angles, cotangents, empty circumcircle of the layout), the flip of a
 non-Delaunay edge with its corner-angle bookkeeping, Rippa's identity for one diamond
@@ -1231,12 +1231,12 @@ paper; equation numbers below are the thesis's. Bibliographic data of the journa
 not checked against Crossref (no network lookup of the DOIs was made); the DOIs are those the
 authors' pages give.
 
-**Machine-checked** (`DdgProofs/Intrinsic/AppsAmrVector.lean`): `app-vector-face-holonomy`
+**Machine-checked** (`DDG/VectorFields/Holonomy.lean`): `app-vector-face-holonomy`
 (the transport angles around a face add up to `Σ (s − 1) θ` modulo full turns; the corner terms
 at an interior vertex add up to its angle defect), `app-vector-fd-connection-laplacian` (one
 edge's contribution to `u* L u` is `w |u_j − r u_i|²`; the entries are Hermitian),
 `app-amr-map-distortion` (singular values from the conformal and anticonformal parts);
-`app-vector-singularity-index` (`DdgProofs/Intrinsic/SingularityIndex.lean`, GODF Sec. 6.1.3,
+`app-vector-singularity-index` (`DDG/VectorFields/PoincareHopf.lean`, GODF Sec. 6.1.3,
 Eq. 19, App. B): `ω_ij ∈ (−π, π]` (the range of `arg`/`atan2`) with
 `u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|` on every halfedge, except that at a tie (both halfedges of an
 edge at `+π`) the halfedge with the higher index takes `−π`; on a closed valid oriented mesh with signpost frames, every vertex in some face,

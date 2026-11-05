@@ -1,5 +1,5 @@
 import DdgProofs.Bff.Laplace
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Cutting a mesh: bookkeeping, and the angle sums at cones

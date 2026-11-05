@@ -1,5 +1,5 @@
-import DdgProofs.Laplace.Kernel
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Kernel
+import DDG.Laplace.Cotan
 
 /-!
 # The Dirichlet problem and the harmonic extension for a square matrix

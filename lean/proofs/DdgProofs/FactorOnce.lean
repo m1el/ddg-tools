@@ -1,7 +1,7 @@
 import DdgProofs.Solver
-import DdgProofs.Laplace.Kernel
+import DDG.Laplace.Kernel
 import DdgProofs.MeshProblem
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # The factor-once method: the reduced problem

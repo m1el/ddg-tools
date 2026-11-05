@@ -1,4 +1,4 @@
-import DdgProofs.Intrinsic.Diamond
+import DDG.Intrinsic.Diamond
 import DDG.Geometry.Barycentric
 
 /-!
@@ -8,7 +8,7 @@ import DDG.Geometry.Barycentric
 Sec. 3.3.2, Sec. 4.2, Alg. 6, 7, 8.
 
 A triangle with the sides `ℓ₀₁, ℓ₁₂, ℓ₂₀` is laid out as `v₀ = (0, 0)`, `v₁ = (ℓ₀₁, 0)`,
-`v₂ = apexK ℓ₀₁ ℓ₂₀ ℓ₁₂` (`DdgProofs/Intrinsic/Diamond.lean`).
+`v₂ = apexK ℓ₀₁ ℓ₂₀ ℓ₁₂` (`DDG/Intrinsic/Diamond.lean`).
 
 * **`it-barycentric-coordinates`** — `barycentric` of a plane triangle of nonzero
   area: the three ratios of signed areas sum to one, reproduce the point, and are the only

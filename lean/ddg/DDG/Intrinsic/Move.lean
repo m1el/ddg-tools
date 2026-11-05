@@ -1,4 +1,4 @@
-import DdgProofs.Intrinsic.Diamond
+import DDG.Intrinsic.Diamond
 
 /-!
 # Intrinsic triangulations: moving a vertex, the circumcentre vector

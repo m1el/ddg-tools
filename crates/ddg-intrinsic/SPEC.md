@@ -580,7 +580,7 @@ and from `crates/ddg-intrinsic/README.md`.
   so the sum is in `[0, 4π)` and a single subtraction brings it into `[0, 2π)`. The Lean
   theorems `signpostUpdate_mem` (the result is in `[0, 2π)` and equals the sum or the sum minus
   `2π`) and `signpostUpdate_direction` (it has the same cosine and sine as the sum, so it is the
-  direction of Eq. 3) in `lean/proofs/DdgProofs/Intrinsic/Signpost.lean` state this for the
+  direction of Eq. 3) in `lean/ddg/DDG/Intrinsic/Signpost.lean` state this for the
   oracle's function, at an interior vertex. Outside the hypotheses (a negative `φ`, a corner
   larger than `Θ`, a signpost of `2π` or more) one subtraction is not enough, and the crate does
   not guard against them.
@@ -667,7 +667,7 @@ written from the paper and the cited papers.
   this is `−3/(2|ω|)` times the gradient of the energy of Chen and Holst's Lemma 4.2, Eq. 4.5
   (checked by finite differences in `tests/reposition.rs` and in the oracle's selftest;
   machine-checked as a derivative, `hasFDerivAt_odtEnergy` in
-  `lean/proofs/DdgProofs/Intrinsic/Move.lean`, which also proves that this planar energy is
+  `lean/ddg/DDG/Intrinsic/Move.lean`, which also proves that this planar energy is
   exactly quadratic in `x`, so that the step changes it by `−3|G|²/(4|ω|) α (2 − α)`: a descent
   for `0 < α < 2`, the minimum at `α = 1`; that this energy is the interpolation error of `|x|²` up to a
   constant, so that the step lowers the error itself while the moved star tiles the same region,

@@ -1,5 +1,5 @@
 import DdgProofs.Delaunay.PlanarBasic
-import DdgProofs.Intrinsic.Diamond
+import DDG.Intrinsic.Diamond
 
 /-!
 # Delaunay layer 4, planar toolkit: rigid motions and triangles
@@ -9,7 +9,7 @@ Points are pairs `ℝ × ℝ` with the Euclidean distance `dist2` and the signed
 (`DdgProofs/Delaunay/PlanarBasic.lean`). This file packages
 
 * **rigid motions** `Rigid` (a rotation `(cs, sn)` followed by a translation, the `rigid` of
-  `DdgProofs/Intrinsic/Diamond.lean`) with composition, inverse, the isometry and orientation
+  `DDG/Intrinsic/Diamond.lean`) with composition, inverse, the isometry and orientation
   facts, and `rigidOfSegment`: the unique rigid motion taking a segment onto a congruent one
   (`rigidOfSegment_fst`, `rigidOfSegment_snd`, `Rigid.ext_of_two`);
 * **triangles** `Tri := Fin 3 → ℝ × ℝ`, positively oriented (`Tri.Pos`), with their closed hull,

@@ -610,7 +610,7 @@ solution difference of 0 at the input vertices.
   `app-fem-galerkin-mass`, `app-fem-midpoint-subdivision` are machine-checked
   (`lean/proofs/DdgProofs/IntrinsicApps/HeatFem.lean`), as are `app-vector-face-holonomy`,
   `app-vector-fd-connection-laplacian`, `app-amr-map-distortion`
-  (`lean/proofs/DdgProofs/Intrinsic/AppsAmrVector.lean`); `app-steiner-fermat-point`,
+  (`lean/ddg/DDG/VectorFields/Holonomy.lean`); `app-steiner-fermat-point`,
   `app-vector-transport`, `app-vector-fem-connection-laplacian`, `app-vector-singularity-index`,
   `app-vector-maximum-principle`, `app-amr-residual-estimator`,
   `app-amr-bulk-marking` are cited (`lean/proofs/CITED.md`); the stiffness matrix is

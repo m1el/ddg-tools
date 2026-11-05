@@ -43,7 +43,7 @@ Three routes were compared.
 Why (c) is the cheapest honest route: it needs no topology of surfaces, no Jordan curve theorem,
 no quotient spaces, no manifold charts, and no new combinatorial theory. Every lemma is about
 triangles in `ℝ × ℝ` (`sda`, `dist2`, `rigid`, hull membership by signs — all in
-`DdgProofs/Delaunay/PlanarBasic.lean`, `DdgProofs/Intrinsic/Diamond.lean`,
+`DdgProofs/Delaunay/PlanarBasic.lean`, `DDG/Intrinsic/Diamond.lean`,
 `DDG/Geometry/Plane.lean`) plus finite sets. The phantom-placement problem (developing around
 a cone point does not return to the same placement) is handled by triggering every consistency
 condition at a *point* of the face or of its open sides, never by "the placed triangles overlap".

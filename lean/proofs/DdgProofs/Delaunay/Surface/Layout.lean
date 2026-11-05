@@ -9,7 +9,7 @@ For a metric triangulation `s : MetricGluing F` (`DdgProofs/Delaunay/Termination
 
 * `sLayout s σ` is the **standard layout** of the face `σ` in the plane: corner `0` at the
   origin, corner `1` on the positive `x`-axis, corner `2` above (the `apexK` of
-  `DdgProofs/Intrinsic/Diamond.lean`); it has the lengths of `s` and is positively oriented.
+  `DDG/Intrinsic/Diamond.lean`); it has the lengths of `s` and is positively oriented.
 * `unfold s e` for a halfedge `e = (σ, k)` glued to `e' = (σ', k')` is the rigid motion that
   places the standard layout of `σ'` next to that of `σ` across the side `k`: `e'` runs against
   `e`, so the tail of `e'` goes to the head of `e` and the head of `e'` to the tail of `e`.

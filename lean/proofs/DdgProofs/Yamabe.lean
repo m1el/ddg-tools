@@ -1,5 +1,5 @@
 import DDG.Mesh.GaussBonnet
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # The linearized discrete Yamabe equation

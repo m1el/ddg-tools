@@ -1,8 +1,8 @@
 import DdgProofs.MeshProblem
 import DdgProofs.Yamabe
 import DdgProofs.Bff.Laplace
-import DdgProofs.Laplace.Kernel
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Kernel
+import DDG.Laplace.Cotan
 
 /-!
 # The mesh problem with boundary unknowns

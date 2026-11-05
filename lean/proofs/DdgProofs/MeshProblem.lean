@@ -2,7 +2,7 @@ import DdgProofs.Certificate
 import DdgProofs.Problem
 import DDG.Mesh.GaussBonnet
 import DDG.Mesh.TriMesh
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # The canonical problem of a mesh, and vectors on all vertices

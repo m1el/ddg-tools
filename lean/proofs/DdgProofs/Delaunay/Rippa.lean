@@ -1,6 +1,6 @@
 import DdgProofs.Delaunay.Local
 import DDG.Mesh.TriMesh
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Delaunay triangulations, layer 1: Rippa's theorem for one diamond

@@ -1,7 +1,7 @@
 import DdgProofs.Yamabe
-import DdgProofs.Laplace.Poisson
+import DDG.Laplace.Poisson
 import DdgProofs.Bff.Curve
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Boundary First Flattening: the linearized curvatures, Cherrier's formula, the Hilbert transform

@@ -1,7 +1,7 @@
 import DDG.Mesh.Orientation
 import DdgProofs.TriangleIntegral.Fem
 import DdgProofs.Bff.Curve
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # The conformal energy of a flattening over an oriented mesh (BFF Eqs. 15–16)

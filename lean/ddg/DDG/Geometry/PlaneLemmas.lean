@@ -15,8 +15,8 @@ triangulations, the Delaunay theory and the finite element integrals:
 * the quarter turn `rot`, the squared norm `nsq` and the linear form `toDual G` of a vector
   (`toDual_apply`).
 
-(Library step S2b: moved here from `DdgProofs/Intrinsic/Diamond.lean` and, `rot`, `nsq`,
-`toDual`, from `DdgProofs/Intrinsic/Move.lean`; the names keep their
+(Library step S2b: moved here from `DDG/Intrinsic/Diamond.lean` and, `rot`, `nsq`,
+`toDual`, from `DDG/Intrinsic/Move.lean`; the names keep their
 `DDG.Intrinsic` namespace until the renames of step S4.)
 -/
 

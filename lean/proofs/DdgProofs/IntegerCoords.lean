@@ -2,13 +2,13 @@ import DdgProofs.IntegerCoords.Formulas
 import DdgProofs.IntegerCoords.FaceModel
 import DdgProofs.IntegerCoords.FaceSplit
 import DdgProofs.IntegerCoords.Flip
-import DdgProofs.IntegerCoords.VertexRemoval
+import DDG.Intrinsic.VertexRemoval
 import DdgProofs.IntegerCoords.Chords
 import DdgProofs.IntegerCoords.Recover
 import DdgProofs.IntegerCoords.Transfer
 import DdgProofs.IntegerCoords.SplitEdge
 import DdgProofs.IntegerCoords.SplitAtCrossing
-import DdgProofs.IntegerCoords.Strip
+import DDG.Intrinsic.Strip
 import DdgProofs.IntegerCoords.Complex.Basic
 import DdgProofs.IntegerCoords.Complex.Trace
 import DdgProofs.IntegerCoords.Complex.Labels

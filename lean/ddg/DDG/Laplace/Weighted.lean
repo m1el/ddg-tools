@@ -1,4 +1,4 @@
-import DdgProofs.Laplace.Cotan
+import DDG.Laplace.Cotan
 
 /-!
 # Cut flow: the weighted cotan Laplacian
