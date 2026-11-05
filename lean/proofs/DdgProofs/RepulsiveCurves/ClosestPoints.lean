@@ -832,6 +832,561 @@ theorem ptTriDist_attained : ∃ v w, InTri v w ∧ ptTriDist p a b c = ‖p - t
 
 end PtTri
 
+/-! ## The Voronoi-region routine (Ericson §5.1.5): `truth.rs`, `obstacle.rs` -/
+
+section Voronoi
+
+variable (p a b c : E)
+
+/-- The dot products of the routine: `d₁ = ab·ap`, `d₂ = ac·ap`, `d₃ = ab·bp`, `d₄ = ac·bp`,
+`d₅ = ab·cp`, `d₆ = ac·cp`, and `v_c = d₁d₄ − d₃d₂`, `v_b = d₅d₂ − d₁d₆`, `v_a = d₃d₆ − d₅d₄`. -/
+def vd1 : ℝ := ⟪b - a, p - a⟫
+def vd2 : ℝ := ⟪c - a, p - a⟫
+def vd3 : ℝ := ⟪b - a, p - b⟫
+def vd4 : ℝ := ⟪c - a, p - b⟫
+def vd5 : ℝ := ⟪b - a, p - c⟫
+def vd6 : ℝ := ⟪c - a, p - c⟫
+def vVc : ℝ := vd1 p a b * vd4 p a b c - vd3 p a b * vd2 p a c
+def vVb : ℝ := vd5 p a b c * vd2 p a c - vd1 p a b * vd6 p a c
+def vVa : ℝ := vd3 p a b * vd6 p a c - vd5 p a b c * vd4 p a b c
+
+/-- `closest_point_on_segment` of `truth.rs`. -/
+def cpSeg (p a b : E) : E :=
+  if ⟪b - a, b - a⟫ = 0 then a else a + clamp01 (⟪p - a, b - a⟫ / ⟪b - a, b - a⟫) • (b - a)
+
+/-- `x`, replaced by `y` if `y` is strictly nearer to `p` (the update step of the loop in
+`truth.rs`). -/
+def nearer (p x y : E) : E := if ‖p - y‖ ^ 2 < ‖p - x‖ ^ 2 then y else x
+
+/-- The degenerate fallback of `truth.rs`: the nearest of the three edge points (the first one
+on ties). -/
+def nearestEdgePt : E := nearer p (nearer p (cpSeg p a b) (cpSeg p b c)) (cpSeg p c a)
+
+/-- **`closest_point_on_triangle` of `crates/ddg-points-as-tori/src/truth.rs`** (exact
+arithmetic; `den.is_finite()` is always true for reals): the Voronoi regions of `a`, `b`, the
+edge `ab`, `c`, the edge `ac`, the edge `bc`, then the projection onto the plane, then the
+nearest edge point for a degenerate triangle.
+
+[formula: pat-truth-closest-point] -/
+def closestPtTri : E :=
+  if vd1 p a b ≤ 0 ∧ vd2 p a c ≤ 0 then a
+  else if 0 ≤ vd3 p a b ∧ vd4 p a b c ≤ vd3 p a b then b
+  else if vVc p a b c ≤ 0 ∧ 0 ≤ vd1 p a b ∧ vd3 p a b ≤ 0 ∧ 0 < vd1 p a b - vd3 p a b then
+    a + (vd1 p a b / (vd1 p a b - vd3 p a b)) • (b - a)
+  else if 0 ≤ vd6 p a c ∧ vd5 p a b c ≤ vd6 p a c then c
+  else if vVb p a b c ≤ 0 ∧ 0 ≤ vd2 p a c ∧ vd6 p a c ≤ 0 ∧ 0 < vd2 p a c - vd6 p a c then
+    a + (vd2 p a c / (vd2 p a c - vd6 p a c)) • (c - a)
+  else if vVa p a b c ≤ 0 ∧ 0 ≤ vd4 p a b c - vd3 p a b ∧ 0 ≤ vd5 p a b c - vd6 p a c ∧
+      0 < (vd4 p a b c - vd3 p a b) + (vd5 p a b c - vd6 p a c) then
+    b + ((vd4 p a b c - vd3 p a b) / ((vd4 p a b c - vd3 p a b) + (vd5 p a b c - vd6 p a c))) •
+      (c - b)
+  else if 0 < vVa p a b c + vVb p a b c + vVc p a b c then
+    a + (vVb p a b c / (vVa p a b c + vVb p a b c + vVc p a b c)) • (b - a) +
+      (vVc p a b c / (vVa p a b c + vVb p a b c + vVc p a b c)) • (c - a)
+  else nearestEdgePt p a b c
+
+/-- **`closest_point_on_triangle` of `crates/ddg-repulsive-curves/src/obstacle.rs`** (no
+degenerate guards; the obstacle rejects degenerate triangles).
+
+[formula: rc-closest-points] -/
+def closestPtTriRC : E :=
+  if vd1 p a b ≤ 0 ∧ vd2 p a c ≤ 0 then a
+  else if 0 ≤ vd3 p a b ∧ vd4 p a b c ≤ vd3 p a b then b
+  else if vVc p a b c ≤ 0 ∧ 0 ≤ vd1 p a b ∧ vd3 p a b ≤ 0 then
+    a + (vd1 p a b / (vd1 p a b - vd3 p a b)) • (b - a)
+  else if 0 ≤ vd6 p a c ∧ vd5 p a b c ≤ vd6 p a c then c
+  else if vVb p a b c ≤ 0 ∧ 0 ≤ vd2 p a c ∧ vd6 p a c ≤ 0 then
+    a + (vd2 p a c / (vd2 p a c - vd6 p a c)) • (c - a)
+  else if vVa p a b c ≤ 0 ∧ 0 ≤ vd4 p a b c - vd3 p a b ∧ 0 ≤ vd5 p a b c - vd6 p a c then
+    b + ((vd4 p a b c - vd3 p a b) / ((vd4 p a b c - vd3 p a b) + (vd5 p a b c - vd6 p a c))) •
+      (c - b)
+  else
+    a + (vVb p a b c * (1 / (vVa p a b c + vVb p a b c + vVc p a b c))) • (b - a) +
+      (vVc p a b c * (1 / (vVa p a b c + vVb p a b c + vVc p a b c))) • (c - a)
+
+variable {p a b c}
+
+/-- The routine's dot products in terms of `P = ap·ab`, `Q = ap·ac`, `A`, `B`, `C`. -/
+theorem vd_eqs :
+    vd1 p a b = tP p a b ∧ vd2 p a c = tQ p a c ∧ vd3 p a b = tP p a b - tA a b ∧
+      vd4 p a b c = tQ p a c - tB a b c ∧ vd5 p a b c = tP p a b - tB a b c ∧
+      vd6 p a c = tQ p a c - tC a c := by
+  have e1 : p - b = (p - a) - (b - a) := by abel
+  have e2 : p - c = (p - a) - (c - a) := by abel
+  unfold vd1 vd2 vd3 vd4 vd5 vd6 tP tQ tA tB tC
+  rw [e1, e2]
+  generalize p - a = x
+  generalize b - a = u
+  generalize c - a = z
+  simp only [inner_sub_right]
+  rw [real_inner_comm x u, real_inner_comm x z, real_inner_comm u z]
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- **Variational inequality, sufficient**: a point `q` of the triangle with
+`⟪p − q, x − q⟫ ≤ 0` at the three corners is the closest point. -/
+theorem vi_suff {q : E} {v₀ w₀ : ℝ} (hq : q = triPt a b c v₀ w₀)
+    (ha : ⟪p - q, a - q⟫ ≤ 0) (hb : ⟪p - q, b - q⟫ ≤ 0) (hc : ⟪p - q, c - q⟫ ≤ 0)
+    {v w : ℝ} (h : InTri v w) : ‖p - q‖ ≤ ‖p - triPt a b c v w‖ := by
+  have e : triPt a b c v w - q = (1 - v - w) • (a - q) + v • (b - q) + w • (c - q) := by
+    rw [hq]; unfold triPt; module
+  have hk : ⟪p - q, triPt a b c v w - q⟫ ≤ 0 := by
+    rw [e, inner_add_right, inner_add_right, inner_smul_right, inner_smul_right,
+      inner_smul_right]
+    obtain ⟨h1, h2, h3⟩ := h
+    nlinarith [mul_nonneg (by linarith : (0 : ℝ) ≤ 1 - v - w) (neg_nonneg.2 ha),
+      mul_nonneg h1 (neg_nonneg.2 hb), mul_nonneg h2 (neg_nonneg.2 hc)]
+  refine norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) ?_
+  have e2 : p - triPt a b c v w = (p - q) - (triPt a b c v w - q) := by abel
+  rw [e2, norm_sub_sq_real (p - q) (triPt a b c v w - q)]
+  nlinarith [sq_nonneg ‖triPt a b c v w - q‖]
+
+/-- **Variational inequality, necessary**: at a closest point `q` of the triangle,
+`⟪p − q, x − q⟫ ≤ 0` for every point `x` of the triangle. -/
+theorem vi_nec {v₀ w₀ : ℝ} (h₀ : InTri v₀ w₀)
+    (hmin : ∀ v w, InTri v w → ‖p - triPt a b c v₀ w₀‖ ≤ ‖p - triPt a b c v w‖)
+    {v w : ℝ} (h : InTri v w) :
+    ⟪p - triPt a b c v₀ w₀, triPt a b c v w - triPt a b c v₀ w₀⟫ ≤ 0 := by
+  set q := triPt a b c v₀ w₀
+  set x := triPt a b c v w
+  set k := ⟪p - q, x - q⟫
+  set m := ‖x - q‖ ^ 2
+  have key : ∀ l : ℝ, 0 ≤ l → l ≤ 1 → 2 * l * k ≤ l ^ 2 * m := by
+    intro l hl0 hl1
+    have hin : InTri (v₀ + l * (v - v₀)) (w₀ + l * (w - w₀)) := by
+      obtain ⟨a1, a2, a3⟩ := h₀; obtain ⟨b1, b2, b3⟩ := h
+      refine ⟨by nlinarith, by nlinarith, by nlinarith⟩
+    have hpt : triPt a b c (v₀ + l * (v - v₀)) (w₀ + l * (w - w₀)) = q + l • (x - q) := by
+      simp only [q, x]; unfold triPt; module
+    have := hmin _ _ hin
+    rw [hpt] at this
+    have h2 := pow_le_pow_left₀ (norm_nonneg _) this 2
+    have e : p - (q + l • (x - q)) = (p - q) - l • (x - q) := by abel
+    rw [e, norm_sub_smul_sq] at h2
+    simp only [m, ← real_inner_self_eq_norm_sq] at *
+    linarith
+  by_contra hk
+  push Not at hk
+  have hm : 0 ≤ m := sq_nonneg _
+  have hl0 : 0 ≤ k / (k + m) := div_nonneg hk.le (by linarith)
+  have hl1 : k / (k + m) ≤ 1 := (div_le_one (by linarith)).2 (by linarith)
+  have := key _ hl0 hl1
+  have hkm : 0 < k + m := by linarith
+  rw [div_pow] at this
+  have h' : 2 * k * k * (k + m) ≤ k ^ 2 * m := by
+    have := mul_le_mul_of_nonneg_right this (sq_nonneg (k + m))
+    field_simp at this
+    nlinarith [this]
+  nlinarith [mul_pos hk hk, mul_pos (mul_pos hk hk) hkm]
+
+/-- The coverage of the plane by the six Voronoi regions, in real arithmetic: `(v₀, w₀)` are the
+coordinates of a point of the triangle satisfying the variational inequality at the corners
+(`Ia, Ib, Ic ≤ 0`, written with `Y₁ = ⟪p − q, ab⟫`, `Y₂ = ⟪p − q, ac⟫`); if none of the six
+region tests holds and `AC − B² > 0`, then `v_a, v_b, v_c ≥ 0`. -/
+theorem voronoi_cover_real {A B C P Q v₀ w₀ : ℝ} (hA : 0 ≤ A) (hC : 0 ≤ C)
+    (hN : 0 < A * C - B ^ 2) (h₀ : InTri v₀ w₀)
+    (hIa : -(v₀ * (P - v₀ * A - w₀ * B) + w₀ * (Q - v₀ * B - w₀ * C)) ≤ 0)
+    (hIb : (1 - v₀) * (P - v₀ * A - w₀ * B) - w₀ * (Q - v₀ * B - w₀ * C) ≤ 0)
+    (hIc : -v₀ * (P - v₀ * A - w₀ * B) + (1 - w₀) * (Q - v₀ * B - w₀ * C) ≤ 0)
+    (t1 : ¬(P ≤ 0 ∧ Q ≤ 0)) (t2 : ¬(0 ≤ P - A ∧ Q - B ≤ P - A))
+    (t3 : ¬(A * Q - B * P ≤ 0 ∧ 0 ≤ P ∧ P - A ≤ 0 ∧ 0 < P - (P - A)))
+    (t4 : ¬(0 ≤ Q - C ∧ P - B ≤ Q - C))
+    (t5 : ¬(C * P - B * Q ≤ 0 ∧ 0 ≤ Q ∧ Q - C ≤ 0 ∧ 0 < Q - (Q - C)))
+    (t6 : ¬(A * C - B ^ 2 - (C - B) * P - (A - B) * Q ≤ 0 ∧ 0 ≤ (Q - B) - (P - A) ∧
+      0 ≤ (P - B) - (Q - C) ∧ 0 < ((Q - B) - (P - A)) + ((P - B) - (Q - C)))) :
+    0 ≤ A * C - B ^ 2 - (C - B) * P - (A - B) * Q ∧ 0 ≤ C * P - B * Q ∧ 0 ≤ A * Q - B * P := by
+  obtain ⟨hv, hw, hvw⟩ := h₀
+  have hApos : 0 < A := by
+    rcases hA.eq_or_lt with h | h
+    · subst h; nlinarith [sq_nonneg B]
+    · exact h
+  have hCpos : 0 < C := by
+    rcases hC.eq_or_lt with h | h
+    · subst h; nlinarith [sq_nonneg B]
+    · exact h
+  have hK : 0 < A + C - 2 * B := by nlinarith [sq_nonneg (A - C), sq_nonneg (A + C - 2 * B)]
+  set Y1 := P - v₀ * A - w₀ * B with hY1
+  set Y2 := Q - v₀ * B - w₀ * C with hY2
+  -- the weighted sum of the three inequalities is `0`
+  have hsum : (1 - v₀ - w₀) * (-(v₀ * Y1 + w₀ * Y2)) + v₀ * ((1 - v₀) * Y1 - w₀ * Y2) +
+      w₀ * (-v₀ * Y1 + (1 - w₀) * Y2) = 0 := by ring
+  have hα : 0 ≤ 1 - v₀ - w₀ := by linarith
+  -- each weighted term is `≤ 0`, so each is `0`
+  have ta : (1 - v₀ - w₀) * (-(v₀ * Y1 + w₀ * Y2)) ≤ 0 := mul_nonpos_of_nonneg_of_nonpos hα hIa
+  have tb : v₀ * ((1 - v₀) * Y1 - w₀ * Y2) ≤ 0 := mul_nonpos_of_nonneg_of_nonpos hv hIb
+  have tc : w₀ * (-v₀ * Y1 + (1 - w₀) * Y2) ≤ 0 := mul_nonpos_of_nonneg_of_nonpos hw hIc
+  have za : (1 - v₀ - w₀) * (-(v₀ * Y1 + w₀ * Y2)) = 0 := by linarith
+  have zb : v₀ * ((1 - v₀) * Y1 - w₀ * Y2) = 0 := by linarith
+  have zc : w₀ * (-v₀ * Y1 + (1 - w₀) * Y2) = 0 := by linarith
+  rcases hw.eq_or_lt with hw0 | hw0
+  · -- on the edge `ab` (w₀ = 0)
+    subst hw0
+    simp only [zero_mul, add_zero, sub_zero, mul_zero] at *
+    rcases hv.eq_or_lt with hv0 | hv0
+    · subst hv0; simp only [zero_mul, sub_zero, one_mul, zero_sub] at *
+      exact absurd ⟨by linarith, by linarith⟩ t1
+    rcases hα.eq_or_lt with hα0 | hα0
+    · have : v₀ = 1 := by linarith
+      subst this; simp only [one_mul, sub_self, zero_mul, zero_sub, neg_mul, one_mul] at *
+      exact absurd ⟨by linarith, by linarith⟩ t2
+    · have hY1z : Y1 = 0 := by
+        have : (1 - v₀) * (-(v₀ * Y1)) = 0 := za
+        rcases mul_eq_zero.1 this with h | h
+        · linarith
+        · rcases mul_eq_zero.1 (neg_eq_zero.1 h) with h' | h'
+          · linarith
+          · exact h'
+      have hP : P = v₀ * A := by linarith
+      refine absurd ⟨?_, by nlinarith, by nlinarith, by linarith⟩ t3
+      have : Y2 ≤ 0 := by nlinarith
+      nlinarith
+  rcases hv.eq_or_lt with hv0 | hv0
+  · -- on the edge `ac` (v₀ = 0, w₀ > 0)
+    subst hv0
+    simp only [zero_mul, add_zero, sub_zero, mul_zero, zero_add, one_mul, neg_mul] at *
+    rcases hα.eq_or_lt with hα0 | hα0
+    · have : w₀ = 1 := by linarith
+      subst this; simp only [one_mul, sub_self, zero_mul, add_zero, zero_sub] at *
+      exact absurd ⟨by linarith, by linarith⟩ t4
+    · have hY2z : Y2 = 0 := by
+        have h' : (1 - w₀) * (-(w₀ * Y2)) = 0 := by linarith
+        rcases mul_eq_zero.1 h' with h | h
+        · linarith
+        · rcases mul_eq_zero.1 (neg_eq_zero.1 h) with h'' | h''
+          · linarith
+          · exact h''
+      have hQ : Q = w₀ * C := by linarith
+      refine absurd ⟨?_, by nlinarith, by nlinarith, by linarith⟩ t5
+      have : Y1 ≤ 0 := by nlinarith
+      nlinarith
+  rcases hα.eq_or_lt with hα0 | hα0
+  · -- on the edge `bc` (v₀ + w₀ = 1)
+    have hv1 : v₀ = 1 - w₀ := by linarith
+    have hb0 : (1 - v₀) * Y1 - w₀ * Y2 = 0 := by
+      rcases mul_eq_zero.1 zb with h | h
+      · linarith
+      · exact h
+    have hc0 : -v₀ * Y1 + (1 - w₀) * Y2 = 0 := by
+      rcases mul_eq_zero.1 zc with h | h
+      · linarith
+      · exact h
+    have hcon : Y2 - Y1 = 0 := by rw [hv1] at hb0 hc0; nlinarith
+    refine absurd ⟨?_, ?_, ?_, ?_⟩ t6
+    · have hva : A * C - B ^ 2 - (C - B) * P - (A - B) * Q =
+          (A + C - 2 * B) * (-(v₀ * Y1 + w₀ * Y2)) +
+            (A * w₀ - A - 2 * B * w₀ + B + C * w₀) * (Y2 - Y1) := by
+        rw [hY1, hY2, hv1]; ring
+      rw [hva, hcon, mul_zero, add_zero]
+      exact mul_nonpos_of_nonneg_of_nonpos hK.le hIa
+    · have : (Q - B) - (P - A) = w₀ * (A + C - 2 * B) + (Y2 - Y1) := by
+        rw [hY1, hY2, hv1]; ring
+      rw [this, hcon]; nlinarith
+    · have : (P - B) - (Q - C) = v₀ * (A + C - 2 * B) - (Y2 - Y1) := by
+        rw [hY1, hY2, hv1]; ring
+      rw [this, hcon]; nlinarith
+    · linarith
+  · -- inside: `p − q ⊥ ab, ac`, so `(v_a, v_b, v_c) = (AC − B²)(1 − v₀ − w₀, v₀, w₀)`
+    have ha0 : -(v₀ * Y1 + w₀ * Y2) = 0 := by
+      rcases mul_eq_zero.1 za with h | h
+      · linarith
+      · exact h
+    have hb0 : (1 - v₀) * Y1 - w₀ * Y2 = 0 := by
+      rcases mul_eq_zero.1 zb with h | h
+      · linarith
+      · exact h
+    have hc0 : -v₀ * Y1 + (1 - w₀) * Y2 = 0 := by
+      rcases mul_eq_zero.1 zc with h | h
+      · linarith
+      · exact h
+    have hY1z : Y1 = 0 := by linarith
+    have hY2z : Y2 = 0 := by linarith
+    have hP : P = v₀ * A + w₀ * B := by linarith
+    have hQ : Q = v₀ * B + w₀ * C := by linarith
+    rw [hP, hQ]
+    refine ⟨?_, ?_, ?_⟩
+    · have : A * C - B ^ 2 - (C - B) * (v₀ * A + w₀ * B) - (A - B) * (v₀ * B + w₀ * C) =
+          (A * C - B ^ 2) * (1 - v₀ - w₀) := by ring
+      rw [this]; positivity
+    · have : C * (v₀ * A + w₀ * B) - B * (v₀ * B + w₀ * C) = (A * C - B ^ 2) * v₀ := by ring
+      rw [this]; positivity
+    · have : A * (v₀ * B + w₀ * C) - B * (v₀ * A + w₀ * B) = (A * C - B ^ 2) * w₀ := by ring
+      rw [this]; positivity
+
+/-- The variational-inequality terms of a point `q = triPt v₀ w₀` in scalars. -/
+theorem vi_scalars (v₀ w₀ : ℝ) :
+    ⟪p - triPt a b c v₀ w₀, a - triPt a b c v₀ w₀⟫ =
+        -(v₀ * (tP p a b - v₀ * tA a b - w₀ * tB a b c) +
+          w₀ * (tQ p a c - v₀ * tB a b c - w₀ * tC a c)) ∧
+      ⟪p - triPt a b c v₀ w₀, b - triPt a b c v₀ w₀⟫ =
+        (1 - v₀) * (tP p a b - v₀ * tA a b - w₀ * tB a b c) -
+          w₀ * (tQ p a c - v₀ * tB a b c - w₀ * tC a c) ∧
+      ⟪p - triPt a b c v₀ w₀, c - triPt a b c v₀ w₀⟫ =
+        -v₀ * (tP p a b - v₀ * tA a b - w₀ * tB a b c) +
+          (1 - w₀) * (tQ p a c - v₀ * tB a b c - w₀ * tC a c) := by
+  have ea : a - triPt a b c v₀ w₀ = -(v₀ • (b - a) + w₀ • (c - a)) := by unfold triPt; abel
+  have eb : b - triPt a b c v₀ w₀ = (1 - v₀) • (b - a) - w₀ • (c - a) := by unfold triPt; module
+  have ec : c - triPt a b c v₀ w₀ = -v₀ • (b - a) + (1 - w₀) • (c - a) := by unfold triPt; module
+  rw [ea, eb, ec, triPt_sub]
+  unfold tP tQ tA tB tC
+  generalize p - a = x
+  generalize b - a = u
+  generalize c - a = z
+  simp only [inner_neg_right, inner_add_right, inner_sub_right, inner_smul_right,
+    inner_sub_left, inner_smul_left, RCLike.conj_to_real]
+  rw [real_inner_comm z u]
+  refine ⟨by ring, by ring, by ring⟩
+
+/-- A point of the triangle with the three scalar variational inequalities is the closest
+point. -/
+theorem closest_of_scalars {A B C P Q v₀ w₀ : ℝ} (eA : tA a b = A) (eB : tB a b c = B)
+    (eC : tC a c = C) (eP : tP p a b = P) (eQ : tQ p a c = Q) (h₀ : InTri v₀ w₀)
+    (hIa : -(v₀ * (P - v₀ * A - w₀ * B) + w₀ * (Q - v₀ * B - w₀ * C)) ≤ 0)
+    (hIb : (1 - v₀) * (P - v₀ * A - w₀ * B) - w₀ * (Q - v₀ * B - w₀ * C) ≤ 0)
+    (hIc : -v₀ * (P - v₀ * A - w₀ * B) + (1 - w₀) * (Q - v₀ * B - w₀ * C) ≤ 0) :
+    (∃ v w, InTri v w ∧ triPt a b c v₀ w₀ = triPt a b c v w) ∧
+      ∀ v w, InTri v w → ‖p - triPt a b c v₀ w₀‖ ≤ ‖p - triPt a b c v w‖ := by
+  obtain ⟨ea, eb, ec⟩ := vi_scalars (p := p) (a := a) (b := b) (c := c) v₀ w₀
+  rw [eA, eB, eC, eP, eQ] at ea eb ec
+  exact ⟨⟨v₀, w₀, h₀, rfl⟩, fun v w h => vi_suff rfl (ea ▸ hIa) (eb ▸ hIb) (ec ▸ hIc) h⟩
+
+theorem nearer_le_left (p x y : E) : ‖p - nearer p x y‖ ≤ ‖p - x‖ := by
+  unfold nearer; split_ifs with h
+  · exact norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) h.le
+  · exact le_rfl
+
+theorem nearer_le_right (p x y : E) : ‖p - nearer p x y‖ ≤ ‖p - y‖ := by
+  unfold nearer; split_ifs with h
+  · exact le_rfl
+  · exact norm_le_of_sq_le (norm_nonneg _) (norm_nonneg _) (not_lt.1 h)
+
+theorem nearer_cases (p x y : E) : nearer p x y = x ∨ nearer p x y = y := by
+  unfold nearer; split_ifs <;> simp
+
+theorem cpSeg_eq (p a b : E) : cpSeg p a b = segPt a b (psParam p a b) := by
+  unfold cpSeg psParam segPt
+  by_cases h : ⟪b - a, b - a⟫ = 0
+  · rw [if_pos h, if_neg (by rw [h]; exact lt_irrefl 0)]; simp
+  · rw [if_neg h, if_pos (lt_of_le_of_ne real_inner_self_nonneg (Ne.symm h))]
+
+theorem vden_eq : vVa p a b c + vVb p a b c + vVc p a b c = tN a b c := by
+  obtain ⟨e1, e2, e3, e4, e5, e6⟩ := vd_eqs (p := p) (a := a) (b := b) (c := c)
+  unfold vVa vVb vVc tN; rw [e1, e2, e3, e4, e5, e6]; ring
+
+theorem proj_Y1 (A B C P Q : ℝ) (hN : 0 < A * C - B ^ 2) :
+    P - (C * P - B * Q) / (A * C - B ^ 2) * A - (A * Q - B * P) / (A * C - B ^ 2) * B = 0 := by
+  generalize hDd : A * C - B ^ 2 = D at *
+  have := hN.ne'
+  field_simp
+  rw [← hDd]; ring
+
+theorem proj_Y2 (A B C P Q : ℝ) (hN : 0 < A * C - B ^ 2) :
+    Q - (C * P - B * Q) / (A * C - B ^ 2) * B - (A * Q - B * P) / (A * C - B ^ 2) * C = 0 := by
+  generalize hDd : A * C - B ^ 2 = D at *
+  have := hN.ne'
+  field_simp
+  rw [← hDd]; ring
+
+/-- **The Voronoi-region routine of `truth.rs` returns the closest point of the triangle**
+(exact arithmetic, any triangle, degenerate ones included): the result is a point of the
+triangle, and no point of the triangle is closer to `p`.
+
+[formula: pat-truth-closest-point] -/
+theorem closestPtTri_isClosest :
+    (∃ v w, InTri v w ∧ closestPtTri p a b c = triPt a b c v w) ∧
+      ∀ v w, InTri v w → ‖p - closestPtTri p a b c‖ ≤ ‖p - triPt a b c v w‖ := by
+  obtain ⟨e1, e2, e3, e4, e5, e6⟩ := vd_eqs (p := p) (a := a) (b := b) (c := c)
+  have hA0 := tA_nonneg (a := a) (b := b)
+  have hC0 : 0 ≤ tC a c := real_inner_self_nonneg
+  unfold closestPtTri
+  unfold vVc vVb vVa
+  rw [e1, e2, e3, e4, e5, e6]
+  set A := tA a b
+  set B := tB a b c
+  set C := tC a c
+  set P := tP p a b
+  set Q := tQ p a c
+  have ta : triPt a b c 0 0 = a := by unfold triPt; simp
+  have tb : triPt a b c 1 0 = b := by unfold triPt; simp
+  have tc : triPt a b c 0 1 = c := by unfold triPt; simp
+  split_ifs with t1 t2 t3 t4 t5 t6 t7
+  · -- the corner `a`
+    have h := closest_of_scalars (p := p) rfl rfl rfl rfl rfl (v₀ := 0) (w₀ := 0)
+      ⟨le_rfl, le_rfl, by norm_num⟩ (by simp) (by simpa using t1.1) (by simpa using t1.2)
+    rwa [ta] at h
+  · -- the corner `b`
+    have h := closest_of_scalars (p := p) rfl rfl rfl rfl rfl (v₀ := 1) (w₀ := 0)
+      ⟨zero_le_one, le_rfl, by norm_num⟩ (by simp; linarith [t2.1]) (by simp)
+      (by simp; linarith [t2.2])
+    rwa [tb] at h
+  · -- the edge `ab`
+    obtain ⟨h1, h2, h3, h4⟩ := t3
+    have hA : 0 < A := by linarith
+    have ht : P - (P - A) = A := by ring
+    rw [ht]
+    have e : triPt a b c (P / A) 0 = a + (P / A) • (b - a) := by unfold triPt; simp
+    rw [← e]
+    have hY1 : P - P / A * A - 0 * B = 0 := by field_simp; ring
+    refine closest_of_scalars (p := p) rfl rfl rfl rfl rfl ⟨div_nonneg h2 hA.le, le_rfl, by
+      rw [add_zero, div_le_one hA]; linarith⟩ (by rw [hY1]; simp) (by rw [hY1]; simp) ?_
+    rw [hY1]
+    have : Q - P / A * B - 0 * C = (A * Q - B * P) / A := by field_simp; ring
+    rw [this]; simp only [mul_zero, neg_zero, zero_add, sub_zero, one_mul]
+    exact div_nonpos_of_nonpos_of_nonneg (by linarith) hA.le
+  · -- the corner `c`
+    have h := closest_of_scalars (p := p) rfl rfl rfl rfl rfl (v₀ := 0) (w₀ := 1)
+      ⟨le_rfl, zero_le_one, by norm_num⟩ (by simp; linarith [t4.1])
+      (by simp; linarith [t4.2]) (by simp)
+    rwa [tc] at h
+  · -- the edge `ac`
+    obtain ⟨h1, h2, h3, h4⟩ := t5
+    have hC : 0 < C := by linarith
+    have ht : Q - (Q - C) = C := by ring
+    rw [ht]
+    have e : triPt a b c 0 (Q / C) = a + (Q / C) • (c - a) := by unfold triPt; simp
+    rw [← e]
+    have hY2 : Q - 0 * B - Q / C * C = 0 := by field_simp; ring
+    refine closest_of_scalars (p := p) rfl rfl rfl rfl rfl ⟨le_rfl, div_nonneg h2 hC.le, by
+      rw [zero_add, div_le_one hC]; linarith⟩ (by rw [hY2]; simp) ?_ (by rw [hY2]; simp)
+    rw [hY2]
+    have : P - 0 * A - Q / C * B = (C * P - B * Q) / C := by field_simp; ring
+    rw [this]; simp only [mul_zero, sub_zero, one_mul]
+    exact div_nonpos_of_nonpos_of_nonneg (by linarith) hC.le
+  · -- the edge `bc`
+    obtain ⟨h1, h2, h3, h4⟩ := t6
+    set K := (Q - B - (P - A)) + (P - B - (Q - C)) with hK
+    set t := (Q - B - (P - A)) / K
+    have ht0 : 0 ≤ t := div_nonneg h2 h4.le
+    have ht1 : t ≤ 1 := (div_le_one h4).2 (by linarith)
+    have e : triPt a b c (1 - t) t = b + t • (c - b) := by unfold triPt; module
+    rw [← e]
+    have hKe : K = A + C - 2 * B := by rw [hK]; ring
+    have htK : t * K = Q - B - (P - A) := div_mul_cancel₀ _ h4.ne'
+    have hcon : (Q - (1 - t) * B - t * C) - (P - (1 - t) * A - t * B) = 0 := by
+      rw [hKe] at htK; linear_combination -htK
+    have hva : A * C - B ^ 2 - (C - B) * P - (A - B) * Q =
+        (A + C - 2 * B) * (-((1 - t) * (P - (1 - t) * A - t * B) +
+          t * (Q - (1 - t) * B - t * C))) +
+        (A * t - A - 2 * B * t + B + C * t) *
+          ((Q - (1 - t) * B - t * C) - (P - (1 - t) * A - t * B)) := by ring
+    have h1' : (P - A) * (Q - C) - (P - B) * (Q - B) = A * C - B ^ 2 - (C - B) * P - (A - B) * Q :=
+      by ring
+    rw [h1', hva, hcon, mul_zero, add_zero] at h1
+    have hK' : 0 < A + C - 2 * B := hKe ▸ h4
+    refine closest_of_scalars (p := p) rfl rfl rfl rfl rfl ⟨by linarith, ht0, by linarith⟩
+      ?_ ?_ ?_
+    · by_contra hc
+      push Not at hc
+      nlinarith [mul_pos hK' hc]
+    · have : (Q - (1 - t) * B - t * C) = (P - (1 - t) * A - t * B) := by linarith
+      rw [this, show 1 - (1 - t) = t by ring, sub_self]
+    · have : (Q - (1 - t) * B - t * C) = (P - (1 - t) * A - t * B) := by linarith
+      rw [this]; exact le_of_eq (by ring)
+  · -- inside: the projection onto the plane
+    have hN : 0 < A * C - B ^ 2 := by
+      have := vden_eq (p := p) (a := a) (b := b) (c := c)
+      unfold vVa vVb vVc at this; rw [e1, e2, e3, e4, e5, e6] at this
+      have h' : A * C - B ^ 2 = tN a b c := rfl
+      rw [h', ← this]
+      linarith [t7]
+    have hden : (P - A) * (Q - C) - (P - B) * (Q - B) + ((P - B) * Q - P * (Q - C)) +
+        (P * (Q - B) - (P - A) * Q) = A * C - B ^ 2 := by ring
+    rw [hden]
+    -- a closest point exists (`ptTriDist`), and satisfies the variational inequality
+    obtain ⟨v₀, w₀, h₀, hd⟩ := ptTriDist_attained (p := p) (a := a) (b := b) (c := c)
+    have hmin : ∀ v w, InTri v w → ‖p - triPt a b c v₀ w₀‖ ≤ ‖p - triPt a b c v w‖ :=
+      fun v w h => hd ▸ ptTriDist_le h
+    have via := vi_nec h₀ hmin (v := 0) (w := 0) ⟨le_rfl, le_rfl, by norm_num⟩
+    have vib := vi_nec h₀ hmin (v := 1) (w := 0) ⟨zero_le_one, le_rfl, by norm_num⟩
+    have vic := vi_nec h₀ hmin (v := 0) (w := 1) ⟨le_rfl, zero_le_one, by norm_num⟩
+    rw [ta] at via; rw [tb] at vib; rw [tc] at vic
+    obtain ⟨ea, eb, ec⟩ := vi_scalars (p := p) (a := a) (b := b) (c := c) v₀ w₀
+    rw [ea] at via; rw [eb] at vib; rw [ec] at vic
+    obtain ⟨ca, cb, cc⟩ := voronoi_cover_real hA0 hC0 hN h₀ via vib vic t1 t2
+      (by intro h; exact t3 ⟨by linarith [h.1], h.2.1, h.2.2.1, h.2.2.2⟩) t4
+      (by intro h; exact t5 ⟨by linarith [h.1], h.2.1, h.2.2.1, h.2.2.2⟩)
+      (by intro h; exact t6 ⟨by linarith [h.1], h.2.1, h.2.2.1, h.2.2.2⟩)
+    have e : triPt a b c ((C * P - B * Q) / (A * C - B ^ 2)) ((A * Q - B * P) / (A * C - B ^ 2)) =
+        a + (((P - B) * Q - P * (Q - C)) / (A * C - B ^ 2)) • (b - a) +
+        ((P * (Q - B) - (P - A) * Q) / (A * C - B ^ 2)) • (c - a) := by
+      unfold triPt; congr 3 <;> ring
+    rw [← e]
+    have hY1 := proj_Y1 A B C P Q hN
+    have hY2 := proj_Y2 A B C P Q hN
+    refine closest_of_scalars (p := p) rfl rfl rfl rfl rfl
+      ⟨div_nonneg cb hN.le, div_nonneg cc hN.le, ?_⟩
+      (by rw [hY1, hY2]; simp) (by rw [hY1, hY2]; simp) (by rw [hY1, hY2]; simp)
+    rw [← add_div, div_le_one hN]; linarith
+  · -- degenerate: the nearest edge point
+    have hN : tN a b c ≤ 0 := by
+      have := vden_eq (p := p) (a := a) (b := b) (c := c)
+      unfold vVa vVb vVc at this; rw [e1, e2, e3, e4, e5, e6] at this
+      rw [← this]; linarith [not_lt.1 t7]
+    have hdist : ptTriDist p a b c = ptEdges p a b c := by unfold ptTriDist; rw [if_pos hN]
+    -- the three candidates are points of the triangle at the edge distances
+    have q1 : ∃ v w, InTri v w ∧ cpSeg p a b = triPt a b c v w ∧
+        ‖p - cpSeg p a b‖ = psDist p a b := by
+      obtain ⟨m1, m2⟩ := psParam_mem p a b
+      exact ⟨psParam p a b, 0, ⟨m1, le_rfl, by linarith⟩, by
+        rw [cpSeg_eq]; unfold triPt segPt; simp, by rw [cpSeg_eq, psDist_eq]⟩
+    have q2 : ∃ v w, InTri v w ∧ cpSeg p b c = triPt a b c v w ∧
+        ‖p - cpSeg p b c‖ = psDist p b c := by
+      obtain ⟨m1, m2⟩ := psParam_mem p b c
+      exact ⟨1 - psParam p b c, psParam p b c, ⟨by linarith, m1, by linarith⟩, by
+        rw [cpSeg_eq]; unfold triPt segPt; module, by rw [cpSeg_eq, psDist_eq]⟩
+    have q3 : ∃ v w, InTri v w ∧ cpSeg p c a = triPt a b c v w ∧
+        ‖p - cpSeg p c a‖ = psDist p c a := by
+      obtain ⟨m1, m2⟩ := psParam_mem p c a
+      exact ⟨0, 1 - psParam p c a, ⟨le_rfl, by linarith, by linarith⟩, by
+        rw [cpSeg_eq]; unfold triPt segPt; module, by rw [cpSeg_eq, psDist_eq]⟩
+    have hle : ‖p - nearestEdgePt p a b c‖ ≤ ptEdges p a b c := by
+      obtain ⟨-, -, -, -, d1⟩ := q1
+      obtain ⟨-, -, -, -, d2⟩ := q2
+      obtain ⟨-, -, -, -, d3⟩ := q3
+      unfold nearestEdgePt ptEdges
+      rw [← d1, ← d2, ← d3]
+      refine le_min (le_min ?_ ?_) (nearer_le_right _ _ _)
+      · exact (nearer_le_left _ _ _).trans (nearer_le_left _ _ _)
+      · exact (nearer_le_left _ _ _).trans (nearer_le_right _ _ _)
+    refine ⟨?_, fun v w h => hle.trans (hdist ▸ ptTriDist_le h)⟩
+    obtain ⟨v1, w1, i1, r1, -⟩ := q1
+    obtain ⟨v2, w2, i2, r2, -⟩ := q2
+    obtain ⟨v3, w3, i3, r3, -⟩ := q3
+    unfold nearestEdgePt
+    rcases nearer_cases p (nearer p (cpSeg p a b) (cpSeg p b c)) (cpSeg p c a) with h | h <;>
+      rw [h]
+    · rcases nearer_cases p (cpSeg p a b) (cpSeg p b c) with h' | h' <;> rw [h']
+      · exact ⟨v1, w1, i1, r1⟩
+      · exact ⟨v2, w2, i2, r2⟩
+    · exact ⟨v3, w3, i3, r3⟩
+
+/-- **The copy in `obstacle.rs` agrees with it for non-degenerate triangles** (`AC − B² > 0`;
+`Obstacle` rejects degenerate triangles), hence also returns the closest point.
+
+[formula: rc-closest-points] -/
+theorem closestPtTriRC_eq (hN : 0 < tN a b c) : closestPtTriRC p a b c = closestPtTri p a b c := by
+  obtain ⟨e1, e2, e3, e4, e5, e6⟩ := vd_eqs (p := p) (a := a) (b := b) (c := c)
+  have hden := vden_eq (p := p) (a := a) (b := b) (c := c)
+  have hA0 := tA_nonneg (a := a) (b := b)
+  have hC0 : 0 ≤ tC a c := real_inner_self_nonneg
+  have hN' : 0 < tA a b * tC a c - tB a b c ^ 2 := hN
+  have hA : 0 < tA a b := by
+    rcases hA0.eq_or_lt with h | h
+    · rw [← h] at hN'; nlinarith [sq_nonneg (tB a b c)]
+    · exact h
+  have hC : 0 < tC a c := by
+    rcases hC0.eq_or_lt with h | h
+    · rw [← h] at hN'; nlinarith [sq_nonneg (tB a b c)]
+    · exact h
+  have g3 : 0 < vd1 p a b - vd3 p a b := by rw [e1, e3]; linarith
+  have g5 : 0 < vd2 p a c - vd6 p a c := by rw [e2, e6]; linarith
+  have g6 : 0 < (vd4 p a b c - vd3 p a b) + (vd5 p a b c - vd6 p a c) := by
+    rw [e3, e4, e5, e6]
+    nlinarith [sq_nonneg (tA a b - tC a c), sq_nonneg (tA a b + tC a c - 2 * tB a b c)]
+  have g7 : 0 < vVa p a b c + vVb p a b c + vVc p a b c := hden ▸ hN
+  unfold closestPtTri closestPtTriRC
+  simp only [g3, g5, g6, g7, and_true, if_true, mul_one_div]
+
+end Voronoi
+
 end RC
 
 end DdgProofs
