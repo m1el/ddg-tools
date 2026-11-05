@@ -19,6 +19,8 @@
 #   Cuts/Weighted -> Cuts/WeightedEntries (app): Cuts.triangleMean_*, Cuts.weightedOffDiag_eq, Cuts.weightedEntry*, Cuts.weighted_*, Cuts.weightedOffDiag_one
 #   Cuts/Dirichlet -> Laplace/Dirichlet: Cuts block products (mulVec_*, dotProduct_mulVec_*), IsDirichletSolution*, boundaryFlux*, existsUnique_isDirichletSolution, isUnit_det_of_posDef, existsUnique_dirichlet_data, existsUnique_harmonicExtension, harmonic_*, harmonicExtension_*, TriMesh.existsUnique_harmonicExtension, TriMesh.harmonicExtension_faceEnergy_le
 #   Cuts/Dirichlet keeps (app): yamabe_*, normalFlux*, dirichletEnergy*, gradient densities, adjoints, TriMesh.lumped, sum_lumped, yamabe_existsUnique, sum_normalFlux_lumped, dirichletEnergy_eq_sum_faceEnergy
+#   Bff/Laplace -> Laplace/Poisson: TriMesh.existsUnique_poisson, neumannData*, sum_neumannData, sum_eq_zero_of_laplacian_mulVec_eq, existsUnique_pinned, exists_laplacian_mulVec_eq_iff, sub_const_of_laplacian_mulVec_eq, existsUnique_neumann
+#   Bff/Laplace keeps (Conformal/Cherrier): gauss_bonnet_conformal, sum_exteriorAngle*, hasDerivAt_geodesicCurvature_conformalScale, hilbertTransform_cotan
 DdgProofs.Bff.Quality	DDG.Geometry.Plane
 DdgProofs.Conformal.Distortion	DDG.Conformal.Distortion
 DdgProofs.Geometry.SignedAngle	DDG.Geometry.SignedAngle
@@ -42,3 +44,5 @@ DdgProofs.Cuts.Weighted	DDG.Laplace.Weighted
 DdgProofs.Cuts.WeightedEntries	DdgProofs.Cuts.WeightedEntries
 DdgProofs.Laplace.Dirichlet	DDG.Laplace.Dirichlet
 DdgProofs.Cuts.Dirichlet	DdgProofs.Cuts.Dirichlet
+DdgProofs.Laplace.Poisson	DDG.Laplace.Poisson
+DdgProofs.Bff.Laplace	DDG.Conformal.Cherrier

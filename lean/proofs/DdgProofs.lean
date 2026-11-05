@@ -115,3 +115,4 @@ import DdgProofs.Optimization.Wolfe
 import DdgProofs.Repulsive.Curves.DualLengths
 import DdgProofs.Cuts.WeightedEntries
 import DdgProofs.Laplace.Dirichlet
+import DdgProofs.Laplace.Poisson
