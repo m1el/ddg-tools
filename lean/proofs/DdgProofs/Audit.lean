@@ -1476,6 +1476,15 @@ open DdgProofs
 #print axioms TriangleIntegral.dot_grad_sideNormal
 #print axioms TriangleIntegral.side_flux_eq
 #print axioms TriangleIntegral.side_flux_add_twin
+#print axioms TriangleIntegral.integral_bary_monomial_cis
+#print axioms TriangleIntegral.expMoment_zero
+#print axioms TriangleIntegral.expMoment_succ
+#print axioms TriangleIntegral.betaExp_eq_sum_expMoment
+#print axioms TriangleIntegral.choose_succ_eq
+#print axioms TriangleIntegral.betaExpTerm_succ
+#print axioms TriangleIntegral.hasSum_betaExp
+#print axioms TriangleIntegral.norm_betaExpTerm_succ_le
+#print axioms TriangleIntegral.norm_tail_betaExp_le
 
 -- oriented meshes (DdgProofs/Orientation.lean), bff-conformal-energy, app-vector-singularity-index
 #print axioms TriMesh.twin_twin

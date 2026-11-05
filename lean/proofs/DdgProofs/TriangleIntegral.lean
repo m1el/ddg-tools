@@ -2,6 +2,7 @@ import DdgProofs.TriangleIntegral.Basic
 import DdgProofs.TriangleIntegral.Fem
 import DdgProofs.TriangleIntegral.Tiling
 import DdgProofs.TriangleIntegral.Flux
+import DdgProofs.TriangleIntegral.BetaExp
 
 /-!
 # Integrals over a triangle
@@ -14,4 +15,6 @@ map, Chen–Holst Lemma 4.1, the element norms of the AMR estimator) and their s
 `Tiling`: additivity of the integral over triangles with disjoint interiors, Lemma 4.1 over a
 tiling and the descent of the interpolation error under the ODT update, the transfer mass matrix
 as an integral. `Flux`: the flux of a linear function through a side (AMR jump residuals).
+`BetaExp`: the series and the recurrence by which `beta_exp` (`knoeppel.rs`) evaluates
+`∫₀¹ s^p (1 − s)^m e^{iΩs} ds`.
 -/

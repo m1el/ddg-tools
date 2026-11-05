@@ -1162,9 +1162,12 @@ machine-checked: the entries below, and everything about rounding and the solver
   Mathlib. Proved instead (`DdgProofs/TriangleIntegral/`, `[formula: fem-area-coordinate-rule]`):
   the area-coordinate rule as a Lebesgue integral over the triangle, and the slice formula that
   `monomial_integral` evaluates, `∫_T b₀^{e₀} b₁^{e₁} b₂^{e₂} e^{iΩ b_c} = 2|T| q! r!/(q + r + 1)! ·
-  ∫₀¹ s^{e_c} (1 − s)^{q+r+1} e^{iΩs} ds` (`q = e_{c+1}`, `r = e_{c+2}`). Not proved: the series and
-  recurrence by which `beta_exp` evaluates the one-dimensional integral, the closed forms above,
-  and that the integrands of SPEC N43 are those of the model.
+  ∫₀¹ s^{e_c} (1 − s)^{q+r+1} e^{iΩs} ds` (`q = e_{c+1}`, `r = e_{c+2}`); and
+  (`DdgProofs/TriangleIntegral/BetaExp.lean`, `[formula: app-vector-beta-exp]`) the two ways
+  `beta_exp` evaluates the one-dimensional integral, exactly: the power series with its running
+  product and a geometric bound on the tail after any term `K` with `|Ω| < K + 1`, and for `Ω ≠ 0`
+  the recurrence `K_k = (e^{iΩ} − k K_{k−1})/(iΩ)` with the binomial expansion of `(1 − s)^m`.
+  Not proved: the closed forms above, and that the integrands of SPEC N43 are those of the model.
 - **What depends on it.** `ConnectionLaplacian::FiniteElement`: the smoothest direction fields
   and the energies of the README's Fig. 21 table.
 

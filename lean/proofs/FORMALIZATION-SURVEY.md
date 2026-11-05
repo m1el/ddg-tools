@@ -76,6 +76,11 @@ These come first because they may be bugs or wrong statements, independent of wh
     `Σ_f ∫ = uᵀLu` over isometric layouts); the convergence part stays cited as `cotan-fem-convergence`.
   - `app-vector-fem-connection-laplacian`: **partial**, new id `fem-area-coordinate-rule` (rule + the exponential
     slice formula that `monomial_integral` evaluates, tagged in Rust); the gauge model, Eq. 17 and `beta_exp` stay cited.
+    **Update (2026-11-05):** `beta_exp` proved as new id `app-vector-beta-exp` (`TriangleIntegral/BetaExp.lean`):
+    series with running product and a geometric tail bound, recurrence + binomial expansion, both exact.
+    `beta_exp` makes no truncation claim beyond its stopping rule; its rounding remarks are not covered (a numeric
+    check of the series one, max_k|t_k| ≤ e^{|Ω|}|B| for p, m ≤ 11, |Ω| < 3, found no violation). Still cited:
+    the gauge model and the Eq. 17 closed forms.
   - `cut-weighted-fem-stiffness`: **done, CITED entry removed** (per triangle and `Σ_f ∫ a∇u·∇w = uᵀL_ā w`).
   - `bff-conformal-energy`: **done, CITED entry removed** (2026-11-05): face orientation added
     (`DdgProofs/Orientation.lean`, `TriMesh.Oriented`, twins, boundary halfedges); shoelace over the mesh and

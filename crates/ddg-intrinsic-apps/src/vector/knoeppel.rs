@@ -110,6 +110,8 @@ fn factorial(n: usize) -> f64 {
 /// whose terms grow to at most `e^{|Ω|}` times the sum); otherwise by expanding `(1 − s)^m` and
 /// the recurrence `K_k = (e^{iΩ} − k K_{k−1}) / (iΩ)` for `K_k = ∫₀¹ s^k e^{iΩ s} ds`, which
 /// is stable for `k < |Ω|` and amplifies rounding by at most `k!/|Ω|^k` beyond.
+///
+/// [formula: app-vector-beta-exp]
 fn beta_exp(p: usize, m: usize, omega: f64) -> C64 {
     if omega.abs() < 3.0 {
         // Term k: (iΩ)^k p_k! m! / ((p + k + m + 1)! ) · (p + k)!/(k! p_k!) ...: written as a
