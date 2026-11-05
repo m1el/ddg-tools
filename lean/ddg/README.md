@@ -115,6 +115,8 @@ its own, copy `DDG/<Part>/`, `DDG/<Part>.lean` and the same for every part in th
 dependencies (for `Delaunay.Planar`: `Geometry`, `FEM`, `Laplace`, `Mesh`), with the `lakefile.toml` blocks of
 those parts.
 
+CI: `.github/workflows/lean.yml` (written, not yet run) restores Mathlib's cache, builds `lean/ddg` standalone, runs `scripts/check-lean-dag.py`, builds `lean/proofs` and runs `scripts/check-formulas.sh --audit-all`.
+
 ## Conventions
 
 * **No `sorry`, no `axiom`.** Every declaration of the library depends on at most the three standard axioms

@@ -1,0 +1,97 @@
+name: lean
+
+# Builds the Lean library `DDG` (lean/ddg) standalone, checks the part DAG, then builds the
+# application layer (lean/proofs) and runs the formula-tag / axiom audit.
+# Mathlib comes from its prebuilt cache (`lake exe cache get`); it is never compiled here.
+
+on:
+  push:
+    paths:
+      - "lean/**"
+      - "scripts/check-lean-dag.py"
+      - "scripts/check-formulas.sh"
+      - ".github/workflows/lean.yml"
+  pull_request:
+    paths:
+      - "lean/**"
+      - "scripts/check-lean-dag.py"
+      - "scripts/check-formulas.sh"
+      - ".github/workflows/lean.yml"
+
+concurrency:
+  group: lean-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchains agree
+        run: |
+          diff lean/ddg/lean-toolchain lean/proofs/lean-toolchain
+          diff lean/ddg/lean-toolchain lean/oracle/lean-toolchain
+
+      - name: Install elan and the pinned toolchain
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain "$(cat lean/ddg/lean-toolchain)"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      # Built `.lake` directories, keyed on the manifests, the toolchain and the sources. The
+      # restore keys let a changed source file reuse the previous build and recompile only what
+      # changed.
+      - name: Cache .lake (lean/ddg)
+        uses: actions/cache@v4
+        with:
+          path: lean/ddg/.lake
+          key: lake-ddg-${{ runner.os }}-${{ hashFiles('lean/ddg/lean-toolchain', 'lean/ddg/lake-manifest.json', 'lean/ddg/lakefile.toml') }}-${{ hashFiles('lean/ddg/DDG/**', 'lean/ddg/DDG.lean') }}
+          restore-keys: |
+            lake-ddg-${{ runner.os }}-${{ hashFiles('lean/ddg/lean-toolchain', 'lean/ddg/lake-manifest.json', 'lean/ddg/lakefile.toml') }}-
+
+      - name: Cache .lake (lean/proofs)
+        uses: actions/cache@v4
+        with:
+          path: lean/proofs/.lake
+          key: lake-proofs-${{ runner.os }}-${{ hashFiles('lean/proofs/lean-toolchain', 'lean/proofs/lake-manifest.json', 'lean/proofs/lakefile.toml', 'lean/ddg/lake-manifest.json', 'lean/oracle/lake-manifest.json') }}-${{ hashFiles('lean/proofs/DdgProofs/**', 'lean/proofs/DdgProofs.lean', 'lean/ddg/DDG/**', 'lean/oracle/DdgOracle/**') }}
+          restore-keys: |
+            lake-proofs-${{ runner.os }}-${{ hashFiles('lean/proofs/lean-toolchain', 'lean/proofs/lake-manifest.json', 'lean/proofs/lakefile.toml', 'lean/ddg/lake-manifest.json', 'lean/oracle/lake-manifest.json') }}-
+
+      - name: Mathlib cache (lean/ddg)
+        working-directory: lean/ddg
+        run: lake exe cache get
+
+      # lean/proofs has its own copy of the packages; the download in ~/.cache/mathlib is shared,
+      # so this only unpacks the same archives.
+      - name: Mathlib cache (lean/proofs)
+        working-directory: lean/proofs
+        run: lake exe cache get
+
+      - name: Build lean/ddg (standalone, Mathlib only)
+        working-directory: lean/ddg
+        run: lake build
+
+      - name: Part DAG
+        run: python3 scripts/check-lean-dag.py
+
+      - name: Build lean/proofs
+        working-directory: lean/proofs
+        run: lake build
+
+      # Formula tags vs Lean theorems and CITED.md, `sorry`/`axiom` scan, axiom audit of the main
+      # theorems and of every declaration (Audit.lean, AuditAll.lean). Needs bash, grep, awk, sed,
+      # find and python3, all preinstalled on ubuntu-latest (it re-runs the DAG check and the
+      # builds, which are then no-ops).
+      - name: Formula check and axiom audit
+        working-directory: lean/proofs
+        run: ../../scripts/check-formulas.sh --audit-all
+
+      - name: Upload audit logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-logs
+          path: runs_tmp/*.log
+          if-no-files-found: ignore
