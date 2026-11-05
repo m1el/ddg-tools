@@ -67,3 +67,6 @@ import DdgProofs.IntegerCoords
 import DdgProofs.IntrinsicSimplification
 import DdgProofs.PointsAsTori
 import DdgProofs.TriangleIntegral
+import DdgProofs.Orientation
+import DdgProofs.Bff.ConformalEnergy
+import DdgProofs.Intrinsic.SingularityIndex
