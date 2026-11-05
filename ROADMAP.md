@@ -57,7 +57,7 @@ Item 1 of the earlier list, the feedback loop of the cones solver, landed on 202
   `BFF::mapToSphere`: punctured disk, radius search, stereographic projection, Möbius centering
   after Baden, Crane, Kazhdan 2018). Default pole: the most regular vertex star (the reference's
   vertex 0 gives flipped triangles on a noisy ellipsoid). Differential test against the
-  reference's own program; Lean `DdgProofs/Bff/Sphere.lean`; Python `ddg_tools.map_to_sphere`;
+  reference's own program; Lean `DDG/Conformal/Sphere.lean`; Python `ddg_tools.map_to_sphere`;
   Blender operator "Conformal Map to Sphere". Open: injectivity is reported, not guaranteed
   (brain: 38 flips, as the reference); the 1e-4 difference of the reference's in-place puncture
   is unexplained.
