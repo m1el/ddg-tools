@@ -61,8 +61,15 @@ criterion (e) in `DdgProofs/Delaunay/Encroachment.lean`.
 * C. Indermitte, Th. M. Liebling, M. Troyanov, H. Clémençon, *Voronoi diagrams on piecewise flat
   surfaces and an application to biological growth*, Theoret. Comput. Sci. 263(1–2), 263–274,
   2001, Sec. 4 (legal edges and flips on piecewise flat surfaces).
+* M. Fisher, B. Springborn, A. I. Bobenko, P. Schröder, *An algorithm for the construction of
+  intrinsic Delaunay triangulations with applications to digital geometry processing*,
+  Computing 81(2–3), 199–213, 2007 (the intrinsic flip algorithm on edge lengths).
 * N. Sharp, Y. Soliman, K. Crane, *Navigating intrinsic triangulations*, ACM TOG 38(4), 2019,
   Sec. 3.3.1 (Fig. 9: the flipped length) and Sec. 4 (Eq. 4).
+
+B–S, Indermitte et al. and the Signpost paper were read (`CITED.md`, "Navigating Intrinsic
+Triangulations"); the bibliographic data of Lawson, Sibson and Fisher et al. were not checked
+against the works here.
 
 ## Dependencies
 

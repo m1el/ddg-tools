@@ -701,7 +701,13 @@ coordinates, the distances of a point to the corners and the lengths of an edge 
 circumcentre in barycentric coordinates; the lengths and areas of a moved vertex's star; the
 circumcentre and barycentre of a triangle times its area; the energy of Chen and Holst of one
 star, its gradient (their Eq. 4.5, as a Fréchet derivative), that it is exactly quadratic, and
-that the update of their Eq. 4.13 is a descent step (`DdgProofs/Intrinsic/Move.lean`). **Not**
+that the update of their Eq. 4.13 is a descent step (`DdgProofs/Intrinsic/Move.lean`). The theory of
+one diamond (`DdgProofs/Delaunay/{Local,Rippa,Potential,Encroachment}.lean`): the equivalent local
+Delaunay criteria (angles, cotangents, empty circumcircle of the layout), the flip of a
+non-Delaunay edge with its corner-angle bookkeeping, Rippa's identity for one diamond
+(`it-rippa-diamond`), two potentials that decrease strictly with each such flip
+(`it-delaunay-potential`), and the encroachment criterion of Ruppert's rule
+(`it-encroachment-angle`). **Not**
 machine-checked: the eight results below; the
 halfedge data structure and that the Rust code applies the formulas to the right elements; a
 tracing query as a whole (only one step is covered), edge traces and their checks (SPEC N7, N8),
@@ -768,7 +774,11 @@ an earlier version with another title, were read).
   to ties, independent of the order of the queue (SPEC §5 item 4, N6: tested, the ties are
   counted). Proved without it: the local condition is equivalent to a nonnegative cotan weight
   (`[formula: it-cotan-weight]`, `cotanWeight_nonneg_iff`), and at a tie both diagonals satisfy
-  it with equality (`flip_of_tie`).
+  it with equality (`flip_of_tie`). B–S Lemma 9 for one diamond (locally Delaunay ⟺ the
+  apex `l` is not strictly inside the circumcircle of `i, j, k` in the unfolded diamond, and
+  symmetrically) is proved in `DdgProofs/Delaunay/Local.lean`
+  (`isLocallyDelaunay_iff_not_inside_circumcircle`, `inside_circumcircle_iff`, `on_circumcircle_iff`,
+  from the power of the point, `2 A_jil (cot θ_k + cot θ_l)`).
 
 ### [formula: it-delaunay-flip-termination] Delaunay flipping terminates
 
@@ -810,7 +820,16 @@ an earlier version with another title, were read).
   runs). Proved: every step of the algorithm is possible (an edge that violates the condition has
   a strictly convex diamond, `diamondConvex_of_not_delaunay`; an edge with the same triangle on
   both sides never violates it, `delaunay_of_same_triangle`), and after the flip the new edge
-  satisfies the condition strictly (`flip_of_not_delaunay`).
+  satisfies the condition strictly (`flip_of_not_delaunay`). **The one-flip part of both proofs
+  is machine-checked** (`DdgProofs/Delaunay/Potential.lean`, `it-delaunay-potential`): the
+  lifting energy `Σ_T A_T(a² + b² + c²)` changes under the flip of an edge with a strictly convex
+  diamond by exactly `−8 A_ijk A_jil (cot θ_k + cot θ_l)` (`liftEnergy_flip`), so it decreases
+  strictly at every non-Delaunay edge (`liftEnergy_flip_lt`) and is unchanged at a tie; Musin's
+  harmonic index `Σ_T (a² + b² + c²)/A_T` (the potential of B–S Prop. 12) decreases strictly too
+  (`harmonicIndex_flip_lt`, from Rippa's identity at the four hat functions). Not checked: that a
+  strictly decreasing potential forces termination, which needs finiteness of the triangulations
+  below a level of the potential (immediate in the plane, where a point set has finitely many
+  triangulations; on a surface the discreteness argument of Indermitte et al. or B–S Thm. 15).
 
 ### [formula: it-rippa-theorem] Rippa's theorem: Delaunay flips do not increase the Dirichlet energy
 
@@ -833,9 +852,16 @@ an earlier version with another title, were read).
   from B–S's quotation; bibliographic data from Crossref. Corrected: the statement follows
   B–S's form (the condition is on the edge after the flip, with the case of equality) instead of
   "an edge that violates the condition".
-- **Why not formalized.** The energy of the interpolant over the two triangulations of a
-  quadrilateral could be compared from the cotan formula; it was not asked for and nothing in the
-  crate evaluates it. The global statement needs the previous entry.
+- **Proved: the one-diamond part** (`DdgProofs/Delaunay/Rippa.lean`, `it-rippa-diamond`). For a
+  strictly convex diamond the difference of the cotan energies of the two triangulations is
+  exactly `−(cot θ_k + cot θ_l)/(2 A_ilk A_jkl)·ℓ(u)²`, with `ℓ` the affine dependence of the four
+  vertices (`rippa_identity`); hence the flip of an edge with `θ_k + θ_l ≥ π` does not increase
+  the energy for any `u` (`rippa_le`), strictly if `θ_k + θ_l > π` and `ℓ(u) ≠ 0` (`rippa_lt`),
+  with equality at a tie (`rippa_eq_of_tie`), and for a convex diamond this holds for all `u`
+  only if `θ_k + θ_l ≥ π` (`forall_rippa_le_iff`). `cotEnergy` is the Dirichlet energy of the
+  linear interpolant on each triangle by `cotan_formula`.
+- **Why not formalized (the rest).** The global statement (minimum over all triangulations) needs
+  the previous entry and a model of all triangulations of a surface with a given vertex set.
 - **What depends on it.** Only the remark of SPEC N6 that two results of flipping that differ at
   ties have the same Dirichlet energy for every vertex function (tested). Proved here: the
   off-diagonal entry of the cotan Laplacian at an edge with two faces is minus half the sum of
@@ -891,7 +917,9 @@ an earlier version with another title, were read).
   circumcentre in barycentric coordinates is equidistant from the three corners at the distance
   `a₀a₁a₂/4A` (`circumcenter_equidistant`), it lies beyond a side exactly when the opposite
   angle is obtuse (`circumcenterBary_neg_iff`), and an angle below `30°` is opposite a side
-  shorter than the circumradius (`circumradius_gt_of_angle_lt`).
+  shorter than the circumradius (`circumradius_gt_of_angle_lt`; also, from lengths only,
+  `DdgProofs/Delaunay/Encroachment.lean`: `circumradius_eq_div_sin`,
+  `lt_circumradius_of_lt_pi_div_six`).
 
 ### [formula: it-ruppert-encroachment] Ruppert's boundary rule in the plane
 
@@ -903,9 +931,8 @@ an earlier version with another title, were read).
   input segments meet at an angle below `60°` (Shewchuk's analysis); it then creates no edge
   shorter than the minimum local feature size of the input. For smaller input angles, splitting
   the segments at an input vertex on concentric circular shells (radii that are powers of
-  two) prevents the two segments from encroaching on each other for ever. In a Delaunay
-  triangulation, a vertex inside the diametral circle of a boundary segment is opposite an
-  obtuse angle (a vertex on it, a right angle), by Thales' theorem.
+  two) prevents the two segments from encroaching on each other for ever. (The criterion that a
+  vertex inside the diametral circle of a segment subtends an obtuse angle is proved, see below.)
 - **Reference.** J. Ruppert, *A Delaunay refinement algorithm for quality 2-dimensional mesh
   generation*, Journal of Algorithms 18(3), 548–585, 1995,
   <https://doi.org/10.1006/jagm.1995.1021>. For the statement as given: J. R. Shewchuk, 2002
@@ -925,9 +952,13 @@ an earlier version with another title, were read).
   condition now says "on or inside".
 - **Why not formalized.** As the previous entry.
 - **What depends on it.** SPEC N1 uses the rule on surfaces with boundary and states that its end
-  at `25°` and `30°` is observed, not proved, as in the plane. Proved here: nothing of the rule
-  itself; the criterion "the opposite angle is obtuse" is the sign of a coordinate of the
-  circumcentre (`circumcenterBary_neg_iff`).
+  at `25°` and `30°` is observed, not proved, as in the plane. Proved here
+  (`DdgProofs/Delaunay/Encroachment.lean`, `it-encroachment-angle`, the test of `is_encroached`):
+  a point is strictly inside the diametral circle of a segment iff the angle it subtends is
+  obtuse, on it iff the angle is right (`dist_midpoint_lt_iff`, `dist_midpoint_eq_iff`), and in
+  lengths, the corner opposite `s` is obtuse iff `x² + y² < s²` (`pi_div_two_lt_cornerAngle_iff`,
+  `encroaches_iff_cornerAngle`); the criterion is also the sign of a coordinate of the
+  circumcentre (`circumcenterBary_neg_iff`). Not proved: termination of the rule.
 
 ### [formula: it-straightest-geodesic] Tracing by unfolding follows the straightest geodesic
 

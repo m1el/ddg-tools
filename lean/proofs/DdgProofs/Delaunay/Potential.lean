@@ -41,8 +41,8 @@ summed over the four hat functions of the diamond (`harmonicIndex_flip`):
 ## References
 
 * O. R. Musin, *Properties of the Delaunay triangulation*, Proc. 13th Annual Symposium on
-  Computational Geometry (SoCG '97), ACM, 1997, 424–426 (the harmonic index and other
-  functionals minimized by the Delaunay triangulation).
+  Computational Geometry (SoCG '97), ACM, 1997 (the harmonic index and other functionals
+  minimized by the Delaunay triangulation; not read here, cited as B–S cite it).
 * A. I. Bobenko, B. A. Springborn, *A discrete Laplace–Beltrami operator for simplicial
   surfaces*, Discrete Comput. Geom. 38(4), 740–756, 2007, Sec. 2 (the harmonic index on
   piecewise flat surfaces and termination of the flip algorithm, Prop. 12, Thm. 15 of arXiv v3).
