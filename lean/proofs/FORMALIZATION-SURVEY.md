@@ -59,6 +59,21 @@ These come first because they may be bugs or wrong statements, independent of wh
   Beta integral for monomials. Covers `cotan-fem-stiffness` (Galerkin vs. lumped mass), `cut-weighted-fem-stiffness`,
   the integral part of `bff-conformal-energy`, `app-vector-fem-connection-laplacian`, `app-fem-galerkin-mass`,
   `it-odt-energy`, and the L² norms of the AMR estimator.
+  **Status (2026-11-05): built**, `DdgProofs/TriangleIntegral/` (`Basic.lean` ~450 lines, `Fem.lean` ~710 lines; no
+  sorry, axioms the standard three). Per item:
+  - `app-fem-galerkin-mass`: **done**, `∫_T λᵢλⱼ = A/6, A/12`, row sums `= ∫λᵢ = A/3`, `∫(Σuλ)² = galerkinForm`.
+  - `cotan-fem-stiffness`: **done and moved out of CITED** (`∫∇λᵢ·∇λⱼ = −½cot θ_k`, `∫|∇f|² = cotEnergy`,
+    `Σ_f ∫ = uᵀLu` over isometric layouts); the convergence part stays cited as `cotan-fem-convergence`.
+  - `app-vector-fem-connection-laplacian`: **partial**, new id `fem-area-coordinate-rule` (rule + the exponential
+    slice formula that `monomial_integral` evaluates, tagged in Rust); the gauge model, Eq. 17 and `beta_exp` stay cited.
+  - `cut-weighted-fem-stiffness`: **done, CITED entry removed** (per triangle and `Σ_f ∫ a∇u·∇w = uᵀL_ā w`).
+  - `bff-conformal-energy`: **partial**, per-triangle identity and the Cauchy–Riemann characterization as
+    `bff-conformal-energy-triangle`; the sum to the loop area (needs face orientation on `TriMesh`) stays cited.
+  - `it-odt-energy`: **partial**, Lemma 4.1 per triangle and for a star as `it-odt-interpolation-error`
+    (also `∫_T|u_I − u| = (A/12)Σℓ²`); the tiling of `Ω` and Thm 2.3 stay cited.
+  - AMR estimator: **done for the element norms**, `app-amr-element-norms` (tagged on `amr::estimate`); the bounds
+    stay cited. `ic-transfer-mass-integral`: the one-triangle integral is now proved, the tiling stays cited.
+  - No disagreement between the cited formulas and the code was found.
 * **Multi-face strip trace** (M) for the intrinsic tracing entries.
 
 **Out of reach (C)**: the smooth theory (uniformization, Riemann mapping, fractional Sobolev operators, PDE theory
@@ -233,7 +248,9 @@ directory (Mathlib) or to `lean/proofs/DdgProofs` (repo). Nothing was compiled; 
 {x,y ≥ 0, x+y ≤ 1} (`setIntegral_prod`), the Beta integral for monomials. It would cover the area-coordinate rule
 (app-vector-fem-connection-laplacian), the identification "these entries are ∫φᵢφⱼ" left out of
 `app-fem-galerkin-mass` and `cotan-fem-stiffness`, Chen–Holst Lemma 4.1 (it-odt-energy), and the L² norms in
-the AMR estimator.
+the AMR estimator. **Status (2026-11-05): built** (`DdgProofs/TriangleIntegral/`; per-item status in the
+"Shared infrastructure" list near the top). Route taken: Fubini via `integral_prod` on the indicator, the Jacobian
+theorem with `det = sda`, the Beta integral by induction on the exponent (no Gamma functions needed).
 
 #### Notes (only where not obvious)
 

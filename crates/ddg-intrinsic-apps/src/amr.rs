@@ -369,6 +369,7 @@ pub fn side_flux<T: Triangulation + ?Sized>(tri: &T, f: usize, k: usize, u: &[f6
 /// components the squares add.
 ///
 /// [formula: app-amr-residual-estimator]
+/// [formula: app-amr-element-norms]
 ///
 /// # Errors
 /// [`AmrError::InvalidInput`] if the solution does not have one value per vertex.

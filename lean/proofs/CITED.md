@@ -183,16 +183,17 @@ boundary).
   problem to the smooth one; the canonical problem itself is fully discrete and is treated
   directly.
 
-### [formula: cotan-fem-stiffness] The cotan matrix as a finite element stiffness matrix
+### [formula: cotan-fem-convergence] The cotan finite element method converges
 
-- **Statement.** `L` is the stiffness matrix of the Laplace–Beltrami operator for piecewise
-  linear elements, `L u = M f` discretizes `Δu = f`, and solutions converge under refinement.
+- **Statement.** `L u = M f` discretizes `Δu = f` on a surface, and its solutions converge to
+  those of the Laplace–Beltrami problem under refinement.
 - **Reference.** Paper Sec. 5.1.3; MacNeal 1949; Pinkall, Polthier 1993.
-- **Why not formalized.** Proved here: on each triangle `Area·|∇f|² = ½ Σ cot θ_k (f_i − f_j)²`
-  for affine `f` (`[formula: cotan-formula]`) and `uᵀLu = Σ_faces` of these
-  (`[formula: cotan-laplacian]`). Not formalized: the identification of `Area·|∇f|²` with the
-  Lebesgue integral `∫_T |∇f|² dA` (the integrand is constant), the lumped mass matrix as a
-  quadrature of the Galerkin mass matrix, and all convergence statements.
+- **Why not formalized.** Convergence of finite elements on surfaces needs Sobolev spaces on a
+  surface, which Mathlib does not have. Proved instead (`DdgProofs/TriangleIntegral/Fem.lean`,
+  `[formula: cotan-fem-stiffness]`): `L` is the stiffness matrix of piecewise linear elements,
+  as Lebesgue integrals over isometric layouts of the faces — `∫_T ∇λᵢ·∇λⱼ = −½ cot θ_k`,
+  `∫_T |∇f|² = ½ Σ cot θ_k (f_i − f_j)²`, `Σ_f ∫_{T_f} |∇u|² = uᵀLu` — and the lumped mass is the
+  row sum of the Galerkin mass `∫_T λᵢ λⱼ` (`[formula: app-fem-galerkin-mass]`).
 - **Does correctness depend on it?** No.
 
 ### [formula: semismooth-newton-convergence] Convergence of the semismooth Newton method
@@ -355,8 +356,14 @@ centering Jacobian. Cited:
 - **Reference.** BFF Sec. 4.3.3, Eqs. 15–17; Hutchinson, *Computing conformal maps and minimal
   surfaces* (1991); Lévy, Petitjean, Ray, Maillot, *Least squares conformal maps*, ACM TOG 21(3),
   2002; Mullen, Tong, Alliez, Desbrun, *Spectral conformal parameterization*, SGP 2008, Sec. 2.2.
-- **Why not formalized.** The identification of the discrete energy with `∫|∂̄f|²` and the
-  statement about conformal maps are smooth/finite-element facts.
+- **Why not formalized.** Proved per triangle (`DdgProofs/TriangleIntegral/Fem.lean`,
+  `[formula: bff-conformal-energy-triangle]`): on a counter-clockwise layout of a face and for
+  linear `f = a + ib`, `2∫_T |∂̄f|² = ½(∫_T|∇a|² + ∫_T|∇b|²) − ½ sda(f(p₀), f(p₁), f(p₂))`, the
+  Dirichlet energies being the face's cotan energies, and it is zero iff `f` satisfies the
+  Cauchy–Riemann equations on `T`. Not formalized: that the image areas of all faces sum to the
+  signed area `𝒜(a, b)` of the boundary polygon (it needs a consistent orientation of the faces,
+  which `TriMesh` does not record), so the identity of `E_C` with `2∫|∂̄f|²` over the mesh is not
+  stated as one theorem.
 - **Does correctness depend on it?** No. Proved: the Neumann data `h_j = ½(a_{j−1} − a_{j+1})`
   is the gradient of the area of the boundary polygon with respect to `b`, it sums to zero, and a
   solution of `A b = h` minimizes `½ bᵀAb − 𝒜(a, b)` (`[formula: bff-hilbert-transform]`). The
@@ -677,21 +684,6 @@ the marching order of the redistancing and its convergence; anything about round
   `junction_load_balanced`). **Hypothesis of these, not derived here:** the interior angles of
   the regions at a cut point resp. a triple point sum to `2π` (the angles around a point inside
   a planar face).
-
-### [formula: cut-weighted-fem-stiffness] The weighted cotan matrix as a finite element matrix
-
-- **Statement.** For piecewise linear `a`, `f`, `g` on a triangle mesh,
-  `∫ a ∇f·∇g = fᵀ L_a g` with `L_a = Σ_t ā_t · (cotan Laplacian of the triangle t)`,
-  `ā_t` the mean of `a` over the vertices of `t` (SPEC §3.6, D11).
-- **Reference.** Standard finite elements (the gradient is constant on a triangle and the
-  integral of a linear function is its mean times the area); the Cuts paper Sec. 5.3 uses the
-  edge rule `(a_i + a_j)/2` instead.
-- **Why not formalized.** The integral over a triangle is not formalized in this package (see
-  `cotan-fem-stiffness`).
-- **What depends on it.** Only the name "exact stiffness matrix". Proved without it:
-  `xᵀ L_a x = Σ_t ā_t · (cotan energy of x on t) ≥ 0` for `a ≥ 0`
-  (`[formula: cut-weighted-laplacian]`), `L_a = cL` for constant `a`, and the edge rule is
-  indefinite on an obtuse triangle (`edgeRuleEnergy_neg_example`).
 
 ### [formula: cut-fast-marching-convergence] The redistancing computes an approximate distance
 
@@ -1048,9 +1040,14 @@ an earlier version with another title, were read).
   circumcentre and barycentre times the area are the oracle's closed forms
   (`circumVec_equidistant`, `circumVec_layout`, `weightedBarycenter_eq`, and
   `[formula: it-circumcenter-vector]`).
-- **Why not formalized.** That `S` is the interpolation error (Lemma 4.1) needs the integral of
-  the hat functions and of `|x|²` over the triangulation, and the optimality of the Delaunay
-  connectivity is a statement about all triangulations of a point set (as for
+- **Why not formalized.** Lemma 4.1 is proved triangle by triangle
+  (`DdgProofs/TriangleIntegral/Fem.lean`, `[formula: it-odt-interpolation-error]`): for
+  `u = |x|²` the interpolant lies above `u` on a triangle and
+  `∫_T |u_I − u| = (1/3) Σ_i |x_i|² |T| − ∫_T |x|² = (|T|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)`; for a star of
+  counter-clockwise triangles `S(x) = Σ_k ∫_{T_k} u_I = Σ_k ∫_{T_k} |u_I − u| + Σ_k ∫_{T_k} |y|²`.
+  Not formalized: that the triangles of a triangulation tile `Ω`, so that `Σ_k ∫_{T_k} |y|²` is
+  `∫_Ω |y|²` and does not depend on the vertex positions, and the optimality of the Delaunay
+  connectivity (Theorem 2.3), a statement about all triangulations of a point set (as for
   `it-delaunay-existence-uniqueness`). The boundary rule is a heuristic, not a theorem.
 - **What depends on it.** The update of the optimal Delaunay triangulation (SPEC §4, N21) and the
   barycentres for triangles at the boundary. That flipping to Delaunay after a move does not
@@ -1095,9 +1092,10 @@ The applications of the Signpost paper's Sec. 5.1 (Steiner trees), 5.2 (finite e
 (geodesic distance by the heat method) are in `crates/ddg-intrinsic-apps` (contract: its `SPEC.md`,
 decisions `N30`–`N39`). Machine-checked (`DdgProofs/IntrinsicApps/HeatFem.lean`): the closed forms
 of one triangle, `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-mass` (row sums and
-the bounds against the lumped mass; that its entries are the integrals `∫ φ_i φ_j` is the
-standard formula and is not proved) and `app-fem-midpoint-subdivision`. The stiffness matrix is
-`cotan-fem-stiffness` above. Cited below: the Fermat point of a triangle. Not covered: the Steiner
+the bounds against the lumped mass; that its entries are the integrals `∫ φ_i φ_j` is proved in
+`DdgProofs/TriangleIntegral/Fem.lean`) and `app-fem-midpoint-subdivision`. The stiffness matrix is
+`cotan-fem-stiffness`, proved as the matrix of the integrals `∫ ∇φ_i·∇φ_j` in the same file; its
+convergence is `cotan-fem-convergence` above. Cited below: the Fermat point of a triangle. Not covered: the Steiner
 heuristic as a whole (Smith, Lee, Liebman 1981, a heuristic with no optimality statement), the
 convergence of the heat method (Crane, Weischedel, Wardetzky 2013, Sec. 3.2 and their
 Appendix A), the exact window propagation of `exact.rs` (Mitchell, Mount, Papadimitriou 1987;
@@ -1191,8 +1189,13 @@ machine-checked: the entries below, and everything about rounding and the solver
   rule `∫_T b_0^a b_1^b b_2^c = 2|T| a! b! c! / (a + b + c + 2)!` (e.g. O. C. Zienkiewicz,
   R. L. Taylor, *The Finite Element Method*, vol. 1); its case `a + b + c = 2` is the Galerkin
   mass matrix, machine-checked as `app-fem-galerkin-mass` and used by `amr` too.
-- **Why not formalized.** Integrals of exponentials over a triangle; Mathlib has the
-  integrals but the statement is about a gauge model of a line bundle that is not in Mathlib.
+- **Why not formalized.** The statement is about a gauge model of a line bundle that is not in
+  Mathlib. Proved instead (`DdgProofs/TriangleIntegral/`, `[formula: fem-area-coordinate-rule]`):
+  the area-coordinate rule as a Lebesgue integral over the triangle, and the slice formula that
+  `monomial_integral` evaluates, `∫_T b₀^{e₀} b₁^{e₁} b₂^{e₂} e^{iΩ b_c} = 2|T| q! r!/(q + r + 1)! ·
+  ∫₀¹ s^{e_c} (1 − s)^{q+r+1} e^{iΩs} ds` (`q = e_{c+1}`, `r = e_{c+2}`). Not proved: the series and
+  recurrence by which `beta_exp` evaluates the one-dimensional integral, the closed forms above,
+  and that the integrands of SPEC N43 are those of the model.
 - **What depends on it.** `ConnectionLaplacian::FiniteElement`: the smoothest direction fields
   and the energies of the README's Fig. 21 table.
 
@@ -1225,7 +1228,8 @@ machine-checked: the entries below, and everything about rounding and the solver
   flux of a linear `u` through the side `ij` is `ℓ_ij ∇u·ν = cot θ_j (u_i − u_k) + cot θ_i (u_j − u_k)`.
 - **Reference.** The cotan formula (`cotan-fem-stiffness`): `∇b_i · ∇b_j = −cot θ_k / 2|T|`
   and `ℓ_ij ν = −2|T| ∇b_k`.
-- **Why not formalized.** Plane geometry of one triangle; `cotan-fem-stiffness` is cited too.
+- **Why not formalized.** Plane geometry of one triangle; the integrals `∫_T ∇b_i·∇b_j` are
+  proved (`cotan-fem-stiffness`), the flux identity itself is not stated.
 - **What depends on it.** The jump residuals of `amr::estimate`.
 
 ### [formula: app-amr-residual-estimator] The residual a posteriori error estimator and the oscillation
@@ -1240,7 +1244,11 @@ machine-checked: the entries below, and everything about rounding and the solver
   `‖H_S^{1/2} J_S‖²_S + ‖H f‖²_{ω_S}`); the paper's supplement, Sec. 2 (which prints
   `A_ijk²` in place of `H_T²`; SPEC N47).
 - **Why not formalized.** Sobolev spaces and Clément interpolation are not in Mathlib in the
-  needed form.
+  needed form. Proved (`DdgProofs/TriangleIntegral/Fem.lean`, `[formula: app-amr-element-norms]`):
+  the element norms as `estimate` evaluates them, `‖R‖²_T = (|T|/6)(Σ r_i² + Σ_{i<j} r_i r_j)` and
+  `‖R − R̄‖²_T = ‖R‖²_T − |T| R̄²` for linear `R` with corner values `r`, `R̄` their mean (which is
+  the mean of `R` over `T`). The side term `ℓ_S ‖J_S‖²_S = (ℓ_S J_S)²` for a constant jump is not
+  stated.
 - **What depends on it.** `amr::estimate` and the marking; nothing of correctness of a solve.
   For a point source the estimator is not an upper bound of anything finite (SPEC N47).
 
@@ -2017,8 +2025,10 @@ are not cited here).
 - **Reference.** P. G. Ciarlet, *The Finite Element Method for Elliptic Problems*, North-Holland
   1978, Sec. 4.1 (exact integration of polynomials over a simplex); IC paper Sec. 4.3.
 - **Source check.** IC paper Sec. 4.3 read; Ciarlet not re-read (standard finite-element fact).
-- **Why not formalized.** Integration over polygons and planar subdivisions are not set up in this
-  tree. Machine-checked instead (`DdgProofs/IntegerCoords/Transfer.lean`, `[formula:
+- **Why not formalized.** Planar subdivisions are not set up in this tree, nor the additivity of the
+  integral over the pieces of a tiling. The integral over one triangle is proved
+  (`DdgProofs/TriangleIntegral/Fem.lean`: `∫_T λ_a λ_b = A/6, A/12` and `∫_T (Σ u_i λ_i)² =
+  galerkinForm`, `[formula: app-fem-galerkin-mass]`). Machine-checked instead (`DdgProofs/IntegerCoords/Transfer.lean`, `[formula:
   ic-transfer-mass-identity]`): the exact finite identity — the piece mass formula, that the whole
   triangle gives `M₀`, and that it is additive under splitting a triangle at any point of its plane,
   an edge, and over the fan of a convex polygon from any apex.

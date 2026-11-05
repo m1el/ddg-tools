@@ -151,6 +151,8 @@ fn beta_exp(p: usize, m: usize, omega: f64) -> C64 {
 ///
 /// With `s = b_c` and `q, r` the other two exponents the integral over the slices `b_c = s`
 /// gives `2A · q! r! / (q + r + 1)! · ∫₀¹ s^{e_c} (1 − s)^{q + r + 1} e^{iΩ s} ds`.
+///
+/// [formula: fem-area-coordinate-rule]
 pub(crate) fn monomial_integral(e: [usize; 3], c: usize, omega: f64, area: f64) -> C64 {
     let (q, r) = (e[(c + 1) % 3], e[(c + 2) % 3]);
     let weight = 2.0 * area * factorial(q) * factorial(r) / factorial(q + r + 1);

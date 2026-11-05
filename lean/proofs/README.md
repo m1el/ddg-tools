@@ -123,6 +123,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/RepulsiveCurves/*.lean` | repulsive curves: vectors and edge quantities (`Basic`), the kernel and its gradient (`Kernel`, `KernelGradient`), the energy, its differential and invariances (`Energy`), the Gram matrices (`Gram`), saddle systems and projector (`Saddle`), constraints (`Constraints`), penalties (`Penalties`), schedules and subdivision (`Schedule`), CCD advancement (`Ccd`), BVH/BCT lumping (`Hierarchy`), coarsening and prolongation (`Multigrid`) (RC SPEC §2–§8) |
 | `DdgProofs/IntrinsicSimplification/*.lean` | intrinsic simplification (IEM SPEC §13): flattening (`Flatten`, `Monotone`), curvature conservation and Eq. 9 (`Curvature`), Eq. 10 (`Interpolation`), removal layouts and the flip lemma (`Removal`), the 1-Wasserstein cost (`Wasserstein`), centres of mass, transport, Sec. 7.3.1 (`Transport`), anisotropy, Galerkin, distortion, QEM (`Operators`), the wrap (`Wrap`), the oracle link (`Oracle`) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
+| `DdgProofs/TriangleIntegral/*.lean` | integrals over a triangle of the plane: Fubini on the standard triangle, the Beta integral, the affine change of variables, area, convex hull, barycentric coordinates, slice formula and area-coordinate rule (`Basic`); the finite element integrals on them — Galerkin mass, cotan and weighted stiffness and their mesh sums, the conformal energy of a linear map, Chen–Holst Lemma 4.1, the AMR element norms (`Fem`) |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
 ## Conventions
@@ -322,7 +323,8 @@ unless a definition of this package is named. All theorems are in `namespace Ddg
 
 Cited for the cut flow (`CITED.md`): `cut-yamabe-equation`, `cut-shape-derivative`,
 `cut-cea-method`, `cut-level-set-evolution`, `cut-ripple-linearization`,
-`cut-network-first-variation`, `cut-weighted-fem-stiffness`, `cut-fast-marching-convergence`.
+`cut-network-first-variation`, `cut-fast-marching-convergence`. (`cut-weighted-fem-stiffness` is
+proved, see [Integrals over a triangle](#integrals-over-a-triangle-ddgproofstriangleintegral).)
 
 **The stop rule of a run** (SPEC §4 "Stopping", D27, D29, D31): the ids `cut-stop-energy` (the
 Rust `energy_stop`; theorem `energy_cases`), `cut-run-lowest` (`run_outcome`; theorem
@@ -615,6 +617,27 @@ flattened one uses `e^{−u}` (CETM Sec. 3.4, App. D) — Eq. 10 is its inverse.
 bijections fixing the corners (the theorems hold for any positive weights). (3) Khodakovsky et
 al. define the anisotropic and area distortion from the eigenvalues `γ = σ²` of the metric tensor
 (`γ_max/γ_min`, `γ_max γ_min`); SPEC §10.3 uses `σ₁/σ₂`, `log(σ₁σ₂)`.
+
+### Integrals over a triangle (`DdgProofs/TriangleIntegral/`)
+
+A triangle is `p : Fin 3 → ℝ × ℝ` with `D = sda p₀ p₁ p₂ ≠ 0` (either orientation), the set
+`triangle p` (the image of `{s, t ≥ 0, s + t ≤ 1}` under `(s, t) ↦ p₀ + s(p₁ − p₀) + t(p₂ − p₀)`,
+equal to the convex hull of the corners), Lebesgue measure on `ℝ × ℝ`; `λᵢ = bary p i`,
+`A = area p` the Heron area of the Euclidean sides, `θ_k` the corner angles from the side lengths
+(`cotCorner`). An intrinsic face is placed by any isometric layout (`TriMesh.IsLayout`; one exists
+for every valid mesh, `TriMesh.exists_isLayout`); every right-hand side is a function of the edge
+lengths. The definitions are this package's own.
+
+| id | exact statement | theorems |
+|---|---|---|
+| (infrastructure) | `∫₀ᴸ tᵐ(L−t)ⁿ = Lᵐ⁺ⁿ⁺¹ m!n!/(m+n+1)!`; `∫_{stdTri} g = ∫₀¹∫₀^{1−s} g` (continuous `g`); `∫_T g = \|D\| ∫_{stdTri} g∘triMap` (every `g`), `det = D`; `vol(T) = \|D\|/2 = A`; `T = convexHull {p₀,p₁,p₂}`; `λ(triMap(s,t)) = (1−s−t, s, t)`, `Σλᵢ = 1`, `Σλᵢpᵢ = x`, `λᵢ(pⱼ) = δᵢⱼ`; slice formula at every corner `c` for continuous `G : ℝ → E`. | `integral_pow_mul_sub_pow`, `integral_stdTri`, `integral_triangle`, `det_triLin`, `volume_real_triangle`, `volume_real_triangle_eq_triArea`, `triangle_eq_convexHull`, `bary_triMap_zero`, `sum_bary`, `sum_bary_smul`, `bary_corner`, `integral_bary_slice` |
+| `fem-area-coordinate-rule` | `∫_T λ₀ᵃλ₁ᵇλ₂ᶜ = 2A a!b!c!/(a+b+c+2)!`; `∫_T λ₀^{e₀}λ₁^{e₁}λ₂^{e₂} e^{iΩλ_c} = 2A q!r!/(q+r+1)! ∫₀¹ s^{e_c}(1−s)^{q+r+1}e^{iΩs} ds`, `q = e_{c+1}`, `r = e_{c+2}` (`monomial_integral` of `knoeppel.rs`). | `integral_bary_monomial`, `integral_bary_monomial_heron`, `integral_bary_slice_exp` |
+| `app-fem-galerkin-mass` (integrals) | `∫_T λᵢ = A/3`; `∫_T λᵢλⱼ = A/6` (`i = j`), `A/12` (`i ≠ j`); `Σⱼ ∫_T λᵢλⱼ = ∫_T λᵢ`; `∫_T (Σuᵢλᵢ)² = galerkinForm A u₀ u₁ u₂`. | `integral_bary`, `integral_bary_mul_bary`, `sum_integral_bary_mul_bary`, `integral_interp_sq` |
+| `cotan-fem-stiffness` | `∇λᵢ = J(p_{i+2} − p_{i+1})/D` (from `fderiv`); `∫_T ∇f·∇g = ½ Σ_k cot θ_k (u_i−u_j)(w_i−w_j)` for the interpolants of `u, w`; `∫_T ∇λᵢ·∇λ_{i+1} = −½cot θ_{i+2}`, `∫_T \|∇λᵢ\|² = ½(cot θ_{i+1} + cot θ_{i+2})`, `∫_T \|∇f\|² = cotEnergy`; on a valid mesh with an isometric layout `Σ_f ∫_{T_f} \|∇u_f\|² = uᵀLu`. Convergence: `cotan-fem-convergence` (cited). | `grad_bary`, `grad_interp`, `integral_grad_dot_grad`, `integral_grad_bary_dot_succ`, `integral_grad_bary_sq`, `integral_grad_sq`, `TriMesh.sum_integral_grad_sq` |
+| `cut-weighted-fem-stiffness` | `∫_T a∇f·∇g = ((a₀+a₁+a₂)/3)·(cotan form)` for linear `a, f, g`; on a valid mesh with an isometric layout `Σ_f ∫_{T_f} a_f ∇u_f·∇w_f = uᵀ L_ā w`, `L_ā = weightedLaplacian (faceMean a)` (SPEC §3.6, D11). | `integral_weighted_grad_dot_grad`, `TriMesh.sum_integral_weighted_grad_dot_grad`, `TriMesh.sum_integral_weighted_grad_sq` |
+| `bff-conformal-energy-triangle` | `D > 0`, `f = a + ib` linear: `2∫_T \|∂̄f\|² = ½(cotEnergy(a) + cotEnergy(b)) − ½ sda(f(p₀), f(p₁), f(p₂))`; `∫_T \|∂̄f\|² = 0 ⟺ a_x = b_y ∧ a_y = −b_x`. The sum over a mesh (`bff-conformal-energy`) is cited. | `integral_dbarSq`, `integral_dbarSq_eq_zero_iff` |
+| `it-odt-interpolation-error` | `u = \|x\|²`, `u_I` its interpolant: `u_I − u = Σ_{i<j} λᵢλⱼ\|pᵢ−pⱼ\|²`, `u ≤ u_I` on `T`; `∫_T \|u_I − u\| = (A/3)Σ\|pᵢ\|² − ∫_T \|x\|² = (A/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)` (Chen–Holst Lemma 4.1 on a triangle); for counter-clockwise `T_k = (x, p_k, p_{k+1})`: `odtEnergy p n x = Σ_k ∫_{T_k} u_I = Σ_k (∫_{T_k}\|u_I − u\| + ∫_{T_k}\|y\|²)`. | `odtInterp_sub`, `nsq_le_odtInterp`, `integral_abs_odt_error`, `integral_odt_error_eq_sides`, `odtEnergy_eq_sum_integral`, `odtEnergy_eq_sum_error_add` |
+| `app-amr-element-norms` | Linear `R` with corner values `r`: `∫_T R² = (A/6)(r₀²+r₁²+r₂²+r₀r₁+r₁r₂+r₂r₀)`; `∫_T (R − R̄)² = ∫_T R² − A R̄²`, `R̄ = (r₀+r₁+r₂)/3 = (1/A)∫_T R` (`amr::estimate`). | `integral_amr_sq`, `integral_amr_osc`, `integral_interp` |
 
 ## Theorems
 
