@@ -470,9 +470,8 @@ pub struct Singularity {
 pub struct Singularities {
     /// Every face with a non-zero index, ascending.
     pub faces: Vec<Singularity>,
-    /// The sum of all indices (units of `1/n`); on a closed surface `n χ` (Poincaré–Hopf), plus
-    /// one for every edge whose transported values are exactly opposite (`ω = π` on both of its
-    /// halfedges, which happens only for such ties; `tests/vector_pi_tie.rs`).
+    /// The sum of all indices (units of `1/n`); on a closed surface `n χ` (Poincaré–Hopf), also
+    /// when the transported values of an edge are exactly opposite (see [`singularities`]).
     pub index_sum: i64,
     /// Faces left out because the field vanishes at one of their corners.
     pub n_skipped: usize,
@@ -482,8 +481,13 @@ pub struct Singularities {
 
 /// The index of every face (GODF Eq. 19, with the face holonomy of [`face_holonomy`]):
 /// `(ω_ij + ω_jk + ω_ki + n Ω_ijk) / 2π`, where `ω_ij ∈ (−π, π]` is the angle with
-/// `u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|`. In exact arithmetic `index_sum = nχ + #{edges with
-/// ω_ij = π}` on a closed surface: at a tie the twin also gets `+π` instead of `−π`.
+/// `u_j/|u_j| = e^{iω_ij} r_ij u_i/|u_i|`. The two halfedges of an interior edge must get
+/// opposite angles; `arg` gives that except at a tie (`u_j = −c r_ij u_i`, `c > 0`), where both
+/// get `+π` and `index_sum` would gain one per such edge. There the halfedge with the higher
+/// index takes `−π` (in floating point: whenever `|ω_ij + ω_ji| > π`, it is shifted by `2π`),
+/// so on a closed surface `index_sum = n χ` unconditionally (in exact arithmetic; lean/proofs
+/// `TriMesh.omegaCode_eq_omegaFixed`, `TriMesh.sum_round_faceIndexFixed`;
+/// `tests/vector_pi_tie.rs`). Away from ties the result is bit for bit that of `arg`.
 ///
 /// [formula: app-vector-singularity-index]
 ///
@@ -517,12 +521,28 @@ pub fn singularities<T: TangentFrames + ?Sized>(
             continue;
         }
         let mut total = n as f64 * face_holonomy(tri, f);
+        let omega = |h: usize| {
+            let (i, j) = (c.from_vertex(h), c.to_vertex(h));
+            (field.values[j] / (framed.transport(h, n) * field.values[i])).arg()
+        };
         for k in 0..3 {
             let h = 3 * f + k;
-            let (i, j) = (c.from_vertex(h), c.to_vertex(h));
-            let ui = field.values[i];
-            let uj = field.values[j];
-            total += (uj / (framed.transport(h, n) * ui)).arg();
+            let w = omega(h);
+            // The twin pair must cancel. It does (to rounding) except at a tie, where `arg`
+            // gives `+π` on both; the halfedge with the higher index then takes `−π`.
+            total += match c.twin(h) {
+                Some(t) if t < h => {
+                    let pair = w + omega(t);
+                    if pair > PI {
+                        w - TAU
+                    } else if pair < -PI {
+                        w + TAU
+                    } else {
+                        w
+                    }
+                }
+                _ => w,
+            };
         }
         let x = total / TAU;
         let index = x.round();
