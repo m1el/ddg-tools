@@ -1,5 +1,5 @@
 import DdgProofs.Intrinsic.Diamond
-import DdgProofs.Geometry.Barycentric
+import DDG.Geometry.Barycentric
 
 /-!
 # Intrinsic triangulations: one step of a tracing query
@@ -18,7 +18,7 @@ of the two other edges the path leaves.
   ends are not strictly on the same side (`y_tail ≤ 0 ≤ y_head` or the reverse, not both zero)
   the parameter lies in `[0, 1]`, so the point is on the edge; it is `0` or `1` exactly when
   that end lies on the axis (`axisCrossingT_mem_Icc`, `axisCrossingT_mem_Ioo`). The parameter
-  is the level-crossing parameter of `DdgProofs/Geometry/Barycentric.lean`
+  is the level-crossing parameter of `DDG/Geometry/Barycentric.lean`
   (`axisCrossingT_eq_crossingParam`, `cut-edge-crossing`). The exit point lies ahead of the entry point on the path
   (`exit_ahead_above`, `exit_ahead_below`).
 * **`it-unfold-apex`** (`apexAboveAxis`) — a closed segment meets the axis exactly

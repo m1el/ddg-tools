@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Basic
+import DDG.Geometry.Vec3
 
 /-!
 # Repulsive Curves: dual lengths

@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Basic
+import DDG.Geometry.Vec3
 
 /-!
 # Repulsive Curves: the constraint Jacobians (paper Sec. 8.1; SPEC §5.1, D6, D7)

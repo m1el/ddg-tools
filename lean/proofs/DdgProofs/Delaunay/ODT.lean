@@ -10,7 +10,7 @@ Triangulations*, CMAME 200 (2011), Lemma 4.1, Lemma 4.2 (Eq. 4.3–4.6), Lemma 4
 Sec. 4.2.1 of the preprint (barycentres at the boundary).
 
 Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area), `sqDist2`, `dist2` of
-`DdgProofs/Bff/Quality.lean` and `nsq`, `rot`, `toDual` of `DdgProofs/Geometry/PlaneLemmas.lean`;
+`DDG/Geometry/Plane.lean` and `nsq`, `rot`, `toDual` of `DDG/Geometry/PlaneLemmas.lean`;
 the integrals are those of `DdgProofs/TriangleIntegral/Fem.lean` and `Tiling.lean`.
 
 * **`it-odt-update`** — `weightedBarycenter` is `A (a + b + c)/3` in the frame of the

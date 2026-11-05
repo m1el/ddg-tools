@@ -1,7 +1,7 @@
 import DdgOracle.Formulas
-import DdgProofs.Optimization.PiecewiseAffine
-import DdgProofs.SoftThreshold
-import DdgProofs.Triangle
+import DDG.Optimization.PiecewiseAffine
+import DDG.Optimization.SoftThreshold
+import DDG.Geometry.Triangle
 
 /-!
 # The oracle's scalar-generic formulas at the real numbers

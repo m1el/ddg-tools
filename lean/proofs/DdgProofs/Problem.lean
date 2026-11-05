@@ -1,4 +1,4 @@
-import DdgProofs.SoftThreshold
+import DDG.Optimization.SoftThreshold
 
 /-!
 # The canonical discrete problem

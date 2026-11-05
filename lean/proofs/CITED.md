@@ -2086,7 +2086,7 @@ are not cited here).
   Crane 2020b.
 - **Why not formalized.** The formula itself **is** machine-checked, under its own id: the code's `ε`
   is the least feasible value and the mollified faces satisfy the strict triangle inequalities
-  (`[formula: intrinsic-mollification]`, `DdgProofs/Bff/Quality.lean`; the Rust function is
+  (`[formula: intrinsic-mollification]`, `DDG/Geometry/Plane.lean`; the Rust function is
   `ddg_core::mollify::mollify_edge_lengths`). What is cited is only the claim that this preprocessing
   makes the later floating-point operations robust, an empirical statement (IC paper Sec. 3.9,
   Table 1).

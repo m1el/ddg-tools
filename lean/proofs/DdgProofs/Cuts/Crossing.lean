@@ -15,7 +15,7 @@ definitions (`lean/oracle/DdgOracle/Formulas/Cuts.lean`) instantiated at `ℝ`.
 
 The crossing parameter itself, the barycentric lengths and the areas of sub-triangles
 (`cut-edge-crossing`, `cut-barycentric-length`, `cut-subtriangle-area`) have native definitions
-and their theorems in `DdgProofs/Geometry/Barycentric.lean` (library); the bridges from the
+and their theorems in `DDG/Geometry/Barycentric.lean` (library); the bridges from the
 oracle's definitions are in `DdgProofs/Oracle/Geometry.lean`. (Library step S3.)
 -/
 

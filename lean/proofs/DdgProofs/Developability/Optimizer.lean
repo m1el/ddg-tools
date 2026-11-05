@@ -1,5 +1,5 @@
 import DdgProofs.Developability.Vec
-import DdgProofs.Optimization.Wolfe
+import DDG.Optimization.Wolfe
 
 /-!
 # Developability: the weak Wolfe line search

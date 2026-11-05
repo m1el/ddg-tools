@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Basic
+import DDG.Geometry.Vec3
 
 /-!
 # Points as Tori: vectors, frames and gradients

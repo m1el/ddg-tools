@@ -1,5 +1,5 @@
 import DdgProofs.RepulsiveSurfaces.Constraints
-import DdgProofs.RepulsiveCurves.Basic
+import DDG.Geometry.Vec3
 
 /-!
 # Repulsive Surfaces: penalty values and gradients (paper Sec. 7.3; SPEC §5.2, D21, D24)

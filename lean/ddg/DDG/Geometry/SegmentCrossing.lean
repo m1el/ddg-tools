@@ -1,4 +1,4 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Proper crossing of two plane segments

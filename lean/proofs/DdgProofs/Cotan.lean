@@ -1,4 +1,4 @@
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # Triangle meshes given by edge lengths

@@ -3,7 +3,7 @@ import DdgProofs.IntrinsicSimplification.Monotone
 import DdgProofs.IntrinsicSimplification.Curvature
 import DdgProofs.IntrinsicSimplification.Interpolation
 import DdgProofs.IntrinsicSimplification.Removal
-import DdgProofs.IntrinsicSimplification.Wasserstein
+import DDG.Optimization.Wasserstein
 import DdgProofs.IntrinsicSimplification.Transport
 import DdgProofs.IntrinsicSimplification.Operators
 import DdgProofs.IntrinsicSimplification.Oracle

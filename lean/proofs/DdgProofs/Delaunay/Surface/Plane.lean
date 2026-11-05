@@ -5,7 +5,7 @@ import DdgProofs.Intrinsic.Diamond
 # Delaunay layer 4, planar toolkit: rigid motions and triangles
 
 Points are pairs `ℝ × ℝ` with the Euclidean distance `dist2` and the signed double area `sda`
-(`DdgProofs/Bff/Quality.lean`); hull membership is by the signs of `sda`
+(`DDG/Geometry/Plane.lean`); hull membership is by the signs of `sda`
 (`DdgProofs/Delaunay/PlanarBasic.lean`). This file packages
 
 * **rigid motions** `Rigid` (a rotation `(cs, sn)` followed by a translation, the `rigid` of

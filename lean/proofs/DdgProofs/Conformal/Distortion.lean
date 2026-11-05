@@ -1,4 +1,4 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Distortion of a triangle map: singular values, quasi-conformal error, log scale

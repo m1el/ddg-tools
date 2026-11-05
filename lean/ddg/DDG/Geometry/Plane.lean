@@ -1,4 +1,4 @@
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # Plane points: dot and cross products, distances, signed area and the reference layout

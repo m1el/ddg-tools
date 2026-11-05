@@ -1187,7 +1187,7 @@ proposals"; all accepted by the orchestrator).** These override §5, §7 and §1
    as the planar Delaunay route, no robust predicates). Cells on the hull are clipped to the k-NN
    radius and counted.
 2. New cited ids `pat-truth-closest-point`, `pat-solid-angle` (CITED.md, WP15 audit;
-   `pat-truth-closest-point` is proved since, `lean/proofs/DdgProofs/RepulsiveCurves/ClosestPoints.lean`).
+   `pat-truth-closest-point` is proved since, `lean/ddg/DDG/Geometry/ClosestPoints.lean`).
 3. **"GWN-sign + distance" is defined** as unsigned distance to the nearest cloud point, signed
    by the (direct, fast or regularized) winding number at threshold ½. It is a baseline of ours,
    not in the paper. On the sanity run it is the strongest point method (512 points, 9 clouds,

@@ -38,7 +38,7 @@ theorem inCircle_eq_dot (i j k l : ℝ × ℝ) :
   unfold inCircle sda sqDist2; ring
 
 /-- The Euclidean side lengths `|ij|, |ik|, |jk|` of a nondegenerate plane triangle form a
-triangle in the sense of `DdgProofs/Triangle.lean`. -/
+triangle in the sense of `DDG/Geometry/Triangle.lean`. -/
 theorem isTriangle_dist2 {i j k : ℝ × ℝ} (h : sda i j k ≠ 0) :
     IsTriangle (dist2 i j) (dist2 i k) (dist2 j k) := by
   have h' : sda k i j ≠ 0 := by

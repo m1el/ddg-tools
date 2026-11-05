@@ -1,4 +1,4 @@
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # Intrinsic mollification of edge lengths

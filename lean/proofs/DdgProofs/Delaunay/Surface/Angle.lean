@@ -1,11 +1,11 @@
 import DdgProofs.Delaunay.Surface.Segment
-import DdgProofs.Geometry.PlaneLemmas
+import DDG.Geometry.PlaneLemmas
 
 /-!
 # Delaunay layer 4, planar toolkit: angles at a point
 
 The angle `angleAt v P Q` between the rays from `v` to `P` and to `Q`, defined from the three
-lengths by the law of cosines (`cornerAngle` of `DdgProofs/Triangle.lean`: the angle opposite
+lengths by the law of cosines (`cornerAngle` of `DDG/Geometry/Triangle.lean`: the angle opposite
 `|PQ|` in the triangle with sides `|PQ|, |vP|, |vQ|`). What the crossing bound of
 `Overlay.lean` needs:
 

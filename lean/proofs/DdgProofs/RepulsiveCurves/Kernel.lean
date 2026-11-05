@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Basic
+import DDG.Geometry.Vec3
 
 /-!
 # Repulsive Curves: the tangent-point kernel (paper Eq. 3; SPEC §3.1, §3.3, D2)

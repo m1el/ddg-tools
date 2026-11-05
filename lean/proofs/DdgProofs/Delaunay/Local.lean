@@ -11,7 +11,7 @@ triangles `ijk` and `jil` on its sides, given intrinsically by five lengths
 * `a = ℓ_ij`, `b = ℓ_ik`, `c = ℓ_jk` (the triangle `ijk`, `IsTriangle a b c`),
 * `d = ℓ_il`, `e = ℓ_jl` (the triangle `jil`, `IsTriangle a d e`).
 
-Corner angles are those of `DdgProofs/Triangle.lean` (`cornerAngle x y z` is the angle opposite
+Corner angles are those of `DDG/Geometry/Triangle.lean` (`cornerAngle x y z` is the angle opposite
 the side `x`): `θ_k = cornerAngle a b c`, `θ_l = cornerAngle a d e` are the angles opposite the
 edge; at `i` the diamond has the corners `cornerAngle c a b` (in `ijk`) and `cornerAngle e a d`
 (in `jil`), at `j` the corners `cornerAngle b c a` and `cornerAngle d e a`. A diamond is a flat
@@ -75,10 +75,10 @@ against the works here.
 
 ## Dependencies
 
-Mathlib, `DdgProofs/Triangle.lean` (the corner angle, cotangent and area from three lengths)
+Mathlib, `DDG/Geometry/Triangle.lean` (the corner angle, cotangent and area from three lengths)
 and, for the proofs only, the planar layout of a diamond in `DdgProofs/Intrinsic/Diamond.lean`
 and `DdgProofs/Intrinsic/FlipAngles.lean`. The statements of the `Delaunay` part of this file mention only `Triangle.lean` definitions and
-the plane `ℝ × ℝ` with `dist2` (`DdgProofs/Bff/Quality.lean`);
+the plane `ℝ × ℝ` with `dist2` (`DDG/Geometry/Plane.lean`);
 `flipLength_eq_flippedLengthFromLengths` relates `flipLength` to the flipped length
 `Intrinsic.flippedLengthFromLengths` of the Rust code. The section on the intrinsic criterion
 (namespace `DDG.Intrinsic`, moved here from `DdgProofs/Intrinsic/Delaunay.lean`) defines the

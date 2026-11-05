@@ -1,5 +1,5 @@
 import DdgProofs.Oracle.Scalar
-import DdgProofs.Geometry.Barycentric
+import DDG.Geometry.Barycentric
 
 /-!
 # Oracle bridges: the level crossing and the barycentric formulas at `ℝ`
@@ -7,7 +7,7 @@ import DdgProofs.Geometry.Barycentric
 The oracle's (`lean/oracle`, `DdgOracle/Formulas/Cuts.lean`) scalar-generic definitions of the
 crossing parameter, the barycentric lengths, the barycentric inner product, the cotangent of a
 sub-triangle and its area, instantiated at `ℝ`, are the native definitions of
-`DdgProofs/Geometry/Barycentric.lean` (library). One-way bridges `Ddg.foo x = DDG.foo x`: the
+`DDG/Geometry/Barycentric.lean` (library). One-way bridges `Ddg.foo x = DDG.foo x`: the
 theorems of the library apply to the oracle's numbers after rewriting with them.
 
 App layer (library step S3).

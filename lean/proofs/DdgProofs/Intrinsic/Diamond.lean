@@ -1,4 +1,4 @@
-import DdgProofs.Geometry.PlaneLemmas
+import DDG.Geometry.PlaneLemmas
 
 /-!
 # Intrinsic triangulations: unfolding a triangle and a diamond, the flipped edge
@@ -10,8 +10,8 @@ The diamond of an edge `ij` of length `a`: the triangles `ijk` and `jil`, with `
 `c = ℓ_jk`, `d = ℓ_il`, `e = ℓ_jl`. The *standard layout* is `i = (0, 0)`, `j = (a, 0)`,
 `k = (x_k, h_k)`, `l = (x_l, −h_l)` with `x = diamondX`, `h = diamondH`. Plane points are pairs
 `ℝ × ℝ` with the Euclidean distance `dist2` and the doubled signed area `sda` of
-`DdgProofs/Bff/Quality.lean`, with the plane lemmas of
-`DdgProofs/Geometry/PlaneLemmas.lean`.
+`DDG/Geometry/Plane.lean`, with the plane lemmas of
+`DDG/Geometry/PlaneLemmas.lean`.
 
 Definitions (the closed forms of the Rust code, on `ℝ`): `diamondX`, `diamondH`,
 `flippedLength`, `flippedLengthFromLengths`, `flipArea1`, `flipArea2`, `flipConvex`,
@@ -69,7 +69,7 @@ theorem diamondX_eq (a b c : ℝ) : diamondX a b c = (a * a + (b - c) * (b + c))
 
 theorem diamondH_eq (a b c : ℝ) : diamondH a b c = 2 * triArea a b c / a := rfl
 
-/-- The diamond is the reference layout of `DdgProofs/Bff/Quality.lean` (the triangle
+/-- The diamond is the reference layout of `DDG/Geometry/Plane.lean` (the triangle
 `i, j, k` with `ℓ₀₁ = a`, `ℓ₁₂ = c`, `ℓ₂₀ = b`). -/
 theorem diamondX_eq_layoutX (a b c : ℝ) : diamondX a b c = layoutX a c b := by
   rw [diamondX_eq, layoutX]

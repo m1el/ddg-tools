@@ -1,5 +1,5 @@
-import DdgProofs.Bff.Quality
-import DdgProofs.Evaluated
+import DDG.Geometry.Plane
+import DDG.Geometry.Stable
 
 /-!
 # Signed corner angle of three plane points

@@ -1,4 +1,4 @@
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # Barycentric combinations: level crossings, lengths and areas inside a face

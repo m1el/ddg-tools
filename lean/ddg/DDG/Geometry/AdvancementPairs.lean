@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Ccd
+import DDG.Geometry.Advancement
 
 /-!
 # Repulsive Surfaces: conservative advancement with moving triangles (SPEC §7.3, D20)

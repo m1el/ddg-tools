@@ -1,4 +1,4 @@
-import DdgProofs.Geometry.Barycentric
+import DDG.Geometry.Barycentric
 import Mathlib.Algebra.BigOperators.Fin
 
 /-!

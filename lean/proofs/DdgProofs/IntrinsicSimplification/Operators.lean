@@ -1,4 +1,4 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Intrinsic simplification: anisotropy, Galerkin coarsening, distortion, quadrics

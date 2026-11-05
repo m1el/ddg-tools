@@ -1,5 +1,5 @@
 import DdgProofs.Developability.Vec
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # Developability: classification of bad triangles for the small-angle remeshing (SPEC §5.3)

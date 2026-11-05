@@ -1,4 +1,4 @@
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # The triangle formulas in the form the Rust code evaluates them

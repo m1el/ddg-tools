@@ -1,4 +1,4 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Least-squares similarity fit of two plane point sets

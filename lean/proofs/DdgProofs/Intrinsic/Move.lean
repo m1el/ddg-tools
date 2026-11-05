@@ -9,7 +9,7 @@ based on Optimal Delaunay Triangulations*, CMAME 200 (2011), Lemma 4.2 (Eq. 4.3�
 Sec. 4.2.1 of the preprint (barycentres at the boundary).
 
 Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area) and `sqDist2`, `dist2` of
-`DdgProofs/Bff/Quality.lean`.
+`DDG/Geometry/Plane.lean`.
 
 * **`it-move-length`** — `movedLength l r (cos α) (sin α)` is the paper's law of
   cosines `√(r² + ℓ² − 2 r ℓ cos α)` (`movedLength_eq_law_of_cosines`) and the distance between
@@ -29,7 +29,7 @@ vector `circumVec`, the star energy and the step of Eq. 4.13) is in `DdgProofs/D
 
 Definitions (the closed forms of the Rust code, on `ℝ`): `movedLength`, `movedDoubleArea`,
 `weightedCircumcenter` (the plane helpers `rot`, `nsq`, `toDual` are in
-`DdgProofs/Geometry/PlaneLemmas.lean`).
+`DDG/Geometry/PlaneLemmas.lean`).
 -/
 
 noncomputable section

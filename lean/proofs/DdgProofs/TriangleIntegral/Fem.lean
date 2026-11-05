@@ -2,7 +2,7 @@ import DdgProofs.TriangleIntegral.Basic
 import DdgProofs.Cotan
 import DdgProofs.Cuts.Weighted
 import DdgProofs.IntrinsicApps.HeatFem
-import DdgProofs.Geometry.PlaneLemmas
+import DDG.Geometry.PlaneLemmas
 import DdgProofs.Laplace.Cotan
 
 /-!

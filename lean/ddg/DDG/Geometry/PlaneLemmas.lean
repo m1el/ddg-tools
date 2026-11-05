@@ -1,10 +1,10 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Plane lemmas: distances and signed areas of points of `ℝ × ℝ`
 
 Small facts about the plane primitives `dist2`, `sda` and `triArea` of
-`DdgProofs/Bff/Quality.lean` and `DdgProofs/Triangle.lean`, used by the intrinsic
+`DDG/Geometry/Plane.lean` and `DDG/Geometry/Triangle.lean`, used by the intrinsic
 triangulations, the Delaunay theory and the finite element integrals:
 
 * `dist2` is symmetric and nonnegative, and its square written out (`dist2_comm`,

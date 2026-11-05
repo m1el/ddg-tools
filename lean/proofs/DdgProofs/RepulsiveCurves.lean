@@ -1,4 +1,4 @@
-import DdgProofs.RepulsiveCurves.Basic
+import DDG.Geometry.Vec3
 import DdgProofs.RepulsiveCurves.Kernel
 import DdgProofs.RepulsiveCurves.KernelGradient
 import DdgProofs.RepulsiveCurves.Energy
@@ -7,8 +7,8 @@ import DdgProofs.RepulsiveCurves.Saddle
 import DdgProofs.RepulsiveCurves.Constraints
 import DdgProofs.RepulsiveCurves.Penalties
 import DdgProofs.RepulsiveCurves.Schedule
-import DdgProofs.RepulsiveCurves.Ccd
-import DdgProofs.RepulsiveCurves.ClosestPoints
+import DDG.Geometry.Advancement
+import DDG.Geometry.ClosestPoints
 import DdgProofs.RepulsiveCurves.Hierarchy
 import DdgProofs.RepulsiveCurves.Multigrid
 import DdgProofs.RepulsiveCurves.BarnesHutAdjoint

@@ -9,8 +9,8 @@ import DdgProofs.RepulsiveSurfaces.BarnesHut
 import DdgProofs.RepulsiveSurfaces.Precond
 import DdgProofs.RepulsiveSurfaces.Step
 import DdgProofs.RepulsiveSurfaces.Remesh
-import DdgProofs.RepulsiveSurfaces.Ccd
-import DdgProofs.RepulsiveSurfaces.Optimize
+import DDG.Geometry.AdvancementPairs
+import DDG.Optimization.LBFGS
 import DdgProofs.RepulsiveSurfaces.Penalties
 
 /-!

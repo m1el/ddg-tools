@@ -328,7 +328,7 @@ of dev-link-condition.
 #### Stale or inaccurate CITED.md reasons
 
 1. **dev-lbfgs-two-loop** (l.1416): "linear algebra of rank-two updates" is given as the reason, but it is
-   already machine-checked generically (`DdgProofs/RepulsiveSurfaces/Optimize.lean`: `twoLoop_eq`,
+   already machine-checked generically (`DDG/Optimization/LBFGS.lean`: `twoLoop_eq`,
    `bfgsInv_posDef`, any SPD H₀). The entry should cross-reference it or be proved by instantiation.
    (Same for `rc-lbfgs-two-loop`.)
 2. **app-amr-edge-flux** (l.1228): "plane geometry of one triangle; cotan-fem-stiffness is cited too". The cited part
@@ -403,7 +403,7 @@ S < 300 lines, M 300–1500, L > 1500.
 | rc-bh-admissibility | RC B.1.2 | N (accuracy; θ→0 measured) | B-L | A-M: first-order bound `|Σ_B − lumped| ≤ sup‖∇k‖·Σ ℓ_j(‖x_j−x̄‖+‖T_j−T̄‖)` on the convex hull | ★`Convex.norm_image_sub_le_of_norm_fderiv_le`; `RC` `rc-bvh-lumped` |
 | rc-bct-admissibility | RC B.2; Hackbusch | N (preconditioner quality) | B-L | the same mean-value bound per block | same |
 | rc-multigrid | RC B.3; Notay | N (speed) | C | none worth doing | — |
-| rc-lbfgs-two-loop | Liu–Nocedal; N&W 7.4 | N (efficiency) | **A-S** (~100–200; most of it already exists) | reuse `RS.twoLoop_eq`, `RS.bfgsInv_posDef`; add a PSD or subspace variant for `H₀ = γM⁻¹` (mean-free); also closes `dev-lbfgs-two-loop` | DdgProofs/RepulsiveSurfaces/Optimize.lean; `RC.massRows_posDefOn` |
+| rc-lbfgs-two-loop | Liu–Nocedal; N&W 7.4 | N (efficiency) | **A-S** (~100–200; most of it already exists) | reuse `RS.twoLoop_eq`, `RS.bfgsInv_posDef`; add a PSD or subspace variant for `H₀ = γM⁻¹` (mean-free); also closes `dev-lbfgs-two-loop` | DDG/Optimization/LBFGS.lean; `RC.massRows_posDefOn` |
 | rc-ncg-polak-ribiere | PR 1969; N&W 5.2 | N | A-S (descent via restart, trivial) / B-L (global convergence) | only the restart rule is worth doing; the convergence theorems need strong Wolfe conditions, and the code uses Armijo only | — |
 | ic-normal-isotopy | Kneser/Haken | **Y** (completeness of the encoding) | C | B-L, combinatorial: existence and uniqueness of a whole-complex model for valid `n` on the existing `Cx` model (Tier C) | no Jordan–Schoenflies, Δ-complexes or isotopy (grep confirms) |
 | ic-refinement-termination | IC Thm C.1 | N (insertion limit) | C | none worth doing (planar Shewchuk packing alone is L+) | no Delaunay/Voronoi in Mathlib |

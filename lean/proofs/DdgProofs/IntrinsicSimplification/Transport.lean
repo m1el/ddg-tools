@@ -1,5 +1,5 @@
 import DdgProofs.IntrinsicSimplification.Removal
-import DdgProofs.IntrinsicSimplification.Wasserstein
+import DDG.Optimization.Wasserstein
 
 /-!
 # Intrinsic simplification: error vectors, transport, vector interpolation

@@ -76,7 +76,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 
 | File | Content |
 |---|---|
-| `DdgProofs/SoftThreshold.lean` | soft threshold, clamp, subdifferential of `t·\|x\|` on an interval (item A.1) |
+| `DDG/Optimization/SoftThreshold.lean` | soft threshold, clamp, subdifferential of `t·\|x\|` on an interval (item A.1) |
 | `DdgProofs/Problem.lean` | the canonical discrete problem: `Site`, `ConeProblem`, objective, feasibility, optimality system |
 | `DdgProofs/Optimality.lean` | sufficiency, quadratic growth, uniqueness, necessity (invertible `L`), guarantee of paper Sec. 4.5 (A.2, A.3) |
 | `DdgProofs/Duality.lean` | discrete dual, Fenchel–Young, weak/strong duality, duality-gap certificate (A.4) |
@@ -85,11 +85,11 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Solver.lean` | the linear systems `crates/ddg-optimal-cones` solves, closed-mesh treatment, adjoint constant, Gauss–Bonnet shift, line-search slope, proximal stage, backward error, cone merging (C) |
 | `DdgProofs/Closed.lean` | closed meshes, optimal additive constant, area normalization of `λ` (A.6, A.7) |
 | `DdgProofs/Components.lean` | the problem of a mesh with several connected components is the sum of the problems of its components (block diagonal `L`, common `λ`, masses normalized by the total area): minimizers, optimality system and Gauss–Bonnet per component; a component solved alone with its own area normalization and `λ_c = (A/A_c)·λ` (A.8) |
-| `DdgProofs/Triangle.lean` | corner angle, cotangent, Heron area, angle sum, scaling, link to Mathlib's Euclidean geometry (B.8) |
+| `DDG/Geometry/Triangle.lean` | corner angle, cotangent, Heron area, angle sum, scaling, link to Mathlib's Euclidean geometry (B.8) |
 | `DdgProofs/Cotan.lean` | cotan formula, cotan Laplacian, lumped mass (B.9, B.10) |
 | `DdgProofs/GaussBonnet.lean` | angle defect, boundary curvature, discrete Gauss–Bonnet (B.11) |
 | `DdgProofs/Yamabe.lean` | linearized discrete Yamabe equation (B.12) |
-| `DdgProofs/Evaluated.lean` | the same formulas in the arrangements `crates/ddg-core` evaluates (Kahan's area, `atan2` corner angle, curvature fields, Laplacian entries) |
+| `DDG/Geometry/Stable.lean` | the same formulas in the arrangements `crates/ddg-core` evaluates (Kahan's area, `atan2` corner angle, curvature fields, Laplacian entries) |
 | `DdgProofs/MeshProblem.lean` | the canonical problem of a mesh (`TriMesh.coneProblem`) and the translation between vectors on the unknowns and per-vertex vectors that vanish on the boundary |
 | `DdgProofs/FactorOnce.lean` | the factor-once method of `crates/ddg-optimal-cones/src/factor_once/`: the reduced (LASSO-type) problem in the cone vector, its Gram matrix, its optimality conditions and their link to `KKT`, the pinned solve of a singular `A` (C) |
 | `DdgProofs/BoundaryProblem.lean` | the mesh problem with boundary unknowns (`TriMesh.boundaryProblem`, `Ω̂`): sufficiency of the optimality system, `Σ s = 2πχ`, the free / penalized / convex boundary sites, first-order curvature of the scaled boundary |
@@ -97,7 +97,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Bff/Laplace.lean` | BFF: Poisson solves, Dirichlet-to-Neumann, Neumann problem, exterior-angle sum, first-order Cherrier formula (D) |
 | `DdgProofs/Bff/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
 | `DdgProofs/Bff/Curve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
-| `DdgProofs/Bff/Quality.lean` | BFF: distortion measures, signed area and angle, segment crossing, similarity fit, mollification (D) |
+| `DDG/Geometry/Plane.lean` | BFF: distortion measures, signed area and angle, segment crossing, similarity fit, mollification (D) |
 | `DdgProofs/Bff/Sphere.lean` | BFF map to the sphere: stereographic projection (on the sphere, inverse, conformal and orientation preserving), inversions of the sphere and the derivative behind the centering Jacobian (D) |
 | `DdgProofs/Cuts/Crossing.lean` | cut flow: crossing parameter and its clamp, barycentric length and inner product, areas and cotangents of sub-triangles (SPEC §3.2, §3.3) |
 | `DdgProofs/Cuts/Curvature.lean` | cut flow: rescaled angles, face curvature `Ω_f`, its sum and Gauss–Bonnet, own and oracle definitions (§3.1) |
@@ -419,7 +419,7 @@ about its definitions unless a definition of this package is named). The *diamon
 package's `apexK a b c`), `l = (x_l, −h_l)` (`apexL a d e`); `f = flippedLengthFromLengths a b c
 d e`. `T(x,y,z)` is `IsTriangle x y z` (the strict triangle inequalities). Plane points are pairs
 of reals; `|pq| = dist2 p q` and `[p,q,r] = sda p q r` (twice the signed area) are those of
-`DdgProofs/Bff/Quality.lean`. Angles: `θ_k = cornerAngle a b c`, `θ_l = cornerAngle a d e`
+`DDG/Geometry/Plane.lean`. Angles: `θ_k = cornerAngle a b c`, `θ_l = cornerAngle a d e`
 (opposite the edge); at `i`: `α_i = cornerAngle c a b`, `β_i = cornerAngle e a d`; at `j`:
 `α_j = cornerAngle b c a`, `β_j = cornerAngle d e a`. `Convex` is this package's
 `DiamondConvex a b c d e`: the oracle's `flipConvex` of the standard layout. After a flip the
@@ -1044,8 +1044,8 @@ closed segment has a point on the x-axis), `layoutPoint` (`b₁v₁ + b₂v₂`)
 of the three weights), `rot`, `nsq`, `toDual`, `circumVec`, `odtEnergy`, `odtGradient`,
 `starArea`, `triGrad`, `forceF` (the vehicle of Eq. 4.5: a quarter turn, the squared norm, a
 vector as a linear form, `|T| c_T` as a polynomial, the energy and the gradient of one star, one
-term of the gradient and the telescoping force of Chen and Holst's proof); plane points, `dist2` and `sda` are those of `DdgProofs/Bff/Quality.lean`,
-`IsTriangle`, `triArea`, `cornerAngle`, `cornerCot` those of `DdgProofs/Triangle.lean`.
+term of the gradient and the telescoping force of Chen and Holst's proof); plane points, `dist2` and `sda` are those of `DDG/Geometry/Plane.lean`,
+`IsTriangle`, `triArea`, `cornerAngle`, `cornerCot` those of `DDG/Geometry/Triangle.lean`.
 
 Own definitions of this package for the default stages and `N` regions (what SPEC states in
 words or as a sum over an index set, for which the oracle has only the scalar pieces):
@@ -1107,9 +1107,9 @@ Everything else (all of `ConeProblem`, `Site`, `TriMesh`, the dual objective, Ga
 combinatorics, the Yamabe linearization) is about this package's own definitions.
 
 The Rust code is not connected to Lean mechanically. For `crates/ddg-core`,
-`DdgProofs/Evaluated.lean` transcribes the expressions the Rust functions evaluate
+`DDG/Geometry/Stable.lean` transcribes the expressions the Rust functions evaluate
 (`kahanArea`, `kahanCornerAngle`, `kahanCornerCot`, `angleDefectField`, `geodesicCurvatureField`)
-and proves them equal to the math-level quantities; `DdgProofs/Bff/Quality.lean` and
+and proves them equal to the math-level quantities; `DDG/Geometry/Plane.lean` and
 `DdgProofs/Bff/Curve.lean` do the same for the per-triangle and per-loop expressions of
 `crates/ddg-bff`, and `DdgProofs/Solver.lean` transcribes the rows of the cone solver's linear
 systems. That a transcription matches the Rust source is checked by reading, and by the
@@ -1519,7 +1519,7 @@ oracle's definitions for it; 46–51 the RC paper and its SPEC; 52–56 the IC p
 - `IsCutOf` describes a cut by its result (same faces, vertex copies); that `cut_mesh` produces
   such a mesh, and that the copies are the sectors around each vertex, is by reading the code.
 - `atan2 y x` is defined as the argument of the complex number `x + iy`; the Kahan arrangements of
-  `DdgProofs/Evaluated.lean` are proved equal to the plain formulas as real numbers, which says
+  `DDG/Geometry/Stable.lean` are proved equal to the plain formulas as real numbers, which says
   nothing about their (better) rounding behaviour.
 - **Division by zero.** In Lean `x/0 = 0` for real numbers, while IEEE arithmetic gives `±∞` or
   NaN. A statement about a quotient that carries no hypothesis on its denominator (for example

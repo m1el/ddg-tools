@@ -1,5 +1,5 @@
 import DdgProofs.Optimality
-import DdgProofs.Optimization.PiecewiseAffine
+import DDG.Optimization.PiecewiseAffine
 
 /-!
 # The semismooth Newton method and its stopping rule (paper Sec. 5.3)

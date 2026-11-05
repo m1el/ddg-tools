@@ -1,4 +1,4 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Integer coordinates: chords of a convex polygon, cevians (tier B)

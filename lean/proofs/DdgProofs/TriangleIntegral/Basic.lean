@@ -1,4 +1,4 @@
-import DdgProofs.Bff.Quality
+import DDG.Geometry.Plane
 
 /-!
 # Integrals over a triangle in the plane
@@ -6,7 +6,7 @@ import DdgProofs.Bff.Quality
 The infrastructure behind the finite element formulas of the library: Lebesgue integrals over a
 triangle of the plane `ℝ × ℝ` (Lebesgue measure `volume = volume.prod volume`). Points of the
 plane are pairs; lengths are the Euclidean `dist2` and areas the signed double area `sda` of
-`DdgProofs/Bff/Quality.lean` (the metric of the type `ℝ × ℝ` is the sup metric and is never used).
+`DDG/Geometry/Plane.lean` (the metric of the type `ℝ × ℝ` is the sup metric and is never used).
 
 * `integral_pow_mul_sub_pow` — the Beta integral `∫₀ᴸ tᵐ (L − t)ⁿ dt = Lᵐ⁺ⁿ⁺¹ m! n!/(m + n + 1)!`;
 * `stdTri` — the standard triangle `{(s, t) | s, t ≥ 0, s + t ≤ 1}`; `integral_stdTri` — Fubini:

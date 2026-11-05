@@ -1,5 +1,5 @@
 import DdgProofs.Intrinsic.Diamond
-import DdgProofs.Geometry.Barycentric
+import DDG.Geometry.Barycentric
 
 /-!
 # Intrinsic triangulations: barycentric coordinates, distances to the corners, the circumcentre

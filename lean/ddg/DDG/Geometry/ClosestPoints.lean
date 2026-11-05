@@ -1,5 +1,5 @@
 import Mathlib
-import DdgProofs.RepulsiveCurves.Ccd
+import DDG.Geometry.Advancement
 
 /-!
 # Closest points of segments and triangles (Ericson 2004, §5.1.2, §5.1.5, §5.1.9)

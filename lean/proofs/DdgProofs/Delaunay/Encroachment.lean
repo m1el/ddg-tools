@@ -1,4 +1,4 @@
-import DdgProofs.Triangle
+import DDG.Geometry.Triangle
 
 /-!
 # Delaunay refinement: encroachment and the circumradius
@@ -41,7 +41,7 @@ The termination of Ruppert's and Chew's algorithms is not proved here (`CITED.md
   diagnosed by an obtuse angle opposite the segment).
 * L. P. Chew, *Guaranteed-quality mesh generation for curved surfaces*, SCG '93, 274–280, 1993.
 
-Dependencies: Mathlib and `DdgProofs/Triangle.lean` only.
+Dependencies: Mathlib and `DDG/Geometry/Triangle.lean` only.
 -/
 
 noncomputable section
