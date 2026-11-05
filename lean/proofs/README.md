@@ -1,6 +1,34 @@
 # lean/proofs — machine-checked derivations of the formulas
 
-Lean 4 / Mathlib proofs of the discrete formulas used by `ddg-tools`:
+# lean/proofs — the application layer of the formal proofs (`DdgProofs`)
+
+The machine-checked proofs of the formulas used by `ddg-tools` are in two Lake packages:
+
+* **`lean/ddg`, the library `DDG`** ([`../ddg/README.md`](../ddg/README.md)): the reusable theory (triangles,
+  meshes, the cotan Laplacian, intrinsic and planar Delaunay triangulations, conformal geometry, normal
+  coordinates, the cone problem, repulsive energies, signed distance functions), in 14 separately buildable
+  parts, depending on Mathlib only, MIT licensed. The papers it formalizes are credited there.
+* **`lean/proofs`, the app layer `DdgProofs`** (this package): what ties the library to this repository. It
+  `require`s `../ddg` and the Float oracle `../oracle`, and contains
+  * the **oracle bridges** (`DdgProofs/Oracle/*`): the theorems about the oracle's scalar-generic `Ddg.*`
+    definitions at `ℝ`, as one-way bridges `Ddg.foo x = DDG.foo x` to the library's native definitions;
+  * the **solver control flow** of the Rust code (the cone solver's linear systems and factor-once method,
+    the feedback loop, schedules, near-pair quadratures), options that are off by default and
+    reference-code variants (`ref: …cpp`);
+  * the developments about the papers' own pipelines that are not reusable theory: the Variational Cuts flow
+    (`Cuts/*`), Developability, intrinsic simplification operators, the Points-as-Tori baselines and loss, the
+    repulsive-surfaces remesher;
+  * the **axiom audits** (`Audit.lean`, `AuditAll.lean`) over library and app;
+  * the **Rust ↔ Lean formula-id mapping** below, [`CITED.md`](CITED.md) (the results that are cited, not
+    proved) and [`FORMALIZATION-SURVEY.md`](FORMALIZATION-SURVEY.md) (what could be proved, and its status).
+
+This README keeps the statement of every formula id (the tables under
+[Formula ids](#formula-ids-and-their-exact-statements) and [Theorems](#theorems)); the theorem names there
+are declarations of the library, in `lean/ddg/DDG/...`, unless a section names a `DdgProofs/...` file. The
+list of library modules, with what each proves, is the module guide of [`../ddg/README.md`](../ddg/README.md);
+the index at the end of this file lists, for every id, the file of its theorem.
+
+The proofs cover, by crate:
 
 * the canonical cone problem and its solver, `crates/ddg-optimal-cones` — *Optimal Cone
   Singularities for Conformal Flattening* (Soliman, Slepčev, Crane, ACM TOG 2018; "the paper");
@@ -51,57 +79,43 @@ statement are cited.
 |---|---|
 | Lean | `leanprover/lean4:v4.34.1` (`lean-toolchain`) |
 | Mathlib | tag `v4.34.1`, revision `d13f23b723b8a846827a245b89c10fc7d3f11612` (`lake-manifest.json`) |
+| Library | path dependency `../ddg` (package `ddg`, library `DDG`, same Mathlib revision; MIT, see its README) |
 | Oracle | path dependency `../oracle` (package `ddgOracle`, no Mathlib); only `DdgOracle.Formulas` is imported |
 
 ```sh
-cd lean/proofs
-lake exe cache get                      # prebuilt Mathlib; do not compile Mathlib from source
-lake build > ../../runs_tmp/lean-proofs-build.log 2>&1
+cd lean/ddg && lake exe cache get       # prebuilt Mathlib; do not compile Mathlib from source
+lake build > ../../runs_tmp/lean-ddg-build.log 2>&1      # the library (or one part: lake build DDGDelaunayPlanar)
+cd ../proofs
+lake build > ../../runs_tmp/lean-proofs-build.log 2>&1   # the app layer (builds the library first if needed)
 lake env lean DdgProofs/Audit.lean      # prints the axioms each main theorem depends on
 ../../scripts/check-formulas.sh         # formula ids: Rust <-> Lean theorem / CITED.md; no sorry/axiom
 ../../scripts/check-formulas.sh --build # the same, plus build and axiom audit of the main theorems
 ../../scripts/check-formulas.sh --audit-all   # the same, plus the axioms of every declaration (a few seconds more)
 ```
 
-There is no `sorry` and no `axiom` declaration in this package. `DdgProofs/Audit.lean` runs
+There is no `sorry` and no `axiom` declaration in either package. `DdgProofs/Audit.lean` runs
 `#print axioms` on the main theorems, by name (the count is printed by `check-formulas.sh --build`);
 every one reports exactly `[propext, Classical.choice, Quot.sound]`.
 `lake env lean DdgProofs/AuditAll.lean` (a few seconds) collects the axioms of *every*
-declaration of the package and of the oracle's formula modules and reports any other axiom.
+declaration of the library, of this package and of the oracle's formula modules and reports any other axiom
+(`check-formulas.sh --audit-all`: ids 487, proved 381, cited 106, missing 0, audited 1659, 13144 declarations checked).
 
-The lakefile sets `autoImplicit = false`; `lake env lean File.lean` on a single file does **not**
+Both lakefiles set `autoImplicit = false`; `lake env lean File.lean` on a single file does **not**
 apply that option (pass `-DautoImplicit=false`), `lake build` does.
 
 ## Layout
 
+The files of the **app layer** (this package). The library modules, by part, are listed in the module guide of
+[`../ddg/README.md`](../ddg/README.md); the file of every theorem of a formula id is in the index at the end
+of this file. `DdgProofs.lean` is the app root: it imports the app modules and the library `DDG`.
+
 | File | Content |
 |---|---|
-| `DDG/Optimization/SoftThreshold.lean` | soft threshold, clamp, subdifferential of `t·\|x\|` on an interval (item A.1) |
-| `DDG/OptimalCones/Problem.lean` | the canonical discrete problem: `Site`, `ConeProblem`, objective, feasibility, optimality system |
-| `DDG/OptimalCones/Optimality.lean` | sufficiency, quadratic growth, uniqueness, necessity (invertible `L`), guarantee of paper Sec. 4.5 (A.2, A.3) |
-| `DDG/OptimalCones/Duality.lean` | discrete dual, Fenchel–Young, weak/strong duality, duality-gap certificate (A.4) |
-| `DDG/OptimalCones/Certificate.lean` | the certificate for inexact data: gap identity for arbitrary points, clipped dual lower bound, repaired upper bound, enclosure, backward statements, counterexamples (A.4′) |
-| `DDG/OptimalCones/Newton.lean` | residual maps, semismooth differentials, stopping rule, regularized problem (A.5) |
 | `DdgProofs/OptimalCones/Solver.lean` | the linear systems `crates/ddg-optimal-cones` solves, closed-mesh treatment, adjoint constant, Gauss–Bonnet shift, line-search slope, proximal stage, backward error, cone merging (C) |
-| `DDG/OptimalCones/Closed.lean` | closed meshes, optimal additive constant, area normalization of `λ` (A.6, A.7) |
-| `DDG/OptimalCones/Components.lean` | the problem of a mesh with several connected components is the sum of the problems of its components (block diagonal `L`, common `λ`, masses normalized by the total area): minimizers, optimality system and Gauss–Bonnet per component; a component solved alone with its own area normalization and `λ_c = (A/A_c)·λ` (A.8) |
-| `DDG/Geometry/Triangle.lean` | corner angle, cotangent, Heron area, angle sum, scaling, link to Mathlib's Euclidean geometry (B.8) |
-| `DDG/Mesh/TriMesh.lean` | cotan formula, cotan Laplacian, lumped mass (B.9, B.10) |
-| `DDG/Mesh/GaussBonnet.lean` | angle defect, boundary curvature, discrete Gauss–Bonnet (B.11) |
-| `DDG/Conformal/Yamabe.lean` | linearized discrete Yamabe equation (B.12) |
-| `DDG/Geometry/Stable.lean` | the same formulas in the arrangements `crates/ddg-core` evaluates (Kahan's area, `atan2` corner angle, curvature fields, Laplacian entries) |
-| `DDG/OptimalCones/MeshProblem.lean` | the canonical problem of a mesh (`TriMesh.coneProblem`) and the translation between vectors on the unknowns and per-vertex vectors that vanish on the boundary |
 | `DdgProofs/OptimalCones/FactorOnce.lean` | the factor-once method of `crates/ddg-optimal-cones/src/factor_once/`: the reduced (LASSO-type) problem in the cone vector, its Gram matrix, its optimality conditions and their link to `KKT`, the pinned solve of a singular `A` (C) |
-| `DDG/OptimalCones/BoundaryProblem.lean` | the mesh problem with boundary unknowns (`TriMesh.boundaryProblem`, `Ω̂`): sufficiency of the optimality system, `Σ s = 2πχ`, the free / penalized / convex boundary sites, first-order curvature of the scaled boundary |
 | `DdgProofs/OptimalCones/ConeFeedback.lean` | the feedback loop of the cone solver: the mismatch `δ` between the solver's `u` and the realized log area factor is invariant under the free constant of `u` and the scale of the plane, and zero where the flattening realizes `u` up to constants; the weighted quantile is shift-equivariant |
-| `DDG/Conformal/Cherrier.lean` | BFF: Poisson solves, Dirichlet-to-Neumann, Neumann problem, exterior-angle sum, first-order Cherrier formula (D) |
-| `DDG/Conformal/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
-| `DDG/Conformal/BoundaryCurve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
-| `DDG/Geometry/Plane.lean` | BFF: distortion measures, signed area and angle, segment crossing, similarity fit, mollification (D) |
-| `DDG/Conformal/Sphere.lean` | BFF map to the sphere: stereographic projection (on the sphere, inverse, conformal and orientation preserving), inversions of the sphere and the derivative behind the centering Jacobian (D) |
 | `DdgProofs/Cuts/Crossing.lean` | cut flow: crossing parameter and its clamp, barycentric length and inner product, areas and cotangents of sub-triangles (SPEC §3.2, §3.3) |
 | `DdgProofs/Cuts/Curvature.lean` | cut flow: rescaled angles, face curvature `Ω_f`, its sum and Gauss–Bonnet, own and oracle definitions (§3.1) |
-| `DDG/Laplace/Weighted.lean` | cut flow: the weighted cotan Laplacian `L_w = Σ_f w̄_f L_f`, the paper's edge rule and a counterexample to its semidefiniteness (§3.6, §3.10, D11) |
 | `DdgProofs/Cuts/Dirichlet.lean` | cut flow: Dirichlet solves on an index set split into `I` and `B`: Yamabe system, boundary flux, Dirichlet energy, scaled and pointwise adjoints, gradient densities, harmonic extension (§3.4–§3.6, §3.8) |
 | `DdgProofs/Cuts/Step.lean` | cut flow: sign of the flow, explicit step, length step, the paper's penalty rule, symmetry projection, step cap, feature size, sliver smoothing (§1, §3.6–§3.11, §4) |
 | `DdgProofs/Cuts/Recovery.lean` | cut flow: recovery of the normal derivative from the integrated fluxes (§3.5, D12) |
@@ -113,59 +127,22 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Cuts/Stop.lean` | cut flow: the stop rule of a run: the three cases of the energy criterion, the state of lowest energy, the motion criterion with the predicted motion (§4, D27, D29, D31; `cut-stop-energy`, `cut-run-lowest`, `cut-stop-motion`) |
 | `DdgProofs/Cuts/Regions.lean` | cut flow with `N` regions: region of a vertex, crossings between regions, triple points, the projection of the redistancing, rates of the functions, the systems on the boundary of a region (§8, D20, D21) |
 | `DdgProofs/Cuts/Analytic.lean` | cut flow: closed-form solutions (flat disk, spherical cap, shrinking circle) and the shape derivatives of the energies on them (§1, §6) |
-| `DDG/Intrinsic/Diamond.lean` | intrinsic triangulations: the layout of a triangle and of the two triangles on an edge from their lengths, uniqueness up to a rigid motion, the length of a flipped edge, strict convexity (intrinsic SPEC §4, N5) |
-| `DdgProofs/Intrinsic/Delaunay.lean` | intrinsic triangulations: the Delaunay condition and the cotan weight, the link to the cotan Laplacian, what a flip does to the angles and to the condition (§4, §5, N6, N17) |
-| `DDG/Delaunay/Local.lean` | Delaunay triangulations, layer 1 (one diamond, from five lengths; statements use only `Triangle.lean` definitions): `θ_k + θ_l ≤ π` ⟺ `cot θ_k + cot θ_l ≥ 0` ⟺ the other apex is not strictly inside the circumcircle of the layout (the power of a point is `2A·(cot θ_k + cot θ_l)`); the flip of a non-Delaunay edge (convex diamond, nondegenerate new triangles, new edge Delaunay, flip back, corner angles add at all four vertices, area kept) |
-| `DDG/Delaunay/Rippa.lean` | Rippa's theorem for one diamond: `E_before − E_after = −(cot θ_k + cot θ_l)/(2 A_ilk A_jkl)·ℓ(u)²` exactly, hence `≤` for every `u` iff `θ_k + θ_l ≥ π` |
-| `DDG/Delaunay/Potential.lean` | potentials for flip termination: the lifting energy `Σ A(a²+b²+c²)` changes by `−8 A_ijk A_jil (cot θ_k + cot θ_l)`; Musin's harmonic index `Σ (a²+b²+c²)/A` from Rippa at the hat functions; both decrease strictly at a non-Delaunay edge, unchanged at a tie |
-| `DDG/Delaunay/Planar/Encroachment.lean` | Ruppert's encroachment: inside the diametral circle ⟺ obtuse angle (Euclidean and in lengths), Thales; circumradius `abc/4A = a/(2 sin θ)`, an angle below `π/6` is opposite a side shorter than `R` (Mathlib + `Triangle.lean` only) |
-| `DDG/Mesh/Gluing.lean` | Delaunay triangulations, layer 2: triangulated surfaces as gluing data (Δ-complex; Hatcher 2.1): halfedges `F × Fin 3` (Rust `3f + k`), `twin` an involution (fixed points = boundary), edges = twin orbits, vertices = classes of corners generated by `x ~ next (twin x)`; self-loops, multi-edges, faces glued to themselves allowed; `χ = V − E + F`, `2E = 3F + B`; vertex labellings (Rust `faces`), faithful = one fan per label; isomorphisms keep `χ` (Mathlib only) |
-| `DDG/Mesh/GluingFlip.lean` | layer 2: the edge flip of gluing data (Rust `Complex::flip_edge`): `twin' = σ twin σ⁻¹` for the 4-cycle `σ`; defined iff the edge's two halfedges are in distinct faces; vertices biject (corner by corner, also when `i, j, k, l` coincide), every surviving halfedge keeps tail and head, `V`, `E`, `F`, `χ`, boundary kept, labellings kept faithful and onto; flipping twice is an explicit isomorphism (Mathlib only) |
-| `DDG/Delaunay/Metric.lean` | layer 2: edge-length metrics on gluing data, corner and cone angles; `Σ_v (2π − Θ_v) = 2πχ` on a closed surface; the flip with `flipLength` keeps a metric for a strictly convex diamond (so after every non-Delaunay edge), the new edge is Delaunay, and every vertex keeps its cone angle |
-| `DDG/Delaunay/FromTriMesh.lean` | layer 2: an oriented `TriMesh` as gluing data (Rust `Complex::from_tri_mesh`): same edges; same `χ` when every vertex star is one fan (not implied by `Manifold`: a pinched vertex); boundary halfedges = boundary edges; cone angle = `angleSum` |
-| `DDG/Delaunay/Termination.lean` | layer 3: Delaunay = every interior edge locally Delaunay; an interior edge with one face on both sides is always Delaunay, so "no Delaunay flip" ⟺ Delaunay; the global potentials `Σ A(a²+b²+c²)` and `Σ (a²+b²+c²)/A` decrease strictly with every Delaunay flip, the area is kept; Gauss–Bonnet with boundary; states `MetricGluing` and the flip relation; termination, a reachable Delaunay state and the invariants (χ, boundary with lengths, area, cone angles) if the reachable set is finite, which follows from the finiteness of triangulations with bounded edges (`BoundedLengthFinite`; proved for every `MetricGluing` in `Surface/Finite.lean`, layer 4, which also gives the theorems unconditionally) |
-| `DDG/Delaunay/Planar/Basic.lean` | planar Delaunay, coordinates: the hull of three points by signs of `sda`, interior ⟺ positive barycentric coordinates, open sets covered by two triangles and missing their interiors are empty (null boundaries); the in-circle determinant = lifting determinant, power of a point for every equidistant `o`, explicit circumcenter, `InCircumcircle` ⟺ open circumdisk; a non-Delaunay diamond is strictly convex; the power across a locally Delaunay edge is monotone; the lifted volume of a convex quadrilateral under both diagonals |
-| `DDG/Delaunay/Planar/Flip.lean` | planar Delaunay: triangulations of a finite point set `S` (corners in `S`, cover `conv S`, disjoint interiors, points of `S` only at corners); the two triangles on an interior edge lie on opposite sides; the two diagonals of a convex quadrilateral cover the same set; the Lawson flip keeps a triangulation of `S`; a Delaunay flip always applies; no Delaunay flip ⟺ locally Delaunay |
-| `DDG/Delaunay/Planar/Termination.lean` | planar Delaunay: the potential `Σ area(t)·Σ_{v∈t}\|v\|²` drops by exactly `sda·inCircle/(2\|sda\|)` at a flip; finitely many triangulations; the Delaunay flip relation is well founded, at most `2^#(triangles S)` flips, from every triangulation flips reach a locally Delaunay one |
-| `DDG/Delaunay/Planar/Lemma.lean` | planar Delaunay: adjacency (a triangle through a relative interior point of an edge is the neighbour across it), a generic interior point, leaving a triangle through an edge; **Delaunay's lemma** (locally Delaunay ⟹ empty circumcircles) by the walk; Lawson's algorithm ends Delaunay; a Delaunay triangulation exists given a triangulation |
-| `DDG/Delaunay/PlanarBridge.lean` | planar Delaunay ↔ layer 1: `cot θ_k = ⟨i − k, j − k⟩/\|sda\|`, the length criterion `θ_k + θ_l ≤ π` of `Local.lean` is the planar in-circle test |
-| `DDG/Delaunay/BoundaryFan.lean` | layer 2/3: `Glued` is an injective partial map of the corners, so every vertex class is a cycle or a path: at most one boundary halfedge leaves and at most one enters a vertex, and as many enter as leave (`b_v ≤ 1`); Gauss–Bonnet with boundary as `Σ_interior (2π − Θ) + Σ_boundary (π − Θ) = 2πχ` |
-| `DDG/Delaunay/Planar/Uniqueness.lean` | planar Delaunay: the lifted plane of a triangle (affine, independent of the corner order); two Delaunay triangulations of `S` differ only in triangles with a fourth point of `S` on the circumcircle; **uniqueness** when no four points are cocircular; any two locally Delaunay triangulations coincide; existence and uniqueness given a triangulation |
-| `DDG/Delaunay/Planar/FlipCount.lean` | planar Delaunay: a Delaunay flip lowers the lifted surface (`LiftBelow`), on an edge the surface is the lifted segment (adjacency), so a flipped edge never reappears; **every sequence of Delaunay flips has at most `C(\|S\|, 2)` flips** |
-| `DDG/Delaunay/Planar/Insertion.lean` | planar Delaunay: a point `p ∉ conv S` coned to the boundary edges visible from it extends a triangulation of `S` to one of `S ∪ {p}`; an edge with points of `conv S` beyond it has a neighbour across it (so a boundary edge lies on a supporting line); the cover by a walk from `conv S` and the density of points whose line to `p` avoids `S` |
-| `DDG/Delaunay/Planar/Existence.lean` | planar Delaunay: lexicographically extreme points are outside the hull of the others; a non-collinear set of `≥ 4` points has one whose removal keeps it non-collinear; **every non-collinear finite point set has a triangulation**, hence a Delaunay triangulation; a triangulation exists iff `S` is empty or not collinear |
-| `DDG/Delaunay/FlipQueue.lean` | layer 3: the Rust loop (`run_flip_queue`): the `AngleSum`/`CotanWeight` tests with tolerance only flip non-Delaunay edges, never hit `BoundaryEdge`/`DegreeOneEndpoint`/`NotConvex`; the queue invariant (off-queue edges pass); every run finite under the finiteness hypothesis, in any order (the hypothesis is discharged by `Surface/Finite.lean`: `loop_acc'`); a finished run passes the test at every interior edge (`θ_k + θ_l ≤ π + τ`) with the invariants of the start |
-| `DDG/Delaunay/Surface/Plane.lean` | layer 4 (overlay route, `Delaunay/LAYER4-PLAN.md`), planar toolkit: rigid motions `Rigid` (composition, inverse, isometry, `rigidOfSegment` and its uniqueness), triangles `Fin 3 → ℝ × ℝ` with hull, interior, open sides, corners and barycentric numerators |
-| `DDG/Delaunay/Surface/Segment.lean` | layer 4, planar toolkit: a straight segment through a triangle (the parameters in the hull form a closed interval, the exit is not interior, a ray leaves through one open side transversally, enters the interior after crossing a side inwards) |
-| `DDG/Delaunay/Surface/Angle.lean` | layer 4, planar toolkit: the angle at a point from the law of cosines; invariance under scaling along the rays, additivity along a line, so a straight line through a fan of wedges at `v` subtends `< π`; the chord bound `\|PQ\| ≥ \|vQ\| sin ∠PvQ` |
-| `DDG/Delaunay/Surface/Quad.lean` | layer 4, planar toolkit: a strictly convex quadrilateral `ConvexQuad` and its two diagonals: the old diagonal is crossed inside, the two new triangles lie in the old diamond (hull and interior), corners of the diamond are never interior to the pieces |
-| `DDG/Delaunay/Surface/Count.lean` | layer 4: the counting lemma for chords through a fan (runs of at most `M` chords at one pivot, every pivot switch costs `≥ c₀` of length ⟹ at most `M(1 + 2Λ/c₀)` chords) |
-| `DDG/Delaunay/Surface/Layout.lean` | layer 4: the standard layout of every face of a metric triangulation, the unfolding motion across a halfedge, cells (a face placed by a rigid motion), consistent and boundary germs, words (crossing sequences), the developed length, finitely many words of bounded crossing number (`Word.finite_length_le`) |
-| `DDG/Delaunay/Surface/Overlay.lean` | layer 4: `Overlay s t`, a geodesic triangulation `t` of the surface of `s` witnessed by planar cell data without building the surface (layouts, cover, germ conditions, corners); the identity overlay `Overlay.refl`; the walk along an edge of `t` as a chain of cells, its word and developed length |
-| `DDG/Delaunay/Surface/Fan.lean` | layer 4: a straight segment of length `≤ L` crosses at most `crossBound s L` edges of `s` (pivot fans, `αMin`, `sinMin`, `ℓMin`), so every edge of an overlaid `t` is the developed length of a word with few crossings (`Overlay.exists_word_le`) |
-| `DDG/Delaunay/Surface/Relayout.lean` | layer 4: moving the layout of one face of an overlay by a rigid motion (`Overlay.relayout`), so the two faces of a flip lie in one plane |
-| `DDG/Delaunay/Surface/FlipFace.lean` | layer 4: the flip of an overlaid triangulation at the face level: the two new faces laid out as the other diagonal of the convex diamond `D`, the cells of `D` distributed to them, the key crossing lemma, every germ/cover/corner invariant of the new faces |
-| `DDG/Delaunay/Surface/FlipEdge.lean` | layer 4: the flip at the edge level and assembly: outer sides keep their layouts and germs, the new edge has the germ of the diamond, **`Overlay.flip`**: a convex flip carries an overlay of `t` to one of the flipped `t'` |
-| `DDG/Delaunay/Surface/Finite.lean` | layer 4: **`MetricGluing.boundedLengthFinite` is a theorem for every `MetricGluing`** (the former hypothesis of layer 3), hence unconditionally `reach_finite`, `acc`, `wellFounded_delaunayFlip`, `not_exists_infinite_flips'`, `exists_delaunay`, `flip_algorithm'`, `flips_length_le'`, `loop_acc'`: surface Delaunay flipping terminates and a Delaunay triangulation with the original vertices exists |
-| `DDG/Intrinsic/Signpost.lean` | intrinsic triangulations: angle normalization, the signpost update around interior and boundary vertices and under a flip (§3, N2) |
-| `DDG/Intrinsic/Trace.lean` | intrinsic triangulations: one step of a tracing query: crossing of an edge with the path, choice of the exit edge, forward progress (§4, N7) |
-| `DDG/Intrinsic/Barycentric.lean` | intrinsic triangulations: barycentric coordinates, distances of a point to the corners, edge split, circumcentre (§4, N10, N14, N17) |
-| `DDG/Intrinsic/Move.lean` | intrinsic triangulations: moving a vertex (lengths, areas of its star), the circumcentre and barycentre times the area, the energy of the optimal Delaunay triangulation of a star, its gradient, the step of Chen and Holst's Eq. 4.13 (§4, N19, N21) |
 | `DdgProofs/Developability/*.lean` | developability: vectors and derivatives along curves (`Vec`), per-face quantities and Eqs. 7–9 (`Basic`), invariances, the six energies (`Combinatorial`, `Covariance`, `MaxCovariance`, `Intrinsic`, `Width`), Jacobi rotation (`Eig`), line search (`Optimizer`), subdivision, remeshing classification, regular cone (developability SPEC §1–§5, §10.3) |
-| `DdgProofs/RepulsiveCurves/*.lean` | repulsive curves: vectors and edge quantities (`Basic`), the kernel and its gradient (`Kernel`, `KernelGradient`), the energy, its differential and invariances (`Energy`), the Gram matrices (`Gram`), saddle systems and projector (`Saddle`), constraints (`Constraints`), penalties (`Penalties`), schedules and subdivision (`Schedule`), CCD advancement (`Ccd`), closest points of segments and triangles, the CCD distances and PAT's ground-truth closest point (`ClosestPoints`), BVH/BCT lumping (`Hierarchy`), coarsening and prolongation (`Multigrid`) (RC SPEC §2–§8) |
-| `DdgProofs/IntrinsicSimplification/*.lean` | intrinsic simplification (IEM SPEC §13): flattening (`Flatten`, `Monotone`), curvature conservation and Eq. 9 (`Curvature`), Eq. 10 (`Interpolation`), removal layouts and the flip lemma (`Removal`), the 1-Wasserstein cost (`Wasserstein`), centres of mass, transport, Sec. 7.3.1 (`Transport`), anisotropy, Galerkin, distortion, QEM (`Operators`), the wrap (`Wrap`), the oracle link (`Oracle`) |
-| `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
-| `DdgProofs/TriangleIntegral/*.lean` | integrals over a triangle of the plane: Fubini on the standard triangle, the Beta integral, the affine change of variables, area, convex hull, barycentric coordinates, slice formula and area-coordinate rule (`Basic`); the finite element integrals on them — Galerkin mass, cotan and weighted stiffness and their mesh sums, the conformal energy of a linear map, Chen–Holst Lemma 4.1, the AMR element norms (`Fem`); additivity over a tiling by triangles with disjoint interiors, Lemma 4.1 over a tiling and the descent of the interpolation error under the ODT update, the transfer mass matrix as an integral (`Tiling`); the flux of a linear function through a side (`Flux`); the series and recurrence of `beta_exp` (`BetaExp`) |
-| `DDG/Mesh/Orientation.lean` | consistent face orientation of a `TriMesh`: halfedges, twins, boundary halfedges = boundary edges, telescoping of antisymmetric sums |
-| `DDG/Conformal/ConformalEnergy.lean` | `bff-conformal-energy`: shoelace over an oriented mesh, `2Σ_f∫\|∂̄f\|² = ½(aᵀLa + bᵀLb) − 𝒜(a, b)` |
-| `DDG/VectorFields/PoincareHopf.lean` | `app-vector-singularity-index`: integer face indices; `index_sum = nχ` for the code's twin rule (`nχ + #(edges with ω = π)` with `arg` on both halfedges) |
+| `DdgProofs/Core/Fields.lean` | the curvature fields and the Laplacian entries in the arrangement `crates/ddg-core` evaluates them (`angle_defects`, `boundary_geodesic_curvatures`, entrywise Laplacian) are the library's quantities |
+| `DdgProofs/Cuts/WeightedEntries.lean` | cut flow: the oracle's face mean and weighted-Laplacian entries are the entries of the library's `TriMesh.weightedLaplacian` (§3.6, §3.10, D11) |
+| `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` (`Scalar`) and the theorems restated about the oracle's definitions: the optimality theorems about `Ddg.Problem` (`Problem`), the regularized system with `μ` kept as an unknown and its piecewise linear systems (`Regularized`), absent bounds (`Unbounded`), the mesh formulas (`Mesh`); one-way bridges `Ddg.foo x = DDG.foo x` to the library's native definitions for the geometry, the intrinsic-triangulation and the integer-coordinate formulas (`Geometry`, `Intrinsic`, `NormalCoords`) |
+| `DdgProofs/RepulsiveCurves/*.lean` | repulsive curves, app part: the near-pair quadrature (`NearPair`, `NearPairSecond`; not in the paper, options off by default), length schedules and subdivision (`Schedule`) (RC SPEC §3.4, §5.4, §17) |
+| `DdgProofs/RepulsiveSurfaces/*.lean` | repulsive surfaces, app part: the line-search tests of the reference code (`Step`, `rs-armijo-reference`) and the formulas of the remesher (`Remesh`) (RS SPEC §7.2, §10) |
+| `DdgProofs/PointsAsTori/*.lean` | Points as Tori, app part: the baselines SSPD and SHC (`Baselines`) and the training loss (`Loss`) (PAT SPEC §9, §10.1) |
+| `DdgProofs/IntrinsicSimplification/*.lean` | intrinsic simplification, app part (IEM SPEC §13): anisotropy, Galerkin coarsening, distortion and quadrics (`Operators`), error vectors, transport and vector interpolation (`Transport`), the wrap (`Wrap`), the link to the oracle's definitions (`Oracle`); the flattening, Eq. 9 and 10 and the removal layouts are in the library (`Conformal/CETM`, `Intrinsic/FlatVertexRemoval`, `Optimization/Wasserstein`) |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
 ## Conventions
 
-- Namespace `DDG` holds the math-level definitions of this package. Namespace `Ddg` belongs
-  to `lean/oracle`; theorems in `namespace Ddg.Problem` / `DDG.Oracle` are about the oracle's
-  scalar-generic definitions instantiated at `ℝ` (the same definitions the `Float` executable runs).
+- Namespace `DDG` holds the math-level definitions of the library (`lean/ddg`, native over `ℝ`/`ℤ`). Namespace
+  `Ddg` belongs to `lean/oracle`; theorems in `namespace Ddg.Problem` / `DDG.Oracle` (app layer,
+  `DdgProofs/Oracle/*`) are about the oracle's scalar-generic definitions instantiated at `ℝ` (the same
+  definitions the `Float` executable runs).
 - Signs are those of `CLAUDE.md`: `L` is positive semidefinite, `u` is the true log scale factor,
   the state equation is `L u = µ − Ω`. The **optimality system** for `(u, φ, µ)` is
 
@@ -180,7 +157,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
   (`L = L_II`, `u = 0` on the boundary already eliminated, see `laplacian_mulVec_of_zero_off`), or
   all vertices on a closed mesh. On a closed mesh the competitors in `IsMinimizer` are *all*
   solutions of `L v = ν − Ω`, so the additive constant of `u` is optimized.
-  `TriMesh.coneProblem M p wE λ site` (`DDG/OptimalCones/MeshProblem.lean`) is this problem for a mesh
+  `TriMesh.coneProblem M p wE λ site` (`lean/ddg/DDG/OptimalCones/MeshProblem.lean`) is this problem for a mesh
   `M` with unknowns `p`, with the masses divided by the total area. For per-vertex vectors that
   vanish off the unknowns (as the Rust arrays do; an exact test), its state residual is
   `(L u)_v − µ_v + Ω_v` with the full Laplacian (`coneProblem_stateResidual`), its adjoint product
@@ -419,7 +396,7 @@ about its definitions unless a definition of this package is named). The *diamon
 package's `apexK a b c`), `l = (x_l, −h_l)` (`apexL a d e`); `f = flippedLengthFromLengths a b c
 d e`. `T(x,y,z)` is `IsTriangle x y z` (the strict triangle inequalities). Plane points are pairs
 of reals; `|pq| = dist2 p q` and `[p,q,r] = sda p q r` (twice the signed area) are those of
-`DDG/Geometry/Plane.lean`. Angles: `θ_k = cornerAngle a b c`, `θ_l = cornerAngle a d e`
+`lean/ddg/DDG/Geometry/Plane.lean`. Angles: `θ_k = cornerAngle a b c`, `θ_l = cornerAngle a d e`
 (opposite the edge); at `i`: `α_i = cornerAngle c a b`, `β_i = cornerAngle e a d`; at `j`:
 `α_j = cornerAngle b c a`, `β_j = cornerAngle d e a`. `Convex` is this package's
 `DiamondConvex a b c d e`: the oracle's `flipConvex` of the standard layout. After a flip the
@@ -496,9 +473,9 @@ lifting potential `Σ_f liftEnergy`, `H = Σ_f harmonicIndex`, `A = Σ_f triArea
 | `it-delaunay-flip-algorithm` | `IsDelaunay ⟺ ∀ t, ¬ DelaunayFlip s t`; `TransGen DelaunayFlip s t ⟹ s ≠ t`; along `ReflTransGen ConvexFlip`: same `χ`, `B`, boundary halfedges with lengths (up to a relabelling), `A`, cone angles (up to a vertex bijection); `(reach s).Finite ⟹ Acc (swap DelaunayFlip) s`, no infinite flip sequence, `n` flips ⟹ `n + 1 ≤ \|reach s\|`, some reachable `t` is Delaunay, every reachable `t` without a further flip is Delaunay with the invariants; `BoundedLengthFinite s` (for every `L`, the states `ConvexFlip`-reachable from `s` with all lengths `≤ L` are finitely many up to `IsIso`) `⟹ (reach s).Finite` (edges stay `≤ √(H(s)A(s))`; finitely many states isomorphic to one) | `isDelaunay_iff_forall_not_delaunayFlip`, `DelaunayFlip.transGen_ne`, `eulerChar_eq_of_reach`, `numBoundary_eq_of_reach`, `boundary_equiv_of_reach`, `totalArea_eq_of_reach`, `coneAngle_equiv_of_reach`, `acc_of_finite`, `wellFounded_of_finite`, `not_exists_infinite_flips`, `flips_length_le`, `exists_delaunay_of_acc`, `flip_algorithm`, `finite_isIso`, `length_le_of_reach`, `reach_finite_of_boundedLengthFinite`; layer 4 (`Surface/Finite.lean`, no hypothesis): `boundedLengthFinite`, `reach_finite`, `acc`, `wellFounded_delaunayFlip`, `not_exists_infinite_flips'`, `exists_delaunay`, `flip_algorithm'`, `flips_length_le'`; `Overlay.flip`, `Overlay.exists_word_le`, `Word.finite_length_le` |
 | `it-delaunay-flip-loop` | `angleSumCriterion τ`: `cot θ_k + cot θ_l < 0 ∧ τ < (θ_k − π) + θ_l`; `cotanCriterion τ`: `½(cot θ_k + cot θ_l) < −τ` (`τ ≥ 0`); a failing interior halfedge is `DelaunayFlippable` and `ConvexAt`; an edge whose two faces avoid the diamond's keeps its test result; `QueueInv` (off-queue halfedges pass) holds for the full queue, after a passing test and after a flip with `flipQueue` (σ-image of the rest plus the four outer edges); `LoopStep` (any queued halfedge) keeps it; every run from `reach`-finite `s₀` is finite; a stopped run from `⟨s₀, univ⟩` has an empty queue, no failing halfedge, a state `ReflTransGen DelaunayFlip`-reachable from `s₀` with its `χ`, `B`, `A`, cone angles and `P ≤ P(s₀)`; for `AngleSum τ ≥ 0`: `θ_k + θ_l ≤ π + τ`, for `τ = 0`: `IsDelaunay` | `angleSum_not_fails_iff`, `IsMetric.delaunayFlippable_of_fails`, `IsMetric.convexAt_of_fails`, `fails_flip_iff_of_far`, `queueInv_pass`, `queueInv_flip`, `loop_reach`, `loop_acc`, `loop_acc'` (unconditional, `Surface/Finite.lean`), `loop_result`, `isDelaunay_of_angleSum_zero`, `angleSum_le_of_not_fails` |
 
-Delaunay triangulations of a planar point set (`DdgProofs/Delaunay/Planar{Basic,Flip,Termination,Lemma,Bridge,Uniqueness,FlipCount}.lean`,
+Delaunay triangulations of a planar point set (`lean/ddg/DDG/Delaunay/Planar/{Basic,Flip,Termination,Lemma,Uniqueness,FlipCount}.lean`, `lean/ddg/DDG/Delaunay/PlanarBridge.lean`,
 `namespace DDG.Delaunay.Planar`; written for extraction: Mathlib plus `sda`, `sqDist2` of
-`Bff/Quality.lean` and the area of a triangle of `TriangleIntegral/Basic.lean`, layer 1 only in the
+`lean/ddg/DDG/Geometry/Plane.lean` and the area of a triangle of `lean/ddg/DDG/FEM/TriangleIntegral.lean`, layer 1 only in the
 bridge). Points are `ℝ × ℝ`; `inCircle a b c d = Σ_cyc \|da\|² sda(d,b,c)`;
 `InCircumcircle a b c d :⟺ sda(a,b,c)·inCircle a b c d > 0`; `circleLift a b c p =
 inCircle a b c p / sda(a,b,c)` (minus the power of `p`); `IsTri t`: `t = {a,b,c}`, `sda a b c ≠ 0`;
@@ -508,7 +485,7 @@ corner of `t`; `flip T i j k l` replaces `{i,j,k}`, `{i,j,l}` by `{i,k,l}`, `{j,
 `DelaunayFlip T T'`: `{i,j,k}, {i,j,l} ∈ T`, `k ≠ l`, `InCircumcircle i j k l`, `T' = flip T i j k l`;
 `IsLocallyDelaunay T`: no such `i j k l`; `IsDelaunay S T`: `¬ InCircumcircle a b c p` for all
 `{a,b,c} ∈ T`, `p ∈ S`. The existence of a first triangulation of `S` is a hypothesis in
-`PlanarLemma.lean` and proved in `Planar{Insertion,Existence}.lean`.
+`Lemma.lean` and proved in `Planar{Insertion,Existence}.lean`.
 
 | id | exact statement | theorems |
 |---|---|---|
@@ -655,7 +632,7 @@ Cited for the RC paper (`CITED.md`): `rc-exponent-range`, `rc-differential-order
 Gillespie, Sharp, Crane, ACM TOG 40(6), 2021 ("the IC paper"); contract
 `crates/ddg-integer-coords/SPEC.md` §9. Integer formulas are the oracle's definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`, namespace `Ddg.IntegerCoords`); the face model
-and the rest live in `namespace DdgProofs.IntegerCoords`. Design and how tier C extends it:
+and the rest live in `namespace DDG.NormalCoords` (`lean/ddg/DDG/NormalCoords/`). Design and how tier C extends it:
 `lean/ddg/DDG/NormalCoords/DESIGN.md`. A face has sides `k` from corner `k` to `k + 1`, crossings
 numbered from corner `k`; corner `k` is opposite side `k + 1`.
 
@@ -687,7 +664,7 @@ numbered from corner `k`; corner `k` is opposite side `k + 1`.
 | `ic-recover-barycentric` | for an affine change `A` of barycentric coordinates and any `ξ` solving Eq. 15, Eq. 16 gives `A v`; `Σ ξ = 1`. | `recover_eq`, `recover_sum_xi`, `changeCoords_sum` |
 | `ic-tangent-length` | Eq. 5 (`‖w‖² = −Σ ℓ² w w` for `Σ w = 0`), the restatement of `cut-barycentric-length`; the face-split lengths. | `tangent_length_sq`, `split_length` |
 | `ic-transfer-normal-equations` | for symmetric PSD `M`, `g` minimizes Eq. 13 ⟺ Eq. 14 holds; unique if `P₀ᵀMP₀` is PD. | `transfer_minimizer_iff`, `transfer_normal_unique`, `transfer_energy_add` |
-| `ic-transfer-mass-identity` | the piece mass formula: the whole triangle gives `M₀/Area`, additive under splits and fans (as an integral over pieces that tile the input triangle: `ic-transfer-mass-integral`, `DDG/FEM/Tiling.lean`). | `pieceMass_one`, `pieceMass_split`, `pieceMass_split_edge`, `pieceMass_fan_apex` |
+| `ic-transfer-mass-identity` | the piece mass formula: the whole triangle gives `M₀/Area`, additive under splits and fans (as an integral over pieces that tile the input triangle: `ic-transfer-mass-integral`, `lean/ddg/DDG/FEM/Tiling.lean`). | `pieceMass_one`, `pieceMass_split`, `pieceMass_split_edge`, `pieceMass_fan_apex` |
 
 ### Intrinsic Simplification (`crates/ddg-intrinsic-simplification`)
 
@@ -733,7 +710,7 @@ bijections fixing the corners (the theorems hold for any positive weights). (3) 
 al. define the anisotropic and area distortion from the eigenvalues `γ = σ²` of the metric tensor
 (`γ_max/γ_min`, `γ_max γ_min`); SPEC §10.3 uses `σ₁/σ₂`, `log(σ₁σ₂)`.
 
-### Integrals over a triangle (`DdgProofs/TriangleIntegral/`)
+### Integrals over a triangle (`lean/ddg/DDG/FEM/`)
 
 A triangle is `p : Fin 3 → ℝ × ℝ` with `D = sda p₀ p₁ p₂ ≠ 0` (either orientation), the set
 `triangle p` (the image of `{s, t ≥ 0, s + t ≤ 1}` under `(s, t) ↦ p₀ + s(p₁ − p₀) + t(p₂ − p₀)`,
@@ -759,7 +736,7 @@ lengths. The definitions are this package's own.
 | `app-vector-beta-exp` | `B(p,m,Ω) = ∫₀¹ s^p(1−s)^m e^{iΩs} ds` (`betaExp`): `∫_T λ₀^{e₀}λ₁^{e₁}λ₂^{e₂}e^{iΩλ_c} = 2A q!r!/(q+r+1)! · B(e_c, q+r+1, Ω)`; series `B = Σ_k t_k`, `t_k = (iΩ)^k/k! · (p+k)!m!/(p+k+m+1)!`, `t_0 = p!m!/(p+m+1)!`, `t_{k+1} = t_k · iΩ(p+k+1)/((k+1)(p+k+m+2))`, `\|t_{k+1}\| ≤ (\|Ω\|/(k+1))\|t_k\|`, and for `ρ = \|Ω\|/(K+1) < 1`: `\|B − Σ_{k≤K} t_k\| ≤ \|t_K\| ρ/(1−ρ)`; for `Ω ≠ 0`, `K_k = ∫₀¹ s^k e^{iΩs}`: `K_0 = (e^{iΩ}−1)/(iΩ)`, `K_{k+1} = (e^{iΩ} − (k+1)K_k)/(iΩ)`, `B = Σ_{l≤m} (−1)^l C(m,l) K_{p+l}`, `C(m,l+1) = C(m,l)(m−l)/(l+1)` (`beta_exp` of `knoeppel.rs`). | `integral_bary_monomial_cis`, `hasSum_betaExp`, `betaExpTerm_zero`, `betaExpTerm_succ`, `norm_betaExpTerm_succ_le`, `norm_tail_betaExp_le`, `expMoment_zero`, `expMoment_succ`, `betaExp_eq_sum_expMoment`, `choose_succ_eq` |
 | `app-amr-edge-flux` | Side `k` from `p_k` to `p_{k+1}`, `o = k+2`, `ℓν = sign(D)(e₂, −e₁)` (`sideNormal`; `⊥ e`, length `ℓ`, `ℓν·(p_o − p_k) = −\|D\|`): `∇u·ℓν = cot θ_{k+1}(u_k − u_o) + cot θ_k(u_{k+1} − u_o)` for the interpolant `u` (gradient from `fderiv`); with face lengths `l_c = \|p_cp_{c+1}\|`, `cornerCot(l_{c+1}, l_c, l_{c+2}) = cot θ_c` (`side_flux` of `amr.rs`); twin side of a face of the same orientation: `ℓν′ = −ℓν`, so `flux + flux′ = (∇u_T − ∇u_{T′})·ℓν_T`. | `dot_sideNormal_side`, `dot_sideNormal_self`, `dot_sideNormal_opposite`, `dot_grad_sideNormal`, `cornerCot_faceLen`, `side_flux_eq`, `sideNormal_twin`, `side_flux_add_twin` |
 
-### Oriented meshes (`DDG/Mesh/Orientation.lean`)
+### Oriented meshes (`lean/ddg/DDG/Mesh/Orientation.lean`)
 
 The corners `a, b, c` of a `TriMesh` face give its halfedges `(f, k)`: corner `k` → corner `k+1`
 (the Rust numbering `3f + k`). `TriMesh.Oriented`: no directed edge is traversed by two
@@ -781,7 +758,7 @@ twin (the surface on the left, as `hilbert_transform` walks the boundary).
 
 Sections A and B below index the theorems about the canonical problem and the operators. The
 theorems about the cone solver (`DdgProofs/OptimalCones/Solver.lean`), about Boundary First Flattening
-(`DdgProofs/Bff/*.lean`) and about the cut flow (`DdgProofs/Cuts/*.lean`) are indexed by the
+(`lean/ddg/DDG/Conformal/*.lean`) and about the cut flow (`DdgProofs/Cuts/*.lean`) are indexed by the
 three id tables just above. The first two groups are about this package's own definitions, which
 transcribe the Rust expressions where the statement says "as the code evaluates it"; the cut-flow
 theorems are about the oracle's definitions wherever one exists (see below).
@@ -847,7 +824,7 @@ Necessity on closed meshes is **not** proved (see `CITED.md`, `optimality-system
 | — | `Site.fenchel_young`, `Site.exists_conj_eq`, `Site.Stationary.fenchel_young_eq` | Fenchel–Young for the per-vertex cost, attainment, and equality at a stationary pair. | Prop. A.3 | own |
 | `duality-gap-certificate` | `Ddg.Problem.objective_le_add_gap` | The certificate for the oracle's problem (finite bounds: every `φ` is dual feasible). | — | oracle (dual value: own formula `dualValue`) |
 
-### A.4′ The certificate for inexact data (`DDG/OptimalCones/Certificate.lean`)
+### A.4′ The certificate for inexact data (`lean/ddg/DDG/OptimalCones/Certificate.lean`)
 
 No assumption on `(u, φ, µ)` unless stated. `r = L u − µ + Ω` (`stateResidual`),
 `φ̂ = dualClip φ`, `D(φ) = dualObjectiveOfAdjoint φ`, `G = complementarityGap`,
@@ -916,7 +893,7 @@ Convergence of the iteration is not proved (`CITED.md`, `semismooth-newton-conve
 | `scale-invariance` | `cornerAngle_smul`, `cornerCot_smul`, `triArea_smul` | Angles and cotangents are scale invariant; areas scale by `s²`. | Sec. 6.2 | own |
 | `scale-invariance` | `TriMesh.laplacian_scale`, `TriMesh.mass_scale`, `TriMesh.angleDefect_scale` | `L` and `Ω` are scale invariant; masses scale by `s²`. | Sec. 6.2 | own |
 
-### A.8 Connected components (`DDG/OptimalCones/Components.lean`)
+### A.8 Connected components (`lean/ddg/DDG/OptimalCones/Components.lean`)
 
 `P.sum Q`: block diagonal `L = fromBlocks P.L 0 0 Q.L`, `Ω, m, wE, site` by `Sum.elim`, `λ = P.lam`;
 every theorem that involves `λ` assumes `P.lam = Q.lam`. Several components: iterate.
@@ -1044,8 +1021,8 @@ closed segment has a point on the x-axis), `layoutPoint` (`b₁v₁ + b₂v₂`)
 of the three weights), `rot`, `nsq`, `toDual`, `circumVec`, `odtEnergy`, `odtGradient`,
 `starArea`, `triGrad`, `forceF` (the vehicle of Eq. 4.5: a quarter turn, the squared norm, a
 vector as a linear form, `|T| c_T` as a polynomial, the energy and the gradient of one star, one
-term of the gradient and the telescoping force of Chen and Holst's proof); plane points, `dist2` and `sda` are those of `DDG/Geometry/Plane.lean`,
-`IsTriangle`, `triArea`, `cornerAngle`, `cornerCot` those of `DDG/Geometry/Triangle.lean`.
+term of the gradient and the telescoping force of Chen and Holst's proof); plane points, `dist2` and `sda` are those of `lean/ddg/DDG/Geometry/Plane.lean`,
+`IsTriangle`, `triArea`, `cornerAngle`, `cornerCot` those of `lean/ddg/DDG/Geometry/Triangle.lean`.
 
 Own definitions of this package for the default stages and `N` regions (what SPEC states in
 words or as a sum over an index set, for which the oracle has only the scalar pieces):
@@ -1107,10 +1084,10 @@ Everything else (all of `ConeProblem`, `Site`, `TriMesh`, the dual objective, Ga
 combinatorics, the Yamabe linearization) is about this package's own definitions.
 
 The Rust code is not connected to Lean mechanically. For `crates/ddg-core`,
-`DDG/Geometry/Stable.lean` transcribes the expressions the Rust functions evaluate
+`lean/ddg/DDG/Geometry/Stable.lean` transcribes the expressions the Rust functions evaluate
 (`kahanArea`, `kahanCornerAngle`, `kahanCornerCot`, `angleDefectField`, `geodesicCurvatureField`)
-and proves them equal to the math-level quantities; `DDG/Geometry/Plane.lean` and
-`DDG/Conformal/BoundaryCurve.lean` do the same for the per-triangle and per-loop expressions of
+and proves them equal to the math-level quantities; `lean/ddg/DDG/Geometry/Plane.lean` and
+`lean/ddg/DDG/Conformal/BoundaryCurve.lean` do the same for the per-triangle and per-loop expressions of
 `crates/ddg-bff`, and `DdgProofs/OptimalCones/Solver.lean` transcribes the rows of the cone solver's linear
 systems. That a transcription matches the Rust source is checked by reading, and by the
 differential tests against the oracle.
@@ -1214,7 +1191,7 @@ oracle's definitions for it; 46–51 the RC paper and its SPEC; 52–56 the IC p
     solves `A b = −Uᵀa`, i.e. `(A b)_j = ½(a_i − a_k)`. That right-hand side, `½(a_{j−1} − a_{j+1})`
     with the surface on the left, is what `hilbert_transform` in `crates/ddg-bff` returns, and it
     is the gradient of the counter-clockwise area of the boundary polygon with respect to `b_j`
-    (proved in `Bff/Curve.lean`; the paper's `aᵀUb` of Eq. 16 is minus that area). Alg. 6
+    (proved in `lean/ddg/DDG/Conformal/BoundaryCurve.lean`; the paper's `aᵀUb` of Eq. 16 is minus that area). Alg. 6
     (lines 2–3) instead writes `h_i ← ½(a_{i+1} − a_{i−1})` and solves `A b = h`, which is the
     same system only for the opposite direction of the walk. Separately, Sec. 4.5.1 prints
     `φ_p := Σ_{i=1}^{p−1} k̃_i` for the direction of the edge leaving vertex `p`, which omits the
@@ -1519,7 +1496,7 @@ oracle's definitions for it; 46–51 the RC paper and its SPEC; 52–56 the IC p
 - `IsCutOf` describes a cut by its result (same faces, vertex copies); that `cut_mesh` produces
   such a mesh, and that the copies are the sectors around each vertex, is by reading the code.
 - `atan2 y x` is defined as the argument of the complex number `x + iy`; the Kahan arrangements of
-  `DDG/Geometry/Stable.lean` are proved equal to the plain formulas as real numbers, which says
+  `lean/ddg/DDG/Geometry/Stable.lean` are proved equal to the plain formulas as real numbers, which says
   nothing about their (better) rounding behaviour.
 - **Division by zero.** In Lean `x/0 = 0` for real numbers, while IEEE arithmetic gives `±∞` or
   NaN. A statement about a quotient that carries no hypothesis on its denominator (for example
@@ -1596,3 +1573,194 @@ oracle's definitions for it; 46–51 the RC paper and its SPEC; 52–56 the IC p
   `max_motion · h_c` changes nothing in exact arithmetic (`localLimit_twoCase_eq`). The descent
   statements are first variations in the model `dE = Σ g σ ℓ`; nothing is proved about the
   energy after a step.
+
+## Where the theorem of each formula id lives
+
+How the Rust code is tied to the statements: a Rust function that implements a formula carries
+`[formula: <id>]` in its doc comment; the Lean theorem that proves it carries the same tag in its docstring,
+and an id that is cited rather than proved is a heading of [`CITED.md`](CITED.md). The tags are the links;
+the ids are stable. `scripts/check-formulas.sh` (from `lean/proofs`: `../../scripts/check-formulas.sh`)
+checks the three-way correspondence, that every tag is followed by a declaration, and that there is no
+`sorry`/`axiom`; with `--build` it builds `lean/ddg` and `lean/proofs` and runs the audit of the main theorems,
+with `--audit-all` also the axioms of every declaration. At the last run: ids 487 (proved 381, cited 106, missing
+0), used by Rust 398, audited 1659 main theorems, 13144 declarations checked.
+
+The index below lists, for each file, the ids of the theorems proved in it (381 distinct proved ids; an id can be
+proved in more than one file, for example the library's theorem and the app's evaluation of it). It is generated from the tags:
+`grep -o '\[formula: [^]]*\]' <file>`.
+
+| File | Formula ids |
+|---|---|
+| `lean/ddg/DDG/Conformal/BoundaryCurve.lean` | `bff-dual-boundary-length`, `bff-close-exterior-angles`, `bff-uniformization-angles`, `bff-boundary-tangents`, `bff-boundary-curve`, `bff-closing-lengths`, `bff-hilbert-transform` |
+| `lean/ddg/DDG/Conformal/CETM/Curvature.lean` | `iem-flatten-conserves-curvature`, `iem-redistribution-weights` |
+| `lean/ddg/DDG/Conformal/CETM/Flatten.lean` | `iem-flatten-monotone`, `iem-flatten-newton` |
+| `lean/ddg/DDG/Conformal/CETM/Interpolation.lean` | `iem-projective-interpolation` |
+| `lean/ddg/DDG/Conformal/CETM/Monotone.lean` | `iem-flatten-monotone` |
+| `lean/ddg/DDG/Conformal/Cherrier.lean` | `bff-exterior-angle-sum`, `bff-cherrier-boundary-curvature`, `bff-hilbert-transform` |
+| `lean/ddg/DDG/Conformal/ConformalEnergy.lean` | `bff-hilbert-transform`, `bff-conformal-energy-triangle`, `bff-conformal-energy` |
+| `lean/ddg/DDG/Conformal/Cut.lean` | `bff-cone-angle-sum`, `cut-euler-characteristic` |
+| `lean/ddg/DDG/Conformal/Distortion.lean` | `quasi-conformal-error`, `face-log-scale-factor` |
+| `lean/ddg/DDG/Conformal/Sphere.lean` | `stereographic-projection`, `stereographic-conformal`, `mobius-sphere-inversion`, `mobius-centering-jacobian` |
+| `lean/ddg/DDG/Conformal/Yamabe.lean` | `discrete-yamabe-linearization` |
+| `lean/ddg/DDG/Delaunay/BoundaryFan.lean` | `complex-boundary-fan` |
+| `lean/ddg/DDG/Delaunay/FlipQueue.lean` | `it-delaunay-flip-loop` |
+| `lean/ddg/DDG/Delaunay/FromTriMesh.lean` | `it-complex-from-mesh`, `euler-characteristic` |
+| `lean/ddg/DDG/Delaunay/Local.lean` | `it-cotan-weight`, `it-delaunay-condition`, `it-flip-length`, `it-angle-normalization` |
+| `lean/ddg/DDG/Delaunay/Metric.lean` | `gauss-bonnet`, `it-complex-euler`, `it-flip-length`, `it-angle-normalization` |
+| `lean/ddg/DDG/Delaunay/ODT.lean` | `it-odt-update`, `it-odt-interpolation-error`, `it-odt-energy` |
+| `lean/ddg/DDG/Delaunay/Planar/Encroachment.lean` | `it-encroachment-angle` |
+| `lean/ddg/DDG/Delaunay/Planar/Existence.lean` | `planar-triangulation-existence`, `planar-delaunay-existence` |
+| `lean/ddg/DDG/Delaunay/Planar/Flip.lean` | `planar-lawson-flip` |
+| `lean/ddg/DDG/Delaunay/Planar/FlipCount.lean` | `planar-flip-count` |
+| `lean/ddg/DDG/Delaunay/Planar/Insertion.lean` | `planar-triangulation-insertion` |
+| `lean/ddg/DDG/Delaunay/Planar/Lemma.lean` | `delaunay-lemma`, `planar-flip-termination` |
+| `lean/ddg/DDG/Delaunay/Planar/Termination.lean` | `planar-flip-potential`, `planar-flip-termination` |
+| `lean/ddg/DDG/Delaunay/Planar/Uniqueness.lean` | `planar-delaunay-uniqueness` |
+| `lean/ddg/DDG/Delaunay/PlanarBridge.lean` | `planar-local-delaunay-bridge` |
+| `lean/ddg/DDG/Delaunay/Potential.lean` | `it-delaunay-potential` |
+| `lean/ddg/DDG/Delaunay/Rippa.lean` | `it-rippa-diamond` |
+| `lean/ddg/DDG/Delaunay/Surface/Finite.lean` | `it-delaunay-flip-termination`, `it-delaunay-existence-uniqueness`, `it-delaunay-flip-algorithm`, `it-delaunay-flip-loop` |
+| `lean/ddg/DDG/Delaunay/Termination.lean` | `it-delaunay-self-glued`, `it-delaunay-potential`, `gauss-bonnet`, `it-delaunay-flip-algorithm` |
+| `lean/ddg/DDG/FEM/BetaExp.lean` | `app-vector-beta-exp` |
+| `lean/ddg/DDG/FEM/Elements.lean` | `app-fem-galerkin-mass`, `cotan-fem-stiffness`, `cotan-formula`, `cut-weighted-fem-stiffness`, `fem-area-coordinate-rule`, `bff-conformal-energy-triangle`, `app-amr-element-norms` |
+| `lean/ddg/DDG/FEM/Flux.lean` | `app-amr-edge-flux` |
+| `lean/ddg/DDG/FEM/Heat.lean` | `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-mass`, `app-fem-midpoint-subdivision` |
+| `lean/ddg/DDG/FEM/Tiling.lean` | `ic-transfer-mass-integral` |
+| `lean/ddg/DDG/FEM/Transfer.lean` | `ic-transfer-normal-equations`, `ic-transfer-mass-identity` |
+| `lean/ddg/DDG/Geometry/Advancement.lean` | `rc-ccd-advancement` |
+| `lean/ddg/DDG/Geometry/AdvancementPairs.lean` | `rs-ccd-advancement` |
+| `lean/ddg/DDG/Geometry/Barycentric.lean` | `cut-barycentric-length`, `cut-edge-crossing`, `cut-subtriangle-area` |
+| `lean/ddg/DDG/Geometry/ClosestPoints.lean` | `rc-closest-points`, `pat-truth-closest-point` |
+| `lean/ddg/DDG/Geometry/Plane.lean` | `signed-area-2d`, `quasi-conformal-error` |
+| `lean/ddg/DDG/Geometry/RigidInvariance.lean` | `dev-gradient-invariance` |
+| `lean/ddg/DDG/Geometry/SegmentCrossing.lean` | `segment-proper-crossing` |
+| `lean/ddg/DDG/Geometry/SignedAngle.lean` | `signed-angle-2d` |
+| `lean/ddg/DDG/Geometry/SimilarityFit.lean` | `similarity-fit` |
+| `lean/ddg/DDG/Geometry/Stable.lean` | `triangle-area`, `corner-angle`, `corner-cot` |
+| `lean/ddg/DDG/Geometry/Triangle.lean` | `corner-angle`, `triangle-area`, `corner-cot`, `triangle-angle-sum`, `scale-invariance`, `edge-length-euclidean` |
+| `lean/ddg/DDG/Geometry/Vec3.lean` | `rc-edge-quantities` |
+| `lean/ddg/DDG/Intrinsic/Barycentric.lean` | `it-barycentric-coordinates`, `it-point-distances`, `it-circumcenter` |
+| `lean/ddg/DDG/Intrinsic/Diamond.lean` | `it-flip-length`, `it-unfold-diamond`, `it-unfold-apex`, `it-flip-convexity` |
+| `lean/ddg/DDG/Intrinsic/FlatVertexRemoval.lean` | `iem-degree-three-barycentric`, `iem-boundary-merge`, `iem-flip-to-degree-three` |
+| `lean/ddg/DDG/Intrinsic/FlipAngles.lean` | `it-angle-normalization` |
+| `lean/ddg/DDG/Intrinsic/Mollification.lean` | `intrinsic-mollification` |
+| `lean/ddg/DDG/Intrinsic/Move.lean` | `it-move-length`, `it-move-area`, `it-circumcenter-vector` |
+| `lean/ddg/DDG/Intrinsic/Signpost.lean` | `it-angle-normalization`, `it-signpost-update` |
+| `lean/ddg/DDG/Intrinsic/Strip.lean` | `ic-strip-intersection` |
+| `lean/ddg/DDG/Intrinsic/Trace.lean` | `it-ray-edge-intersection`, `it-unfold-apex` |
+| `lean/ddg/DDG/Intrinsic/VertexRemoval.lean` | `ic-vertex-removal` |
+| `lean/ddg/DDG/Laplace/Cotan.lean` | `cotan-laplacian-psd`, `cotan-formula`, `cotan-laplacian`, `cotan-laplacian-kernel`, `cotan-laplacian-interior-posdef`, `lumped-mass`, `scale-invariance`, `closed-mesh-cone-sum` |
+| `lean/ddg/DDG/Laplace/Dirichlet.lean` | `cut-yamabe-system`, `cut-harmonic-extension` |
+| `lean/ddg/DDG/Laplace/Kernel.lean` | `gauss-bonnet-adjoint-shift` |
+| `lean/ddg/DDG/Laplace/Poisson.lean` | `bff-harmonic-extension`, `bff-dirichlet-to-neumann`, `bff-neumann-to-dirichlet` |
+| `lean/ddg/DDG/Laplace/Weighted.lean` | `cut-weighted-laplacian` |
+| `lean/ddg/DDG/Mesh/GaussBonnet.lean` | `scale-invariance`, `gauss-bonnet`, `angle-defect`, `boundary-geodesic-curvature`, `euler-characteristic` |
+| `lean/ddg/DDG/Mesh/Gluing.lean` | `it-complex-euler` |
+| `lean/ddg/DDG/Mesh/GluingFlip.lean` | `it-complex-flip`, `it-complex-euler` |
+| `lean/ddg/DDG/NormalCoords/Chords.lean` | `ic-chord-interleave`, `ic-cevians-cross` |
+| `lean/ddg/DDG/NormalCoords/Complex/Basic.lean` | `ic-face-decoding`, `ic-trace-step` |
+| `lean/ddg/DDG/NormalCoords/Complex/Extract.lean` | `ic-extract-intrinsic-edge` |
+| `lean/ddg/DDG/NormalCoords/Complex/Flip.lean` | `ic-flip-normal`, `ic-roundabout-update` |
+| `lean/ddg/DDG/NormalCoords/Complex/Labels.lean` | `ic-emanating`, `ic-identify-edge` |
+| `lean/ddg/DDG/NormalCoords/Complex/Merge.lean` | `ic-merge-edge-normal` |
+| `lean/ddg/DDG/NormalCoords/Complex/QuadCount.lean` | `ic-flip-normal` |
+| `lean/ddg/DDG/NormalCoords/Complex/QuadFlip.lean` | `ic-flip-normal` |
+| `lean/ddg/DDG/NormalCoords/Complex/SplitAtCrossing.lean` | `ic-split-at-crossing` |
+| `lean/ddg/DDG/NormalCoords/Complex/Trace.lean` | `ic-trace-terminates` |
+| `lean/ddg/DDG/NormalCoords/FaceModel.lean` | `ic-face-decoding`, `ic-corner-coordinates`, `ic-emanating`, `ic-cevians-cross`, `ic-face-validity`, `ic-trace-step` |
+| `lean/ddg/DDG/NormalCoords/FaceSplit.lean` | `ic-face-split-normal` |
+| `lean/ddg/DDG/NormalCoords/Flip.lean` | `ic-flip-normal`, `ic-flip-involution` |
+| `lean/ddg/DDG/NormalCoords/Formulas.lean` | `ic-normal-sign`, `ic-emanating`, `ic-corner-coordinates`, `ic-face-validity`, `ic-flip-normal`, `ic-reverse-crossing`, `ic-split-edge-normal` |
+| `lean/ddg/DDG/NormalCoords/Frames/Angle.lean` | `ic-input-aligned-frame` |
+| `lean/ddg/DDG/NormalCoords/Frames/Input.lean` | `ic-input-aligned-frame` |
+| `lean/ddg/DDG/NormalCoords/Frames/Inserted.lean` | `ic-input-aligned-frame` |
+| `lean/ddg/DDG/NormalCoords/Frames/Wedge.lean` | `ic-input-aligned-frame` |
+| `lean/ddg/DDG/NormalCoords/Recover.lean` | `ic-recover-barycentric`, `ic-tangent-length` |
+| `lean/ddg/DDG/NormalCoords/SplitAtCrossing.lean` | `ic-split-at-crossing`, `ic-split-crossed-edge` |
+| `lean/ddg/DDG/NormalCoords/SplitEdge.lean` | `ic-split-crossed-edge` |
+| `lean/ddg/DDG/OptimalCones/BoundaryProblem.lean` | `boundary-optimality-system` |
+| `lean/ddg/DDG/OptimalCones/Certificate.lean` | `duality-gap-certificate`, `duality-gap-inexact` |
+| `lean/ddg/DDG/OptimalCones/Closed.lean` | `closed-mesh-cone-sum`, `closed-mesh-optimal-constant`, `lambda-area-normalization` |
+| `lean/ddg/DDG/OptimalCones/Components.lean` | `component-lambda-rescaling`, `component-separation`, `closed-mesh-cone-sum` |
+| `lean/ddg/DDG/OptimalCones/Duality.lean` | `duality-gap-certificate` |
+| `lean/ddg/DDG/OptimalCones/Newton.lean` | `soft-threshold-active-sets`, `newton-stopping-rule`, `regularized-cone-update`, `regularized-optimality-sufficient`, `regularized-suboptimality` |
+| `lean/ddg/DDG/OptimalCones/Optimality.lean` | `optimality-system-sufficient`, `least-distortion-guarantee`, `minimizer-unique`, `optimality-system-necessary` |
+| `lean/ddg/DDG/OptimalCones/Problem.lean` | `cone-fixed-point-bounded` |
+| `lean/ddg/DDG/Optimization/LBFGS.lean` | `rs-lbfgs-two-loop` |
+| `lean/ddg/DDG/Optimization/SoftThreshold.lean` | `abs-subdifferential-bounded`, `regularized-cone-update`, `cone-fixed-point-bounded`, `soft-threshold-fixed-point` |
+| `lean/ddg/DDG/Optimization/Wasserstein.lean` | `iem-memoryless-cost` |
+| `lean/ddg/DDG/Optimization/Wolfe.lean` | `dev-weak-wolfe-curvature` |
+| `lean/ddg/DDG/Repulsive/Curves/BarnesHutAdjoint.lean` | `rc-bh-adjoint`, `rc-bh-adjoint-shift` |
+| `lean/ddg/DDG/Repulsive/Curves/Constraints.lean` | `rc-constraint-edge-length`, `rc-constraint-total-length`, `rc-constraint-barycenter`, `rc-constraint-point`, `rc-constraint-surface`, `rc-constraint-tangent`, `rc-tangent-frame` |
+| `lean/ddg/DDG/Repulsive/Curves/DualLengths.lean` | `rc-dual-length` |
+| `lean/ddg/DDG/Repulsive/Curves/Energy.lean` | `rc-discrete-kernel`, `rc-energy`, `rc-energy-scaling`, `rc-energy-differential`, `rc-gradient-identities` |
+| `lean/ddg/DDG/Repulsive/Curves/Gram.lean` | `rc-gram-psd-kernel`, `rc-derivative-operator`, `rc-high-order-gram`, `rc-low-order-gram`, `rc-kernel-matrix-form`, `rc-gram-scaling`, `rc-classic-metrics` |
+| `lean/ddg/DDG/Repulsive/Curves/Hierarchy.lean` | `rc-bvh-lumped`, `rc-bh-differential`, `rc-bct-lowrank` |
+| `lean/ddg/DDG/Repulsive/Curves/Kernel.lean` | `rc-kernel`, `rc-kernel-matrix-form` |
+| `lean/ddg/DDG/Repulsive/Curves/KernelGradient.lean` | `rc-kernel-gradient` |
+| `lean/ddg/DDG/Repulsive/Curves/Multigrid.lean` | `rc-coarsen`, `rc-prolongation` |
+| `lean/ddg/DDG/Repulsive/Curves/Penalties.lean` | `rc-penalty-total-length`, `rc-penalty-length-difference`, `rc-penalty-hencky`, `rc-penalty-field`, `rc-penalty-surface` |
+| `lean/ddg/DDG/Repulsive/Curves/Saddle.lean` | `rc-saddle-gradient`, `rc-descent-direction`, `rc-chord-projection`, `rc-projector`, `rc-projected-system`, `rc-projection-transform`, `rc-mean-free-direction`, `rc-gradient-scaling` |
+| `lean/ddg/DDG/Repulsive/Surfaces/BarnesHut.lean` | `rs-bh-energy`, `rs-bh-aggregate-adjoint`, `rs-box-distance` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Basic.lean` | `rs-exponents`, `rs-face-quantities` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Constraints.lean` | `rs-area-gradient`, `rs-volume-gradient`, `rs-barycenter` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Energy.lean` | `rs-energy`, `rs-energy-scaling`, `rs-energy-gradient`, `rs-gradient-identities` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Geometry.lean` | `rs-face-area-gradient`, `rs-face-normal-variation` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Kernel.lean` | `rs-kernel`, `rs-kernel-gradient` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Metric.lean` | `rs-df-gradient`, `rs-sobolev-forms`, `rs-low-order-symmetrisation`, `rs-kernel-matrix-form`, `rs-hierarchical-null-space`, `rs-projector-average` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Penalties.lean` | `rs-penalties`, `rs-willmore` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Precond.lean` | `rs-preconditioner-order`, `rs-fractional-preconditioner` |
+| `lean/ddg/DDG/Repulsive/Surfaces/Saddle.lean` | `rs-schur-direction`, `rs-schur-correction`, `rs-nested-saddle` |
+| `lean/ddg/DDG/SDF/Blend.lean` | `pat-blend-shift`, `pat-blend-weight-range`, `pat-blend-convex`, `pat-blend-gradient`, `pat-blend-gradient-exact`, `pat-blend-laplacian` |
+| `lean/ddg/DDG/SDF/Circle2d.lean` | `pat2d-circle-fit`, `pat2d-circle-sdf`, `pat2d-blend` |
+| `lean/ddg/DDG/SDF/Features.lean` | `pat-median-scale`, `pat-local-frame`, `pat-features`, `pat-feature-invariance` |
+| `lean/ddg/DDG/SDF/MongeFit.lean` | `pat-fundamental-forms`, `pat-surface-normal`, `pat-mean-gauss`, `pat-principal-pair`, `pat-curvature-rayleigh`, `pat-principal-directions`, `pat-torus-sign`, `pat-torus-radii`, `pat-torus-frame`, `pat-output-scaling` |
+| `lean/ddg/DDG/SDF/Operations.lean` | `pat-orientation-metric`, `pat-mc-interpolation`, `pat-boolean`, `pat-revolution`, `pat-extrusion`, `pat-extrusion-gradient`, `pat-render-step` |
+| `lean/ddg/DDG/SDF/Torus.lean` | `pat-torus-sdf`, `pat-torus-sdf-gradient`, `pat-torus-sdf-stable`, `pat-torus-contact`, `pat-fit-contact`, `pat-torus-sdf-laplacian` |
+| `lean/ddg/DDG/VectorFields/Holonomy.lean` | `app-vector-face-holonomy`, `app-vector-fd-connection-laplacian`, `app-amr-map-distortion` |
+| `lean/ddg/DDG/VectorFields/PoincareHopf.lean` | `app-vector-singularity-index` |
+| `lean/proofs/DdgProofs/Core/Fields.lean` | `gauss-bonnet`, `angle-defect`, `boundary-geodesic-curvature`, `cotan-laplacian` |
+| `lean/proofs/DdgProofs/Cuts/Analytic.lean` | `cut-disk-radial-solution`, `cut-gradient-dirichlet`, `cut-speed`, `cut-gradient-scaled`, `cut-gradient-pointwise`, `cut-sphere-cap-solution`, `cut-curve-shortening-circle` |
+| `lean/proofs/DdgProofs/Cuts/Crossing.lean` | `cut-edge-crossing` |
+| `lean/proofs/DdgProofs/Cuts/Curvature.lean` | `cut-face-curvature`, `cut-face-curvature-sum` |
+| `lean/proofs/DdgProofs/Cuts/Dirichlet.lean` | `cut-yamabe-system`, `cut-normal-derivative`, `cut-dirichlet-energy`, `cut-gradient-dirichlet`, `cut-gradient-scaled`, `cut-gradient-pointwise`, `cut-adjoint-scaled`, `cut-adjoint-pointwise` |
+| `lean/proofs/DdgProofs/Cuts/OnCut.lean` | `cut-extension-local`, `cut-gradient-norm`, `cut-length-step-on-cut`, `cut-step-cap` |
+| `lean/proofs/DdgProofs/Cuts/Quantile.lean` | `cut-weighted-quantile`, `cut-roughening-rate`, `cut-step-cap`, `cut-step-local` |
+| `lean/proofs/DdgProofs/Cuts/Recovery.lean` | `cut-flux-recovery` |
+| `lean/proofs/DdgProofs/Cuts/Redistance.lean` | `cut-redistance` |
+| `lean/proofs/DdgProofs/Cuts/Regions.lean` | `cut-edge-crossing-regions`, `cut-triple-point`, `cut-region-projection`, `cut-region-extension`, `cut-length-step-regions` |
+| `lean/proofs/DdgProofs/Cuts/Ripple.lean` | `cut-roughening-rate` |
+| `lean/proofs/DdgProofs/Cuts/Step.lean` | `cut-speed`, `cut-explicit-step`, `cut-length-step`, `cut-penalty-step-paper`, `cut-symmetry-projection`, `cut-step-cap`, `cut-feature-size`, `cut-sliver-smoothing` |
+| `lean/proofs/DdgProofs/Cuts/Stop.lean` | `cut-stop-energy`, `cut-run-lowest`, `cut-stop-motion` |
+| `lean/proofs/DdgProofs/Cuts/VertexLimit.lean` | `cut-step-local` |
+| `lean/proofs/DdgProofs/Cuts/WeightedEntries.lean` | `cut-weighted-laplacian` |
+| `lean/proofs/DdgProofs/Developability/Basic.lean` | `dev-face-frame`, `dev-corner-angle`, `dev-area-gradient`, `dev-normal-gradient`, `dev-angle-gradient`, `dev-backprop-face`, `dev-vertex-normal` |
+| `lean/proofs/DdgProofs/Developability/Combinatorial.lean` | `dev-star-bipartitions`, `dev-combinatorial-width`, `dev-combinatorial-gradient`, `dev-combinatorial-max` |
+| `lean/proofs/DdgProofs/Developability/Covariance.lean` | `dev-covariance-matrix`, `dev-eigenvalue-supergradient`, `dev-covariance-gradient`, `dev-angle-weight-retessellation` |
+| `lean/proofs/DdgProofs/Developability/Eig.lean` | `dev-jacobi-rotation` |
+| `lean/proofs/DdgProofs/Developability/Intrinsic.lean` | `dev-log-map`, `dev-log-map-gradient`, `dev-tangent-eigen-derivative` |
+| `lean/proofs/DdgProofs/Developability/MaxCovariance.lean` | `dev-spherical-circumcenter`, `dev-max-covariance-gradient` |
+| `lean/proofs/DdgProofs/Developability/Optimizer.lean` | `dev-lewis-overton-line-search` |
+| `lean/proofs/DdgProofs/Developability/RegularCone.lean` | `dev-regular-cone-values` |
+| `lean/proofs/DdgProofs/Developability/Remesh.lean` | `dev-small-angle-classification` |
+| `lean/proofs/DdgProofs/Developability/Subdivision.lean` | `dev-midpoint-subdivision` |
+| `lean/proofs/DdgProofs/Developability/Width.lean` | `dev-intrinsic-width`, `dev-width-altitude-gradient`, `dev-min-width-gradient` |
+| `lean/proofs/DdgProofs/IntrinsicSimplification/Operators.lean` | `iem-anisotropic-scale`, `iem-galerkin-spd`, `iem-distortion`, `iem-qem-quadric` |
+| `lean/proofs/DdgProofs/IntrinsicSimplification/Oracle.lean` | `iem-flatten-monotone`, `iem-flatten-newton`, `iem-redistribution-weights`, `iem-memoryless-cost`, `iem-center-of-mass-update`, `iem-projective-interpolation` |
+| `lean/proofs/DdgProofs/IntrinsicSimplification/Transport.lean` | `iem-center-of-mass-update`, `iem-transport-rotation`, `iem-vector-interpolation` |
+| `lean/proofs/DdgProofs/IntrinsicSimplification/Wrap.lean` | `iem-wrap` |
+| `lean/proofs/DdgProofs/OptimalCones/ConeFeedback.lean` | `cut-weighted-quantile`, `cone-feedback-mismatch` |
+| `lean/proofs/DdgProofs/OptimalCones/FactorOnce.lean` | `reduced-lasso-problem`, `reduced-optimality-conditions`, `reduced-gram-matrix`, `reduced-sum-constraint-pin` |
+| `lean/proofs/DdgProofs/OptimalCones/Solver.lean` | `saddle-point-newton-system`, `closed-mesh-optimal-constant`, `gauss-bonnet-adjoint-shift`, `newton-stopping-rule`, `regularized-optimality-sufficient`, `regularized-cone-update`, `proximal-fixed-point`, `soft-threshold-active-sets`, `abs-subdifferential-bounded`, `adjoint-constant-interval`, `regularized-dual-objective`, `componentwise-backward-error`, `cone-cluster-frechet-mean`, `closed-mesh-cone-sum` |
+| `lean/proofs/DdgProofs/Oracle/Mesh.lean` | `cotan-laplacian`, `cotan-laplacian-psd`, `angle-defect`, `boundary-geodesic-curvature`, `gauss-bonnet`, `lumped-mass` |
+| `lean/proofs/DdgProofs/Oracle/Problem.lean` | `optimality-system-sufficient`, `minimizer-unique`, `newton-stopping-rule`, `duality-gap-certificate` |
+| `lean/proofs/DdgProofs/Oracle/Regularized.lean` | `newton-stopping-rule`, `regularized-optimality-sufficient` |
+| `lean/proofs/DdgProofs/Oracle/Scalar.lean` | `cone-fixed-point-bounded`, `regularized-cone-update`, `soft-threshold-active-sets`, `corner-angle`, `edge-length-euclidean` |
+| `lean/proofs/DdgProofs/Oracle/Unbounded.lean` | `soft-threshold-active-sets`, `optimality-system-sufficient`, `minimizer-unique`, `duality-gap-certificate`, `regularized-optimality-sufficient`, `newton-stopping-rule` |
+| `lean/proofs/DdgProofs/PointsAsTori/Baselines.lean` | `pat-sspd`, `pat-sspd-gradient`, `pat-shc-gradient`, `pat-shc`, `pat-fwn-expansion` |
+| `lean/proofs/DdgProofs/PointsAsTori/Loss.lean` | `pat-loss` |
+| `lean/proofs/DdgProofs/RepulsiveCurves/NearPair.lean` | `rc-near-h-constant`, `rc-near-inner`, `rc-near-outer`, `rc-near-blend`, `rc-near-differential`, `rc-near-divergence` |
+| `lean/proofs/DdgProofs/RepulsiveCurves/NearPairSecond.lean` | `rc-near-onesided`, `rc-near-gate`, `rc-near-foldgate` |
+| `lean/proofs/DdgProofs/RepulsiveCurves/Schedule.lean` | `rc-length-schedule`, `rc-subdivision-constraints` |
+| `lean/proofs/DdgProofs/RepulsiveSurfaces/Remesh.lean` | `rs-circumcenter`, `rs-smoothing-weights`, `rs-delaunay-test` |
+| `lean/proofs/DdgProofs/RepulsiveSurfaces/Step.lean` | `rs-armijo-reference` |
