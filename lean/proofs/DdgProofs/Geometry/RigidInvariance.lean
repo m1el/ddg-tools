@@ -1,4 +1,4 @@
-import DdgProofs.Developability.Vec
+import Mathlib
 
 /-!
 # Developability: invariances of the energy and the identities of its gradient (SPEC §3)
