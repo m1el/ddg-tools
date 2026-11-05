@@ -6,3 +6,5 @@ import DDG.Intrinsic
 import DDG.VectorFields
 import DDG.FEM
 import DDG.NormalCoords
+import DDG.Delaunay
+import DDG.Conformal

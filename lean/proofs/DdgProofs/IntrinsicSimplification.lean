@@ -1,7 +1,7 @@
-import DdgProofs.IntrinsicSimplification.Flatten
-import DdgProofs.IntrinsicSimplification.Monotone
-import DdgProofs.IntrinsicSimplification.Curvature
-import DdgProofs.IntrinsicSimplification.Interpolation
+import DDG.Conformal.CETM.Flatten
+import DDG.Conformal.CETM.Monotone
+import DDG.Conformal.CETM.Curvature
+import DDG.Conformal.CETM.Interpolation
 import DDG.Intrinsic.FlatVertexRemoval
 import DDG.Optimization.Wasserstein
 import DdgProofs.IntrinsicSimplification.Transport

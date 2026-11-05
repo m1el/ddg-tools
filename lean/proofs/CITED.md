@@ -315,9 +315,9 @@ centering Jacobian. Cited:
   and Springborn, Schröder, Pinkall, *Conformal equivalence of triangle meshes*, ACM TOG 27(3),
   2008, Def. 2.1.
 - **Why not formalized.** It is a definition, the same scaling as `TriMesh.conformalScale` in
-  `DdgProofs/Yamabe.lean` (for which the first-order change of the curvatures is proved,
+  `DDG/Conformal/Yamabe.lean` (for which the first-order change of the curvatures is proved,
   `[formula: discrete-yamabe-linearization]`, `[formula: bff-cherrier-boundary-curvature]`).
-  Proved about the transcription (`DdgProofs/Bff/Curve.lean`): it is positive for positive `ℓ`
+  Proved about the transcription (`DDG/Conformal/BoundaryCurve.lean`): it is positive for positive `ℓ`
   and the identity for `u = 0`.
 - **Does correctness depend on it?** It defines what the flattener aims at. The layout is *not*
   claimed to have these lengths: the boundary lengths are adjusted to close the curve
@@ -782,7 +782,7 @@ an earlier version with another title, were read).
   Delaunay, `isDelaunay_iff_isLocallyDelaunay`; empty circumdisk with the explicit circumcenter,
   `isDelaunay_iff_empty_circumdisk`), and existence of a Delaunay triangulation of `S` **given some
   triangulation of `S`** (`exists_delaunay_of_triangulation`; the existence of a first
-  triangulation, e.g. by a sweep, is a hypothesis), `DdgProofs/Delaunay/PlanarLemma.lean`
+  triangulation, e.g. by a sweep, is a hypothesis), `DDG/Delaunay/Planar/Lemma.lean`
   (`delaunay-lemma`). The planar local test equals layer 1's `θ_k + θ_l ≤ π` on the Euclidean
   lengths (`isLocallyDelaunay_dist2_iff`). Not proved: uniqueness up to ties, and the surface case.
 - **Proved, planar case (2026-11-05), uniqueness up to ties.** Two Delaunay triangulations of a
@@ -791,7 +791,7 @@ an earlier version with another title, were read).
   (`NoFourCocircular`, required only for triples spanning a triangle; `delaunay_unique`); any two
   locally Delaunay triangulations are then equal whatever the flip order
   (`eq_of_isLocallyDelaunay`), and the Delaunay triangulation exists and is unique given a
-  triangulation (`existsUnique_delaunay`), `DdgProofs/Delaunay/PlanarUniqueness.lean`
+  triangulation (`existsUnique_delaunay`), `DDG/Delaunay/Planar/Uniqueness.lean`
   (`planar-delaunay-uniqueness`; the lifting argument, de Berg et al. Thm. 9.6–9.7). Only the
   surface case of this entry stays cited.
 - **Planar existence unconditional (2026-11-05).** Every finite `S ⊂ ℝ²` that is not collinear
@@ -822,7 +822,7 @@ an earlier version with another title, were read).
   (`[formula: it-cotan-weight]`, `cotanWeight_nonneg_iff`), and at a tie both diagonals satisfy
   it with equality (`flip_of_tie`). B–S Lemma 9 for one diamond (locally Delaunay ⟺ the
   apex `l` is not strictly inside the circumcircle of `i, j, k` in the unfolded diamond, and
-  symmetrically) is proved in `DdgProofs/Delaunay/Local.lean`
+  symmetrically) is proved in `DDG/Delaunay/Local.lean`
   (`isLocallyDelaunay_iff_not_inside_circumcircle`, `inside_circumcircle_iff`, `on_circumcircle_iff`,
   from the power of the point, `2 A_jil (cot θ_k + cot θ_l)`).
 
@@ -876,12 +876,12 @@ an earlier version with another title, were read).
   away never reappears (`flipped_edge_not_mem`): the lifted surface goes down with every flip
   (`liftBelow_flip`) and lies strictly below the lifted segment of the flipped edge at the crossing
   of the diagonals, while on an edge it equals the lifted segment (`liftPlane_eq_of_mem_edge`),
-  `DdgProofs/Delaunay/PlanarFlipCount.lean` (`planar-flip-count`; Edelsbrunner, *Geometry and
+  `DDG/Delaunay/Planar/FlipCount.lean` (`planar-flip-count`; Edelsbrunner, *Geometry and
   Topology for Mesh Generation*, Sec. 1.3). Fortune's note was not used.
 - **Proved (trimmed, 2026-11-05, layer 3).** Everything but the finiteness, on the gluing data of
   `DDG/Mesh/Gluing.lean` (self-loops, multiple edges, faces glued to themselves):
-  `DdgProofs/Delaunay/Termination.lean` (`it-delaunay-self-glued`, `it-delaunay-potential`,
-  `it-delaunay-flip-algorithm`) and `DdgProofs/Delaunay/FlipQueue.lean` (`it-delaunay-flip-loop`).
+  `DDG/Delaunay/Termination.lean` (`it-delaunay-self-glued`, `it-delaunay-potential`,
+  `it-delaunay-flip-algorithm`) and `DDG/Delaunay/FlipQueue.lean` (`it-delaunay-flip-loop`).
   Every non-Delaunay interior edge can be flipped (an edge with one face on both sides is always
   Delaunay, strictly: `IsMetric.locallyDelaunayAt_of_same_face`; B–S's topological obstruction);
   the global lifting energy and the harmonic index decrease strictly with every Delaunay flip
@@ -937,7 +937,7 @@ an earlier version with another title, were read).
   from B–S's quotation; bibliographic data from Crossref. Corrected: the statement follows
   B–S's form (the condition is on the edge after the flip, with the case of equality) instead of
   "an edge that violates the condition".
-- **Proved: the one-diamond part** (`DdgProofs/Delaunay/Rippa.lean`, `it-rippa-diamond`). For a
+- **Proved: the one-diamond part** (`DDG/Delaunay/Rippa.lean`, `it-rippa-diamond`). For a
   strictly convex diamond the difference of the cotan energies of the two triangulations is
   exactly `−(cot θ_k + cot θ_l)/(2 A_ilk A_jkl)·ℓ(u)²`, with `ℓ` the affine dependence of the four
   vertices (`rippa_identity`); hence the flip of an edge with `θ_k + θ_l ≥ π` does not increase
@@ -1003,7 +1003,7 @@ an earlier version with another title, were read).
   `a₀a₁a₂/4A` (`circumcenter_equidistant`), it lies beyond a side exactly when the opposite
   angle is obtuse (`circumcenterBary_neg_iff`), and an angle below `30°` is opposite a side
   shorter than the circumradius (`circumradius_gt_of_angle_lt`; also, from lengths only,
-  `DdgProofs/Delaunay/Encroachment.lean`: `circumradius_eq_div_sin`,
+  `DDG/Delaunay/Planar/Encroachment.lean`: `circumradius_eq_div_sin`,
   `lt_circumradius_of_lt_pi_div_six`).
 
 ### [formula: it-ruppert-encroachment] Ruppert's boundary rule in the plane
@@ -1038,7 +1038,7 @@ an earlier version with another title, were read).
 - **Why not formalized.** As the previous entry.
 - **What depends on it.** SPEC N1 uses the rule on surfaces with boundary and states that its end
   at `25°` and `30°` is observed, not proved, as in the plane. Proved here
-  (`DdgProofs/Delaunay/Encroachment.lean`, `it-encroachment-angle`, the test of `is_encroached`):
+  (`DDG/Delaunay/Planar/Encroachment.lean`, `it-encroachment-angle`, the test of `is_encroached`):
   a point is strictly inside the diametral circle of a segment iff the angle it subtends is
   obtuse, on it iff the angle is right (`dist_midpoint_lt_iff`, `dist_midpoint_eq_iff`), and in
   lengths, the corner opposite `s` is obtuse iff `x² + y² < s²` (`pi_div_two_lt_cornerAngle_iff`,
@@ -1540,7 +1540,7 @@ rotation (numerical devices); anything about rounding.
 - **Source check.** Not re-read for this entry; the statement is elementary combinatorics.
 - **Proved (trimmed, 2026-11-05).** The topological part, for the flip on gluing data
   (`DDG/Mesh/GluingFlip.lean`, `it-complex-flip`) and hence for an oriented mesh whose vertex
-  stars are single fans (`DdgProofs/Delaunay/FromTriMesh.lean`, `it-complex-from-mesh`): the flip
+  stars are single fans (`DDG/Delaunay/FromTriMesh.lean`, `it-complex-from-mesh`): the flip
   of an interior edge whose two triangles are distinct keeps the vertices (each with its class, also
   when `i, j, k, l` coincide), the number of edges and faces, the boundary halfedges with their end
   points, the Euler characteristic, the orientation, and the property that every vertex star is one
@@ -1554,7 +1554,7 @@ rotation (numerical devices); anything about rounding.
   faces. (That every boundary fan has exactly one boundary halfedge leaving and one entering its
   vertex is now proved in the gluing model, for any involution `twin`:
   `Gluing.boundaryCount_le_one`, `boundaryInCount_eq_boundaryCount`,
-  `DdgProofs/Delaunay/BoundaryFan.lean`, `complex-boundary-fan`; what remains is the translation
+  `DDG/Delaunay/BoundaryFan.lean`, `complex-boundary-fan`; what remains is the translation
   of the flipped gluing data back to a simplicial `TriMesh`.)
 - **Why not formalized.** The remaining step is the simplicial bookkeeping between the two models;
   the Rust code rebuilds and validates the mesh after every remeshing pass (`TriMesh::new`, SPEC

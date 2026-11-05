@@ -17,7 +17,7 @@ are `θ_k = cornerAngle a b c` and `θ_l = cornerAngle a d e`. After a flip the 
   new ones, and likewise at `j` and `l` (`flip_angle_i`, `flip_angle_j`, `flip_angle_sums`).
 
 The Delaunay criterion of one diamond (the cotan weight, the excess, the flip of a violating edge)
-is in `DdgProofs/Delaunay/Local.lean`.
+is in `DDG/Delaunay/Local.lean`.
 -/
 
 noncomputable section

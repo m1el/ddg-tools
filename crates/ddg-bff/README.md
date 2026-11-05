@@ -465,7 +465,7 @@ from ours.
 pole is at the south pole; centering puts the area center at the origin; genus-0 models map
 injectively; invariance under rigid motion and scale; different poles give the same map up to a
 rotation; non-spheres and bad options are refused; the formulas below hold numerically. Lean:
-`lean/proofs/DdgProofs/Bff/Sphere.lean` (stereographic projection on the sphere, its inverse,
+`lean/ddg/DDG/Conformal/Sphere.lean` (stereographic projection on the sphere, its inverse,
 conformality and orientation; inversions keep the sphere; the derivative `2(u - (u·x)x)`).
 
 ## Deviations from the reference implementation
@@ -601,7 +601,7 @@ left; edge `i` runs from boundary vertex `i` to `i + 1`. BFF = Sawhney and Crane
 
 None of the BFF ids above (up to `similarity-fit`) has a theorem in `lean/proofs` or an entry in
 `lean/proofs/CITED.md` yet, so `scripts/check-formulas.sh` lists them as missing. The sphere ids
-have theorems in `DdgProofs/Bff/Sphere.lean` or entries in `CITED.md`.
+have theorems in `DDG/Conformal/Sphere.lean` or entries in `CITED.md`.
 
 ## Not done, not verified
 

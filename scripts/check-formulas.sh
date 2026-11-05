@@ -3,7 +3,7 @@
 #
 #   Every Rust function that implements a formula carries a doc line  [formula: <kebab-id>].
 #   Each such id must be either
-#     * on a Lean theorem (or lemma) in lean/proofs  -> status "proved", or
+#     * on a Lean theorem (or lemma) in lean/ddg and lean/proofs  -> status "proved", or
 #     * the id of a heading in lean/proofs/CITED.md  -> status "cited".
 #   Anything else is "MISSING" and makes the script fail.
 #
@@ -11,7 +11,7 @@
 #   sources of lean/proofs.
 #
 # Usage:  scripts/check-formulas.sh [--build] [--audit-all]
-#   --build       additionally run `lake build` in lean/proofs and check that the axiom audit
+#   --build       additionally run `lake build` in lean/ddg and lean/proofs and check that the axiom audit
 #                 (DdgProofs/Audit.lean, the main theorems by name) reports only propext,
 #                 Classical.choice and Quot.sound.
 #   --audit-all   additionally (implies --build) run DdgProofs/AuditAll.lean, which collects the
@@ -26,6 +26,11 @@ export LC_ALL
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 proofs="$root/lean/proofs"
+ddg="$root/lean/ddg"
+# Lean source roots: the library (lean/ddg) and the application layer (lean/proofs).
+lean_roots=()
+[ -d "$ddg" ] && lean_roots+=("$ddg")
+[ -d "$proofs" ] && lean_roots+=("$proofs")
 cited="$proofs/CITED.md"
 crates="$root/crates"
 do_build=0
@@ -48,8 +53,8 @@ fail=0
 #    A tag belongs to the first declaration that follows it.
 # ---------------------------------------------------------------------------------------------
 : > "$tmp/lean.tsv"
-if [ -d "$proofs" ]; then
-  find "$proofs" -name '*.lean' -not -path '*/.lake/*' -print | sort | while IFS= read -r f; do
+if [ "${#lean_roots[@]}" -gt 0 ]; then
+  find "${lean_roots[@]}" -name '*.lean' -not -path '*/.lake/*' -print | sort | while IFS= read -r f; do
     rel="${f#"$root"/}"
     awk -v file="$rel" '
       function flush(kind, name, line,   i) {
@@ -161,29 +166,29 @@ done < "$tmp/ids.txt"
 
 # Tags that are not attached to any declaration.
 if grep -q '	none	' "$tmp/lean.tsv"; then
-  echo "FAIL: formula tag(s) in lean/proofs not followed by a declaration:" >&2
+  echo "FAIL: formula tag(s) in lean/ddg and lean/proofs not followed by a declaration:" >&2
   grep '	none	' "$tmp/lean.tsv" | awk -F '\t' '{ print "  " $1 "  " $4 }' >&2
   fail=1
 fi
 
 # ---------------------------------------------------------------------------------------------
-# 5. No sorry, no admit, no axiom declarations in lean/proofs
+# 5. No sorry, no admit, no axiom declarations in lean/ddg and lean/proofs
 # ---------------------------------------------------------------------------------------------
 bad=0
-if [ -d "$proofs" ]; then
-  find "$proofs" -name '*.lean' -not -path '*/.lake/*' -print0 \
+if [ "${#lean_roots[@]}" -gt 0 ]; then
+  find "${lean_roots[@]}" -name '*.lean' -not -path '*/.lake/*' -print0 \
     | xargs -0 -r grep -n -E '(^|[^[:alnum:]_.])(sorry|admit)([^[:alnum:]_]|$)' /dev/null > "$tmp/sorry.txt" 2>/dev/null
-  find "$proofs" -name '*.lean' -not -path '*/.lake/*' -print0 \
+  find "${lean_roots[@]}" -name '*.lean' -not -path '*/.lake/*' -print0 \
     | xargs -0 -r grep -n -E '^[[:space:]]*(@\[[^]]*\][[:space:]]*)?((private|protected|noncomputable|unsafe)[[:space:]]+)*axiom[[:space:]]' /dev/null > "$tmp/axiom.txt" 2>/dev/null
   if [ -s "$tmp/sorry.txt" ]; then
-    echo "FAIL: 'sorry'/'admit' found in lean/proofs:" >&2; sed "s|^$root/|  |" "$tmp/sorry.txt" >&2; bad=1
+    echo "FAIL: 'sorry'/'admit' found in lean/ddg and lean/proofs:" >&2; sed "s|^$root/|  |" "$tmp/sorry.txt" >&2; bad=1
   fi
   if [ -s "$tmp/axiom.txt" ]; then
-    echo "FAIL: axiom declaration found in lean/proofs:" >&2; sed "s|^$root/|  |" "$tmp/axiom.txt" >&2; bad=1
+    echo "FAIL: axiom declaration found in lean/ddg and lean/proofs:" >&2; sed "s|^$root/|  |" "$tmp/axiom.txt" >&2; bad=1
   fi
 fi
 if [ "$bad" = 0 ]; then
-  echo "no sorry, no admit, no axiom declarations in lean/proofs"
+  echo "no sorry, no admit, no axiom declarations in lean/ddg and lean/proofs"
 else
   fail=1
 fi
@@ -194,8 +199,10 @@ fi
 if [ "$do_build" = 1 ]; then
   mkdir -p "$root/runs_tmp"
   log="$root/runs_tmp/check-formulas-build.log"
-  echo "building lean/proofs (log: runs_tmp/check-formulas-build.log) ..."
-  if (cd "$proofs" && lake build DdgProofs > "$log" 2>&1 && lake env lean DdgProofs/Audit.lean >> "$log" 2>&1); then
+  echo "building lean/ddg, then lean/proofs (log: runs_tmp/check-formulas-build.log) ..."
+  if python3 "$root/scripts/check-lean-dag.py" > "$log" 2>&1 \
+     && { [ ! -d "$ddg" ] || (cd "$ddg" && lake build >> "$log" 2>&1); } \
+     && (cd "$proofs" && lake build DdgProofs >> "$log" 2>&1 && lake env lean DdgProofs/Audit.lean >> "$log" 2>&1); then
     if grep -q "sorryAx" "$log"; then
       echo "FAIL: the axiom audit mentions sorryAx" >&2; fail=1
     fi

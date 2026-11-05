@@ -61,8 +61,8 @@ faces glued to themselves (`twin (f, 0) = (f, 1)`), vertices with a single corne
   other; it preserves `V`, `E`, `F` and `χ` (`Iso.eulerChar_eq`).
 
 The edge flip and its invariants are in `DDG/Mesh/GluingFlip.lean`, edge lengths, corner and
-cone angles in `DdgProofs/Delaunay/Metric.lean`, the simplicial `TriMesh` of
-`DDG/Mesh/GaussBonnet.lean` as gluing data in `DdgProofs/Delaunay/FromTriMesh.lean`.
+cone angles in `DDG/Delaunay/Metric.lean`, the simplicial `TriMesh` of
+`DDG/Mesh/GaussBonnet.lean` as gluing data in `DDG/Delaunay/FromTriMesh.lean`.
 -/
 
 namespace DDG.Delaunay

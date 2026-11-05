@@ -1021,7 +1021,7 @@ open DDG
 #print axioms Delaunay.MetricGluing.wellFounded_delaunayFlip
 #print axioms Delaunay.MetricGluing.not_exists_infinite_flips'
 #print axioms Delaunay.MetricGluing.flips_length_le'
--- The boundary fan on gluing data (DdgProofs/Delaunay/BoundaryFan.lean)
+-- The boundary fan on gluing data (DDG/Delaunay/BoundaryFan.lean)
 #print axioms Delaunay.Gluing.eq_of_isBoundary_of_vertexOf_eq
 #print axioms Delaunay.Gluing.eq_of_isBoundary_of_vertexOf_next_eq
 #print axioms Delaunay.Gluing.boundaryCount_le_one

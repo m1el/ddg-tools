@@ -28,7 +28,7 @@ On it:
   (`transfer_mass_tiling`); for pieces of the orientation of `p`, `Σ pieceMass β a b = (1 + δ_ab)/12`
   (`sum_pieceMass_tiling`).
 
-Chen–Holst's interpolation error over a tiling (`it-odt-energy`) is in `DdgProofs/Delaunay/ODT.lean`.
+Chen–Holst's interpolation error over a tiling (`it-odt-energy`) is in `DDG/Delaunay/ODT.lean`.
 -/
 
 noncomputable section

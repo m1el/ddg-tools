@@ -2,15 +2,15 @@ import DdgProofs.Oracle.Geometry
 import DDG.Intrinsic.Barycentric
 import DDG.Intrinsic.Signpost
 import DDG.Intrinsic.Trace
-import DdgProofs.Delaunay.Local
-import DdgProofs.Delaunay.ODT
+import DDG.Delaunay.Local
+import DDG.Delaunay.ODT
 
 /-!
 # Oracle bridges: the intrinsic-triangulation formulas at `ℝ`
 
 The oracle's (`lean/oracle`, `DdgOracle/Formulas/Intrinsic.lean`) scalar-generic definitions of
 the intrinsic-triangulation formulas, instantiated at `ℝ`, are the native definitions of the
-library (`DdgProofs/Intrinsic/*`, `DdgProofs/Delaunay/Local.lean`, `DdgProofs/Delaunay/ODT.lean`,
+library (`DdgProofs/Intrinsic/*`, `DDG/Delaunay/Local.lean`, `DDG/Delaunay/ODT.lean`,
 namespace `DDG.Intrinsic`). One-way bridges `Ddg.foo x = DDG.Intrinsic.foo x`: the theorems of the
 library apply to the oracle's numbers after rewriting with them. Only the oracle's corner angle
 needs a hypothesis (a nondegenerate triangle, `oppositeAngles_eq`), because its half-angle form

@@ -1,6 +1,6 @@
-import DdgProofs.IntrinsicSimplification.Monotone
-import DdgProofs.IntrinsicSimplification.Curvature
-import DdgProofs.IntrinsicSimplification.Interpolation
+import DDG.Conformal.CETM.Monotone
+import DDG.Conformal.CETM.Curvature
+import DDG.Conformal.CETM.Interpolation
 import DdgProofs.IntrinsicSimplification.Transport
 import DdgProofs.Oracle.Scalar
 

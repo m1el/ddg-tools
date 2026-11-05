@@ -1,7 +1,7 @@
 # Delaunay layer 4: discharging the finiteness hypothesis
 
 Goal 1 of layer 4: prove `MetricGluing.BoundedLengthFinite s` for every `s : MetricGluing F`
-(`DdgProofs/Delaunay/Termination.lean`), so that intrinsic Delaunay flipping terminates
+(`DDG/Delaunay/Termination.lean`), so that intrinsic Delaunay flipping terminates
 unconditionally and a Delaunay triangulation with the original vertices exists unconditionally
 (Indermitte–Liebling–Troyanov–Clémençon 2001, Thm. 1; Bobenko–Springborn 2007, Prop. 12 /
 Thm. 15; Fisher–Springborn–Bobenko–Schröder 2007).
@@ -43,7 +43,7 @@ Three routes were compared.
 Why (c) is the cheapest honest route: it needs no topology of surfaces, no Jordan curve theorem,
 no quotient spaces, no manifold charts, and no new combinatorial theory. Every lemma is about
 triangles in `ℝ × ℝ` (`sda`, `dist2`, `rigid`, hull membership by signs — all in
-`DdgProofs/Delaunay/PlanarBasic.lean`, `DDG/Intrinsic/Diamond.lean`,
+`DDG/Delaunay/Planar/Basic.lean`, `DDG/Intrinsic/Diamond.lean`,
 `DDG/Geometry/Plane.lean`) plus finite sets. The phantom-placement problem (developing around
 a cone point does not return to the same placement) is handled by triggering every consistency
 condition at a *point* of the face or of its open sides, never by "the placed triangles overlap".

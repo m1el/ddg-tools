@@ -25,7 +25,7 @@ Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area) and `sqDist
   (`weightedCircumcenter_equidistant_heron`).
 
 The optimal Delaunay triangulation update (`it-odt-update`: the barycentre, the circumcentre
-vector `circumVec`, the star energy and the step of Eq. 4.13) is in `DdgProofs/Delaunay/ODT.lean`.
+vector `circumVec`, the star energy and the step of Eq. 4.13) is in `DDG/Delaunay/ODT.lean`.
 
 Definitions (the closed forms of the Rust code, on `ℝ`): `movedLength`, `movedDoubleArea`,
 `weightedCircumcenter` (the plane helpers `rot`, `nsq`, `toDual` are in

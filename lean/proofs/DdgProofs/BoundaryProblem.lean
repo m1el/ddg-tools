@@ -1,6 +1,6 @@
 import DdgProofs.MeshProblem
-import DdgProofs.Yamabe
-import DdgProofs.Bff.Laplace
+import DDG.Conformal.Yamabe
+import DDG.Conformal.Cherrier
 import DDG.Laplace.Kernel
 import DDG.Laplace.Cotan
 
