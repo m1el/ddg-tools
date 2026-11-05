@@ -675,7 +675,7 @@ the marching order of the redistancing and its convergence; anything about round
 - **What depends on it.** Nothing in the formulas: the redistancing only re-initializes `φ` away
   from the cut (cut-adjacent vertices keep their values). Proved: the local update is exactly
   `min_{λ∈[0,1]} λT_j + (1−λ)T_k + |x_i − (λx_j + (1−λ)x_k)|`
-  (`[formula: cut-redistance]`, `hopfLaxTriangle_isLeast`, also from the side lengths alone),
+  (`[formula: cut-redistance]`, `DDG.hopfLaxTriangle_isLeast` in `DDG/Geometry/HopfLax.lean`, also from the side lengths alone),
   never exceeds the edge terms, and is at least `min(T_j, T_k)`. On obtuse triangles the single
   pass is the definition (SPEC D10).
 

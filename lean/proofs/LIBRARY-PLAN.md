@@ -171,7 +171,7 @@ so importers are only touched once.
 | Cuts/OnCut | 1131 | app | A | app |
 | Cuts/Quantile | 1376 | app | A | app |
 | Cuts/Recovery | 284 | app | A | app |
-| Cuts/Redistance | 461 | app | A | app (promotion candidate: Hopf–Lax local update) |
+| Cuts/Redistance | 461 | Geometry+app | A | Geometry/HopfLax (S6: the Hopf–Lax update, native defs) · app (oracle bridges `Ddg.hopfLaxTriangle = DDG.hopfLaxTriangle`) |
 | Cuts/Regions | 676 | app | A | app |
 | Cuts/Ripple | 344 | app | A | app |
 | Cuts/Step | 919 | app | A | app |
@@ -471,7 +471,7 @@ branch `lean-library`, after `points-as-tori` is merged, with other Lean work fr
 | **S4** package and moves | Create `lean/ddg` (lakefile, `parts.toml`). Copy the manifest entries for mathlib and its dependencies from `lean/proofs` by hand, and symlink `.lake/packages` (no Mathlib rebuild). Add `require ddg` to `lean/proofs`; registering it in the manifest is a targeted `lake update ddg` or a hand edit, **needs your go-ahead**. Then move in DAG order:<br>① Geometry + Optimization<br>② Mesh<br>③ Laplace + Intrinsic + VectorFields<br>④ FEM + NormalCoords<br>⑤ Delaunay.Planar + Delaunay + Conformal<br>⑥ OptimalCones + Repulsive + SDF<br>Green after each batch. | Sonnet 5 (one agent, sequential: every batch rewrites shared imports) | — | **done**: `e77274f` (package, `parts.toml`, move map), batches ① to ⑦ `419b97f`, `d6a3935`, `eb8bc65`, `ead497b`, `5bdea4d` (+ `6c5308c`), `b81bef8` (+ `fa7d729`), `197acb9` (namespace renames). Not applied: the Gluing / MetricGluing rename (S6). |
 | **S5** docs and tooling | Library README (per part, skeleton from the module docstrings); app README trimmed to the Rust ↔ Lean mapping; `check-formulas.sh` roots; AuditAll prefix; the 38 + 161 path rewrites | Sonnet 2 | — | **done**: commits `lean library S5: …` (`git log --grep "lean library S5"`): library README, `LICENSE`, `CITATION.cff`, part-root docstrings, app README trimmed, path and name rewrites, this status. `CITATION.cff` author to be confirmed. |
 | | **total** | **≈ 28.5 agent-h** (Opus ≈ 10, Sonnet ≈ 18.5); wall clock ≈ 21 h plus build waits | | |
-| S6 *(optional, before publishing)* | • namespace polish;<br>• metric triangulations moved to Intrinsic;<br>• mesh-model, rigid-motion and V3 unification;<br>• Developability promoted to the library (re-base on `Fin 3 → ℝ`: 15–25 h by itself);<br>• Hopf–Lax update (Cuts.Redistance) promoted;<br>• doc-gen4, CI with Mathlib cache, `CITATION.cff`, extraction to its own repo | Opus 20–40 | | **not started** (deferred). |
+| S6 *(optional, before publishing)* | • namespace polish;<br>• metric triangulations moved to Intrinsic;<br>• mesh-model, rigid-motion and V3 unification;<br>• Developability promoted to the library (re-base on `Fin 3 → ℝ`: 15–25 h by itself);<br>• Hopf–Lax update (Cuts.Redistance) promoted (**done**: `DDG/Geometry/HopfLax.lean`, no new part; bridges stay in `Cuts/Redistance.lean`; `library-moves/s6-hl.tsv`);<br>• doc-gen4, CI with Mathlib cache, `CITATION.cff`, extraction to its own repo | Opus 20–40 | | **not started** (deferred). |
 
 **Risks.**
 * **Namespace churn.** The Rust code references ids, so it is safe. `Audit.lean`, the docs and

@@ -119,7 +119,7 @@ of this file. `DdgProofs.lean` is the app root: it imports the app modules and t
 | `DdgProofs/Cuts/Dirichlet.lean` | cut flow: Dirichlet solves on an index set split into `I` and `B`: Yamabe system, boundary flux, Dirichlet energy, scaled and pointwise adjoints, gradient densities, harmonic extension (§3.4–§3.6, §3.8) |
 | `DdgProofs/Cuts/Step.lean` | cut flow: sign of the flow, explicit step, length step, the paper's penalty rule, symmetry projection, step cap, feature size, sliver smoothing (§1, §3.6–§3.11, §4) |
 | `DdgProofs/Cuts/Recovery.lean` | cut flow: recovery of the normal derivative from the integrated fluxes (§3.5, D12) |
-| `DdgProofs/Cuts/Redistance.lean` | cut flow: the Hopf–Lax triangle update in closed form is the minimum over the edge (§3.12) |
+| `DdgProofs/Cuts/Redistance.lean` | cut flow: bridges from the oracle's Hopf–Lax `hopfLaxTriangle` to the library's (`DDG/Geometry/HopfLax.lean`) and the oracle forms of the minimum statements (§3.12) |
 | `DdgProofs/Cuts/OnCut.lean` | cut flow, default stages: the two systems on the cut (length force, rate), the extension from the cut, `\|∇φ\|` in a crossed face and its mean, the per-step factor of a ripple, the adaptive step (§3.8–§3.10, §4, D14–D16) |
 | `DdgProofs/Cuts/Ripple.lean` | cut flow: the roughening rate `ωk − wk²`, the length weight for a cutoff wavelength, the ingredients of the linearization on closed forms, the sphere rates (§1, §4, D18) |
 | `DdgProofs/Cuts/Quantile.lean` | cut flow: the weighted quantile, the roughening rate of a state as a quantile, the robust step rule and the local limit per cut point (§1, §4, D22–D25) |
@@ -1630,6 +1630,7 @@ proved in more than one file, for example the library's theorem and the app's ev
 | `lean/ddg/DDG/Geometry/Advancement.lean` | `rc-ccd-advancement` |
 | `lean/ddg/DDG/Geometry/AdvancementPairs.lean` | `rs-ccd-advancement` |
 | `lean/ddg/DDG/Geometry/Barycentric.lean` | `cut-barycentric-length`, `cut-edge-crossing`, `cut-subtriangle-area` |
+| `lean/ddg/DDG/Geometry/HopfLax.lean` | `cut-redistance` |
 | `lean/ddg/DDG/Geometry/ClosestPoints.lean` | `rc-closest-points`, `pat-truth-closest-point` |
 | `lean/ddg/DDG/Geometry/Plane.lean` | `signed-area-2d`, `quasi-conformal-error` |
 | `lean/ddg/DDG/Geometry/RigidInvariance.lean` | `dev-gradient-invariance` |

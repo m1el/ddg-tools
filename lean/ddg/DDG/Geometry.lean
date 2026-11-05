@@ -2,6 +2,7 @@ import DDG.Geometry.Advancement
 import DDG.Geometry.AdvancementPairs
 import DDG.Geometry.Barycentric
 import DDG.Geometry.ClosestPoints
+import DDG.Geometry.HopfLax
 import DDG.Geometry.Plane
 import DDG.Geometry.PlaneLemmas
 import DDG.Geometry.RigidInvariance
@@ -30,6 +31,8 @@ function of its three side lengths (Sharp, Soliman, Crane 2019, Sec. 5.1.1).
   proper crossing of two segments, the least-squares similarity fit of two point sets.
 * `Barycentric`: barycentric combinations, level crossings (`crossingParam`), lengths and areas
   inside a face (`baryLength`).
+* `HopfLax`: the Hopf–Lax (local eikonal) update on a triangle in closed form is the minimum over
+  the edge (`hopfLaxTriangle_isLeast`; `cut-redistance`).
 * `Vec3`, `RigidInvariance`: vectors of `ℝ³` and derivatives along motions; invariance under rigid
   motions and the identities `Σ g = 0`, `Σ x × g = 0` of a gradient (`gradient_invariance`).
 * `ClosestPoints`, `Advancement`, `AdvancementPairs`: closest points of segments and triangles

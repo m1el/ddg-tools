@@ -517,18 +517,20 @@ open DDG
 #print axioms Cuts.fluxRecovery_bounds
 #print axioms Cuts.fluxRecovery_const_piece
 #print axioms Cuts.fluxRecovery_nodal
--- Hopf-Lax update (Cuts/Redistance.lean)
+-- Hopf-Lax update (library: Geometry/HopfLax.lean; bridges: Cuts/Redistance.lean)
 #print axioms Cuts.hopfLaxTriangle_eq
-#print axioms Cuts.hl_stationary_le
-#print axioms Cuts.clamp_min_of_convex
-#print axioms Cuts.hopfLaxObjective_convex
-#print axioms Cuts.hopfLaxTriangle_le
-#print axioms Cuts.hopfLaxTriangle_mem
-#print axioms Cuts.hopfLaxTriangle_isLeast
-#print axioms Cuts.hopfLaxTriangle_le_edge
-#print axioms Cuts.min_le_hopfLaxTriangle
-#print axioms Cuts.exists_triangle_points
-#print axioms Cuts.hopfLaxTriangle_isLeast_intrinsic
+#print axioms Cuts.Ddg_hopfLaxTriangle_isLeast
+#print axioms Cuts.Ddg_hopfLaxTriangle_isLeast_intrinsic
+#print axioms hl_stationary_le
+#print axioms clamp_min_of_convex
+#print axioms hopfLaxObjective_convex
+#print axioms hopfLaxTriangle_le
+#print axioms hopfLaxTriangle_mem
+#print axioms hopfLaxTriangle_isLeast
+#print axioms hopfLaxTriangle_le_edge
+#print axioms min_le_hopfLaxTriangle
+#print axioms exists_triangle_points
+#print axioms hopfLaxTriangle_isLeast_intrinsic
 -- closed-form solutions (Cuts/Analytic.lean)
 #print axioms Cuts.diskU_ode
 #print axioms Cuts.diskU_boundary

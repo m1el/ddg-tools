@@ -1,0 +1,32 @@
+# Library step S6, Hopf-Lax promotion: old name <TAB> new name <TAB> note
+# Module created (library): DDG.Geometry.HopfLax (part Geometry; imports DDG.Geometry.Barycentric only).
+# Module kept (app): DdgProofs.Cuts.Redistance, now only the one-way bridges from the oracle.
+# All [formula: cut-redistance] tags (5) moved with their theorems; the tag multiset is unchanged.
+# Native definitions introduced: DDG.hopfLaxEdge, DDG.hopfLaxTriangle (the oracle's Ddg.* at R), DDG.hlQ, DDG.hlValue, DDG.hlLam (moved).
+DDG.Cuts.hlQ	DDG.hlQ	moved
+DDG.Cuts.hlValue	DDG.hlValue	moved
+DDG.Cuts.hlLam	DDG.hlLam	moved
+DDG.Cuts.convex_between	DDG.convex_between	moved
+DDG.Cuts.clamp_min_of_convex	DDG.clamp_min_of_convex	moved
+DDG.Cuts.hl_stationary_le	DDG.hl_stationary_le	moved
+DDG.Cuts.hopfLaxObjective	DDG.hopfLaxObjective	moved
+DDG.Cuts.hlQ_eq_norm_sq	DDG.hlQ_eq_norm_sq	moved
+DDG.Cuts.hlQ_nonneg	DDG.hlQ_nonneg	moved
+DDG.Cuts.hlValue_eq_objective	DDG.hlValue_eq_objective	moved
+DDG.Cuts.hopfLaxObjective_convex	DDG.hopfLaxObjective_convex	moved
+DDG.Cuts.norm_sub_point_le	DDG.norm_sub_point_le	moved
+DDG.Cuts.hopfLaxObjective_endpoint_le	DDG.hopfLaxObjective_endpoint_le	moved
+DDG.Cuts.hlValue_stationary_le	DDG.hlValue_stationary_le	moved
+DDG.Cuts.hopfLaxTriangle_le	DDG.hopfLaxTriangle_le	moved; statement about DDG.hopfLaxTriangle instead of Ddg.hopfLaxTriangle
+DDG.Cuts.hopfLaxTriangle_mem	DDG.hopfLaxTriangle_mem	moved; native statement
+DDG.Cuts.hopfLaxTriangle_isLeast	DDG.hopfLaxTriangle_isLeast	moved; native statement
+DDG.Cuts.hopfLaxObjective_one	DDG.hopfLaxObjective_one	moved; native statement
+DDG.Cuts.hopfLaxObjective_zero	DDG.hopfLaxObjective_zero	moved; native statement
+DDG.Cuts.hopfLaxTriangle_le_edge	DDG.hopfLaxTriangle_le_edge	moved; native statement
+DDG.Cuts.min_le_hopfLaxTriangle	DDG.min_le_hopfLaxTriangle	moved; native statement
+DDG.Cuts.exists_triangle_points	DDG.exists_triangle_points	moved
+DDG.Cuts.hopfLaxTriangle_isLeast_intrinsic	DDG.hopfLaxTriangle_isLeast_intrinsic	moved; native statement (DDG.baryLength)
+DDG.Cuts.hopfLaxEdge_eq	DDG.Cuts.hopfLaxEdge_eq	stays app; now the bridge Ddg.hopfLaxEdge = DDG.hopfLaxEdge
+DDG.Cuts.hopfLaxTriangle_eq	DDG.Cuts.hopfLaxTriangle_eq	stays app; now the bridge Ddg.hopfLaxTriangle = DDG.hopfLaxTriangle
+-	DDG.Cuts.Ddg_hopfLaxTriangle_isLeast	new app theorem: oracle form of hopfLaxTriangle_isLeast
+-	DDG.Cuts.Ddg_hopfLaxTriangle_isLeast_intrinsic	new app theorem: oracle form of the intrinsic statement
