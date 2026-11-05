@@ -1,4 +1,5 @@
 import DdgProofs.MeshProblem
+import DdgProofs.Laplace.Cotan
 
 /-!
 # The mesh problem with boundary unknowns

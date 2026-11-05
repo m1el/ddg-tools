@@ -1,6 +1,7 @@
 import DdgProofs.Yamabe
 import DdgProofs.Solver
 import DdgProofs.Bff.Curve
+import DdgProofs.Laplace.Cotan
 
 /-!
 # The Poisson problems of Boundary First Flattening

@@ -1,4 +1,5 @@
 import DdgProofs.Bff.Laplace
+import DdgProofs.Laplace.Cotan
 
 /-!
 # The canonical problem of a mesh, and vectors on all vertices

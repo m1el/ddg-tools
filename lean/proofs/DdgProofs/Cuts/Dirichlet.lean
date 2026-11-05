@@ -1,5 +1,6 @@
 import DdgProofs.Cuts.Weighted
 import DdgProofs.Solver
+import DdgProofs.Laplace.Cotan
 
 /-!
 # Cut flow: the Dirichlet solves in a region

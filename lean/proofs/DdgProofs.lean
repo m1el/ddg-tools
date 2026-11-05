@@ -108,3 +108,4 @@ import DdgProofs.Geometry.SegmentCrossing
 import DdgProofs.Geometry.SimilarityFit
 import DdgProofs.Intrinsic.Mollification
 import DdgProofs.Core.Fields
+import DdgProofs.Laplace.Cotan

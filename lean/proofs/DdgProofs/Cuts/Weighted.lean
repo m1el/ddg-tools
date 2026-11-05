@@ -1,4 +1,5 @@
 import DdgProofs.Oracle.Mesh
+import DdgProofs.Laplace.Cotan
 
 /-!
 # Cut flow: the weighted cotan Laplacian

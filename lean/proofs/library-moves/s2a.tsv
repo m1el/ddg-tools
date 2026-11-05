@@ -8,6 +8,9 @@
 #   Bff/Quality -> Intrinsic/Mollification: MarginHolds, mollify*, isTriangle_of_margin, isTriangle_mollified
 #   Evaluated -> Evaluated (kept as Geometry/Stable): atan2, IsRearrangement, kahan*, sixteen_mul_triArea_sq_eq, ...
 #   Evaluated -> Core/Fields (app): TriMesh.angleDefectField, geodesicCurvatureField, gauss_bonnet_fields, laplacian_apply_of_ne, laplacian_apply_self
+#   Cotan -> Cotan (kept as Mesh/TriMesh): TriMesh, la lb lc, cotA-C, angleA-C, area, Valid, scale, angleA/B/C_scale
+#   Cotan -> Laplace/Cotan: cotEnergy, cotan_formula, faceEnergy, cotOpp, offDiag, laplacian*, Adj, Connected, mass, vertexArea, totalArea*, laplacian_scale, mass_scale
+#   GaussBonnet -> Laplace/Cotan: TriMesh.sum_cone_eq_two_pi_eulerChar
 DdgProofs.Bff.Quality	DDG.Geometry.Plane
 DdgProofs.Conformal.Distortion	DDG.Conformal.Distortion
 DdgProofs.Geometry.SignedAngle	DDG.Geometry.SignedAngle
@@ -16,3 +19,5 @@ DdgProofs.Geometry.SimilarityFit	DDG.Geometry.SimilarityFit
 DdgProofs.Intrinsic.Mollification	DDG.Intrinsic.Mollification
 DdgProofs.Evaluated	DDG.Geometry.Stable
 DdgProofs.Core.Fields	DdgProofs.Core.Fields
+DdgProofs.Cotan	DDG.Mesh.TriMesh
+DdgProofs.Laplace.Cotan	DDG.Laplace.Cotan

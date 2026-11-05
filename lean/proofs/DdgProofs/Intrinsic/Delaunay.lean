@@ -1,5 +1,6 @@
 import DdgProofs.Intrinsic.Diamond
 import DdgProofs.Cotan
+import DdgProofs.Laplace.Cotan
 
 /-!
 # Intrinsic triangulations: the Delaunay condition, the cotan weight, and what a flip does to the angles
