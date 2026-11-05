@@ -92,10 +92,11 @@ Machine-checked: `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-m
 `app-fem-midpoint-subdivision`, `app-vector-face-holonomy`,
 `app-vector-fd-connection-laplacian`, `app-amr-map-distortion`. Cited: `app-steiner-fermat-point`,
 `app-vector-transport`, `app-vector-fem-connection-laplacian`, `app-vector-singularity-index`,
-`app-vector-maximum-principle`, `app-amr-edge-flux`, `app-amr-residual-estimator`,
+`app-vector-maximum-principle`, `app-amr-residual-estimator`,
 `app-amr-bulk-marking`. Machine-checked as integrals over a triangle
 (`lean/proofs/DdgProofs/TriangleIntegral/`): `fem-area-coordinate-rule` (`monomial_integral`),
-`app-amr-element-norms` (the element norms of `estimate`), and the integrals behind
+`app-amr-element-norms` (the element norms of `estimate`), `app-amr-edge-flux` (`side_flux` is
+the outward flux, and twin fluxes add to the jump), and the integrals behind
 `app-fem-galerkin-mass`. Shared with the workspace: `cotan-fem-stiffness` (proved),
 `cotan-laplacian`.
 

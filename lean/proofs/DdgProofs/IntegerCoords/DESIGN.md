@@ -33,7 +33,8 @@ changing them.
 | `Frames/Wedge.lean` | `wedge_at`'s index is the label of the input direction before `h` (`RoundaboutsOK`); a flip keeps the frame data of the other edges | `ic-input-aligned-frame` |
 
 Cited (`CITED.md`, "Integer Coordinates"): `ic-normal-isotopy`, `ic-refinement-termination`,
-`ic-dijkstra-ball`, `ic-mollify`, `ic-transfer-mass-integral`, `ic-vertex-removal-delta` (open).
+`ic-dijkstra-ball`, `ic-mollify`, `ic-vertex-removal-delta` (open). `ic-transfer-mass-integral` is
+proved as an integral over pieces that tile the input triangle (`DdgProofs/TriangleIntegral/Tiling.lean`).
 
 ## The face model (`FaceModel.lean`)
 

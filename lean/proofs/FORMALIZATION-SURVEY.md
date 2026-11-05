@@ -37,7 +37,7 @@ These come first because they may be bugs or wrong statements, independent of wh
 | id | class | what it takes |
 |---|---|---|
 | `dev-lbfgs-two-loop`, `rc-lbfgs-two-loop` | A-S | already proved as `rs-lbfgs-two-loop` (`RepulsiveSurfaces/Optimize.lean`, `twoLoop_eq`, `bfgsInv_posDef`); instantiate H₀ = γI, and a PSD/subspace variant for RC's mean-free H₀ = γM⁻¹ |
-| `app-amr-edge-flux` | A-S | 2 × `divergence_corner` (`IntrinsicApps/HeatFem.lean`) with X = ∇u, plus dot/cross cotangent ↔ `cornerCot` |
+| `app-amr-edge-flux` | A-S | 2 × `divergence_corner` (`IntrinsicApps/HeatFem.lean`) with X = ∇u, plus dot/cross cotangent ↔ `cornerCot`. **Status (2026-11-05): done**, `TriangleIntegral/Flux.lean` (proved directly from `gradInterp` and `cotCorner`, in `side_flux`'s argument order; also twin fluxes add to the jump); moved out of CITED |
 | `moreau-yosida-convergence` (finite-dim, with rate) | A-S | `IsRegMinimizer.objective_le` + `IsMinimizer.weighted_sq_sub_le` |
 | `discrete-minimizer-existence` (+ feasibility hypothesis) | A-S | compact sublevel set, `IsCompact.exists_isMinOn`; with `IsMinimizer.unique` gives exactly one minimizer |
 | `rc-distance-gradient` | A-S | `norm_eq_iInf_iff_real_inner_le_zero`, `HasFDerivAt.sqrt`; closes the `rc-penalty-surface` chain |
@@ -76,8 +76,16 @@ These come first because they may be bugs or wrong statements, independent of wh
     `bff-conformal-energy-triangle`; the sum to the loop area (needs face orientation on `TriMesh`) stays cited.
   - `it-odt-energy`: **partial**, Lemma 4.1 per triangle and for a star as `it-odt-interpolation-error`
     (also `∫_T|u_I − u| = (A/12)Σℓ²`); the tiling of `Ω` and Thm 2.3 stay cited.
+    **Update (2026-11-05): done** with `TriangleIntegral/Tiling.lean` (additivity over `IsTiling`, null
+    triangle boundaries via `Convex.addHaar_frontier`): Lemma 4.1 over a tiling (also per vertex star and by
+    edge lengths), `E(x) = S(x) + C − ∫_Ω|y|²` for a fan plus fixed triangles, and the ODT step lowers `E`
+    (tiling of the moved star as a hypothesis). Thm 2.3 and the boundary rule stay cited under the new id
+    `it-odt-delaunay-optimality` (needs all triangulations of a point set).
   - AMR estimator: **done for the element norms**, `app-amr-element-norms` (tagged on `amr::estimate`); the bounds
     stay cited. `ic-transfer-mass-integral`: the one-triangle integral is now proved, the tiling stays cited.
+    **Update (2026-11-05): `ic-transfer-mass-integral` done and moved out of CITED** (`Tiling.lean`): the
+    per-piece assembly of `Transfer::new` is `∫_piece λ_aλ_b`, summing to `∫_T λ_aλ_b` over pieces that tile
+    `T` (hypothesis), and `Σ pieceMass = pieceMass_one` for consistently oriented pieces.
   - No disagreement between the cited formulas and the code was found.
 * **Multi-face strip trace** (M) for the intrinsic tracing entries.
 
@@ -88,7 +96,7 @@ solvers). The "Out of scope" section has nothing in reach.
 ## Stale or inaccurate reasons in `CITED.md`
 
 * `dev-lbfgs-two-loop`, `rc-lbfgs-two-loop`: already proved (`rs-lbfgs-two-loop`).
-* `app-amr-edge-flux`: "cotan-fem-stiffness is cited" is irrelevant; `divergence_corner` and `cotan_formula` cover it.
+* `app-amr-edge-flux`: "cotan-fem-stiffness is cited" is irrelevant; `divergence_corner` and `cotan_formula` cover it. (Resolved: proved, entry removed.)
 * `app-steiner-fermat-point`: triangle trigonometry now exists in `DdgProofs`.
 * `dev-min-width-hull-edge` ("needs convex hulls"), `dev-max-covariance-voronoi` ("needs the cell decomposition of the
   sphere"): overstated.

@@ -36,8 +36,10 @@ Plane points are pairs `ℝ × ℝ` with `sda` (doubled signed area) and `sqDist
   changes the energy by exactly `−(3 |∇S|²/(4|ω|)) α (2 − α)`: a descent step for every
   `0 < α < 2`, the minimum of `S` for `α = 1` (`odtEnergy_step`, `odtEnergy_step_le`).
 
-Not covered here (`CITED.md`, `it-odt-energy`): that `S` is the interpolation error of `|x|²`
-(Lemma 4.1), what the minimizing triangulations are, and the boundary rule as a remedy. The
+Not covered here: that `S` is the interpolation error of `|x|²` up to a constant (Lemma 4.1;
+proved over a tiling in `DdgProofs/TriangleIntegral/Tiling.lean`, `it-odt-energy`), what the
+minimizing triangulations are and the boundary rule as a remedy (`CITED.md`,
+`it-odt-delaunay-optimality`). The
 identities are about a planar star with signed areas; that the star of an intrinsic vertex
 unfolds into such a star is SPEC N19.
 

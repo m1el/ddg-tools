@@ -669,8 +669,10 @@ written from the paper and the cited papers.
   machine-checked as a derivative, `hasFDerivAt_odtEnergy` in
   `lean/proofs/DdgProofs/Intrinsic/Move.lean`, which also proves that this planar energy is
   exactly quadratic in `x`, so that the step changes it by `−3|G|²/(4|ω|) α (2 − α)`: a descent
-  for `0 < α < 2`, the minimum at `α = 1`; that the optimal Delaunay triangulation minimizes the
-  interpolation error is cited, `it-odt-energy`). Chen and Holst halve `α` to keep the elements
+  for `0 < α < 2`, the minimum at `α = 1`; that this energy is the interpolation error of `|x|²` up to a
+  constant, so that the step lowers the error itself while the moved star tiles the same region,
+  is proved over a tiling, `it-odt-energy`; that the Delaunay connectivity minimizes it is cited,
+  `it-odt-delaunay-optimality`). Chen and Holst halve `α` to keep the elements
   valid, not for descent; so does N21's line search.
   *Representations* (Integer Coordinates SPEC I29, §4.11): the iteration is written once,
   `odt::optimal_delaunay<T: OdtMoves>` (`odt_target`, `star_min_shape`, `move_vertex_with_shape`,

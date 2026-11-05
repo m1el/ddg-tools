@@ -987,26 +987,19 @@ an earlier version with another title, were read).
   hits the opposite vertex (`exit_cases`), the crossing is on that edge
   (`axisCrossingT_mem_Icc`) and lies ahead (`exit_ahead_above`, `exit_ahead_below`).
 
-### [formula: it-odt-energy] The optimal Delaunay triangulation, its energy and the update of Chen and Holst
+### [formula: it-odt-delaunay-optimality] The Delaunay connectivity minimizes the interpolation error; the boundary rule
 
 - **Statement.** For a point set `V` of the plane (convex hull `Ω`) and `u(x) = |x|²`, the error
   of the piecewise linear interpolant `u_I` on a triangulation `T`, `E(T) = ∫_Ω |u_I − u| dx`, is
   smallest for the Delaunay triangulation of `V` among all triangulations of `V` (Chen–Holst
   Theorem 2.3, proved in Chen–Xu; first in the plane by Rippa for `L^q`, `1 ≤ q < ∞`, and by
   D'Azevedo–Simpson for `q = ∞`). An *optimal Delaunay triangulation* minimizes `E` over the
-  positions of the interior vertices as well. For a uniform density
-  `E = (1/(d+1)) Σ_i |x_i|² |ω_i| − ∫_Ω |x|² dx` (Lemma 4.1, `ω_i` the star of `x_i`), and for an
-  interior vertex `∂_i E = (2/(d+1)) Σ_{τ_j ∈ ω_i} (x_i − c_j) |τ_j|` (Lemma 4.2, Eq. 4.5, `c_j`
-  the circumcentre of `τ_j`), `∂_ii E = (2/(d+1)) |ω_i|` (Lemma 4.3). The local scheme moves a
-  vertex to `x_i^new = (1 − α) x_i + α Σ_j (|τ_j|/|ω_i|) c_j` (Eq. 4.13, uniform density), starting
-  with `α = 1` and halving `α` (`1, ½, ¼, …`) while the new star has a simplex of negative signed
-  volume. For *boundary elements* (simplices with at least one vertex on the boundary) the
-  circumcentre is replaced by the barycentre (Sec. 4.2.1, "For boundary elements, use the
-  barycenter"), a remedy against stretched triangles at the boundary, not a gradient. Eq. 4.5
-  was first derived by Alliez, Cohen-Steiner, Yvinec, Desbrun (as Chen–Holst state after
-  Lemma 4.2). The Signpost paper (Sec. 4.3) applies Eq. 4.13 to inserted vertices of an intrinsic
-  triangulation, averaging the *vectors* to the circumcentres in the tangent plane of the
-  vertex, followed by Delaunay flipping.
+  positions of the interior vertices as well. For *boundary elements* (simplices with at least
+  one vertex on the boundary) Chen–Holst replace the circumcentre by the barycentre (Sec. 4.2.1,
+  "For boundary elements, use the barycenter"), a remedy against stretched triangles at the
+  boundary, not a gradient. The Signpost paper (Sec. 4.3) applies Eq. 4.13 to inserted vertices
+  of an intrinsic triangulation, averaging the *vectors* to the circumcentres in the tangent
+  plane of the vertex, followed by Delaunay flipping.
 - **Reference.** L. Chen, M. Holst, *Efficient mesh optimization schemes based on Optimal
   Delaunay Triangulations*, Computer Methods in Applied Mechanics and Engineering 200(9–12),
   967–984, 2011, <https://doi.org/10.1016/j.cma.2010.11.007>: Theorem 2.3, Lemmas 4.1–4.3
@@ -1029,32 +1022,28 @@ an earlier version with another title, were read).
   [24]). Not read: Chen–Xu and Alliez et al. (only their Crossref records); the statements
   attributed to them are as Chen–Holst report them. Chen–Holst do **not** claim that Eq. 4.13
   decreases the energy for every `α`; the line search guards validity of the mesh, not descent.
-- **Proved instead, in the plane, for one star with fixed connectivity**
-  (`DdgProofs/Intrinsic/Move.lean`, `[formula: it-odt-update]`): with a closed link
-  `p_0, …, p_n = p_0` and signed areas, the star's part of the energy
-  `S(x) = Σ_k (|x|² + |p_k|² + |p_{k+1}|²) |T_k| / 3` has the Fréchet derivative
-  `(2/3) Σ_k |T_k| (x − c_k)` (Eq. 4.5 for `d = 2`, `hasFDerivAt_odtEnergy`); it is exactly
-  `S(x) + ⟨∇S, v⟩ + |ω| |v|²/3` at `x + v` (Lemma 4.3; `odtEnergy_add`); the step of Eq. 4.13
-  changes it by `−(3|∇S|²/(4|ω|)) α (2 − α)` (`odtEnergy_step`), so every `0 ≤ α ≤ 2` is a
-  descent step on a star of positive area and `α = 1` is its minimum (`odtEnergy_step_le`); the
-  circumcentre and barycentre times the area are the oracle's closed forms
-  (`circumVec_equidistant`, `circumVec_layout`, `weightedBarycenter_eq`, and
-  `[formula: it-circumcenter-vector]`).
-- **Why not formalized.** Lemma 4.1 is proved triangle by triangle
-  (`DdgProofs/TriangleIntegral/Fem.lean`, `[formula: it-odt-interpolation-error]`): for
-  `u = |x|²` the interpolant lies above `u` on a triangle and
-  `∫_T |u_I − u| = (1/3) Σ_i |x_i|² |T| − ∫_T |x|² = (|T|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)`; for a star of
-  counter-clockwise triangles `S(x) = Σ_k ∫_{T_k} u_I = Σ_k ∫_{T_k} |u_I − u| + Σ_k ∫_{T_k} |y|²`.
-  Not formalized: that the triangles of a triangulation tile `Ω`, so that `Σ_k ∫_{T_k} |y|²` is
-  `∫_Ω |y|²` and does not depend on the vertex positions, and the optimality of the Delaunay
-  connectivity (Theorem 2.3), a statement about all triangulations of a point set (as for
-  `it-delaunay-existence-uniqueness`). The boundary rule is a heuristic, not a theorem.
+- **Proved instead** (formerly part of this entry, id `it-odt-energy`;
+  `DdgProofs/TriangleIntegral/Tiling.lean`, with `it-odt-interpolation-error` and `it-odt-update`):
+  Lemma 4.1 for a triangulation, as a Lebesgue integral over any tiling of `Ω` by the triangles
+  (`IsTiling`: union `Ω`, disjoint interiors; boundaries of triangles are null sets),
+  `E = Σ_T (|T|/3) Σ_i |x_i|² − ∫_Ω |x|² = (1/3) Σ_i |x_i|² |ω_i| − ∫_Ω |x|²
+  = Σ_T (|T|/12)(ℓ₀₁² + ℓ₁₂² + ℓ₂₀²)`; for a fan around `x` plus fixed triangles,
+  `E(x) = S(x) + C − ∫_Ω |y|²` with the star energy `S = odtEnergy` of `Intrinsic/Move.lean`, whose
+  derivative (Eq. 4.5), Hessian (Lemma 4.3) and the exact change under the step of Eq. 4.13 are
+  proved there; so the step with `0 ≤ α ≤ 2` lowers `E` itself and `α = 1` minimizes it, whenever
+  the moved fan still tiles the same region (`odt_error_step_le`). The tiling is a hypothesis: that
+  the moved fan tiles the same star region is not proved here (the line search of N21 keeps every
+  triangle of the star positively oriented, which the theorems also assume).
+- **Why not formalized.** Theorem 2.3 is a statement about all triangulations of a point set (the
+  lifting of `V` to the paraboloid and the lower convex hull, as for
+  `it-delaunay-existence-uniqueness`); triangulations of a point set are not modelled in this
+  tree and Mathlib has no Delaunay triangulation. The boundary rule is a heuristic, not a theorem.
 - **What depends on it.** The update of the optimal Delaunay triangulation (SPEC §4, N21) and the
   barycentres for triangles at the boundary. That flipping to Delaunay after a move does not
   increase `E` is Theorem 2.3 in the plane; for an intrinsic triangulation it is the intrinsic
   analogue (`it-rippa-theorem`, Rippa's theorem being the `L^q` case). Not claimed: that the
   intrinsic iteration converges, or that a step shortened to stay in the star (N19, N20) keeps
-  the descent beyond what `odtEnergy_step_le` states for one planar star.
+  the descent beyond what `odt_error_step_le` states for a planar star.
 
 ### [formula: it-odt-target-length-splits] Splitting edges longer than a target length between optimization steps
 
@@ -1222,16 +1211,6 @@ machine-checked: the entries below, and everything about rounding and the solver
   for the weights); the margin of SPEC N45 is a measurement, not a theorem.
 - **What depends on it.** `vector::check_maximum_principle` and the README's table.
 
-### [formula: app-amr-edge-flux] The flux of a linear function through a side
-
-- **Statement.** In a triangle with corners `i, j, k` and corner angles `θ`, the outward
-  flux of a linear `u` through the side `ij` is `ℓ_ij ∇u·ν = cot θ_j (u_i − u_k) + cot θ_i (u_j − u_k)`.
-- **Reference.** The cotan formula (`cotan-fem-stiffness`): `∇b_i · ∇b_j = −cot θ_k / 2|T|`
-  and `ℓ_ij ν = −2|T| ∇b_k`.
-- **Why not formalized.** Plane geometry of one triangle; the integrals `∫_T ∇b_i·∇b_j` are
-  proved (`cotan-fem-stiffness`), the flux identity itself is not stated.
-- **What depends on it.** The jump residuals of `amr::estimate`.
-
 ### [formula: app-amr-residual-estimator] The residual a posteriori error estimator and the oscillation
 
 - **Statement.** For `(c + Δ)u = f` and its linear finite element solution `u_H`, with the
@@ -1247,8 +1226,10 @@ machine-checked: the entries below, and everything about rounding and the solver
   needed form. Proved (`DdgProofs/TriangleIntegral/Fem.lean`, `[formula: app-amr-element-norms]`):
   the element norms as `estimate` evaluates them, `‖R‖²_T = (|T|/6)(Σ r_i² + Σ_{i<j} r_i r_j)` and
   `‖R − R̄‖²_T = ‖R‖²_T − |T| R̄²` for linear `R` with corner values `r`, `R̄` their mean (which is
-  the mean of `R` over `T`). The side term `ℓ_S ‖J_S‖²_S = (ℓ_S J_S)²` for a constant jump is not
-  stated.
+  the mean of `R` over `T`); and the jump terms (`DdgProofs/TriangleIntegral/Flux.lean`,
+  `[formula: app-amr-edge-flux]`): `side_flux` is `ℓ ∇u·ν` and the two fluxes of an interior side
+  add up to `ℓ` times the jump of the normal derivative. The side term `ℓ_S ‖J_S‖²_S = (ℓ_S J_S)²`
+  for a constant jump (a line integral) is not stated.
 - **What depends on it.** `amr::estimate` and the marking; nothing of correctness of a solve.
   For a point source the estimator is not an upper bound of anything finite (SPEC N47).
 
@@ -2004,24 +1985,6 @@ are not cited here).
   Table 1).
 - **What depends on it.** Robustness on near-degenerate inputs, not correctness: the operation is
   off by default in the library and reported when on (SPEC §7).
-
-### [formula: ic-transfer-mass-integral] The pieces of the common subdivision tile the input triangle
-
-- **Statement.** The faces of the common subdivision inside an input triangle `T` tile it, and the
-  P1 mass formula `Area/12 (1 + δ_ab)` is the integral of `λ_a λ_b` over a triangle; hence
-  `P₀ᵀ M_S P₀ = M₀` exactly (SPEC §6, `ic-transfer-mass-identity`).
-- **Reference.** P. G. Ciarlet, *The Finite Element Method for Elliptic Problems*, North-Holland
-  1978, Sec. 4.1 (exact integration of polynomials over a simplex); IC paper Sec. 4.3.
-- **Source check.** IC paper Sec. 4.3 read; Ciarlet not re-read (standard finite-element fact).
-- **Why not formalized.** Planar subdivisions are not set up in this tree, nor the additivity of the
-  integral over the pieces of a tiling. The integral over one triangle is proved
-  (`DdgProofs/TriangleIntegral/Fem.lean`: `∫_T λ_a λ_b = A/6, A/12` and `∫_T (Σ u_i λ_i)² =
-  galerkinForm`, `[formula: app-fem-galerkin-mass]`). Machine-checked instead (`DdgProofs/IntegerCoords/Transfer.lean`, `[formula:
-  ic-transfer-mass-identity]`): the exact finite identity — the piece mass formula, that the whole
-  triangle gives `M₀`, and that it is additive under splitting a triangle at any point of its plane,
-  an edge, and over the fan of a convex polygon from any apex.
-- **What depends on it.** That the transfer system of Eq. 14 uses `M₀`; the Rust code assembles
-  `P₀ᵀ M_S P₀` and checks it against `M₀` numerically (SPEC §6).
 
 ### [formula: ic-vertex-removal-delta] Removing an inserted vertex of a Δ-complex by flips (open)
 

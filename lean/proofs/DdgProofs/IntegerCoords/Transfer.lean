@@ -35,13 +35,12 @@ minimizer `f̂` of `‖f − f̂‖² = (P₁f − P₀f̂)ᵀ M (P₁f − P₀
   `λ_a`, `λ_b`). Proved: the piece equal to `T` gives `M₀ / Area(T)`, i.e. `(1 + δ_ab)/12`
   (`pieceMass_one`); `pieceMass` is additive under splitting a (signed) triangle at any point of its
   plane into three (`pieceMass_split`), hence under splitting an edge (`pieceMass_split_edge`) and
-  over any fan of a convex polygon, independently of the apex (`pieceMass_fan_apex`). **Cited**,
-  not formalized: that the pieces of the common subdivision tile `T` (a planar subdivision of a
-  triangle into triangles has, as signed chains, the triangle as its sum, so the valuation
-  `pieceMass` sums to `(1 + δ_ab)/12`), and the exactness of the P1 mass formula as an integral
-  (`∫_T λ_a λ_b = Area/12 (1 + δ_ab)`); both are standard finite-element facts (e.g. Ciarlet,
-  *The Finite Element Method for Elliptic Problems*, 1978, Sec. 4.1), the latter checked numerically
-  in Rust.
+  over any fan of a convex polygon, independently of the apex (`pieceMass_fan_apex`). As integrals
+  (`ic-transfer-mass-integral`, `DdgProofs/TriangleIntegral/Tiling.lean`): the contribution of a
+  piece is `∫_piece λ_a λ_b`, and for pieces that tile `T` (a hypothesis: union `T`, disjoint
+  interiors) the contributions sum to `∫_T λ_a λ_b = Area/12 (1 + δ_ab)`, so `Σ pieceMass` over
+  pieces of the orientation of `T` is `pieceMass_one`. That the faces of the common subdivision
+  tile their input triangle is not proved (it is checked numerically in Rust).
 -/
 
 namespace DdgProofs

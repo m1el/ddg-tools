@@ -17,9 +17,9 @@
 //! ```
 //!
 //! The matrix on the left is the Galerkin mass matrix `M₀` of the input mesh, exactly: on every
-//! input triangle the pieces of `S` are linear (`ic-transfer-mass-identity`, with the tiling of
-//! the triangle and the exactness of the P1 mass formula cited as `ic-transfer-mass-integral`,
-//! Ciarlet 1978). [`Transfer`] still forms `P₀ᵀ M_S P₀` from the pieces instead of using the
+//! input triangle the pieces of `S` are linear (`ic-transfer-mass-identity`; as integrals,
+//! `ic-transfer-mass-integral`: a piece contributes `∫_piece λ_a λ_b`, and pieces that tile the
+//! input triangle sum to its P1 mass integral; the tiling itself is a hypothesis of the proof). [`Transfer`] still forms `P₀ᵀ M_S P₀` from the pieces instead of using the
 //! mesh's own `M₀`, which is the check of the identity (`tests/transfer.rs` compares the two);
 //! the factorization of it is kept for repeated transfers. The reverse direction `T⁰ → T¹`
 //! solves `M₁ ĝ = P₁ᵀ M_S P₀ g` with `M₁ = P₁ᵀ M_S P₁`, the Galerkin mass matrix of `T¹`.
@@ -50,8 +50,9 @@
 //! # Formula ids
 //!
 //! `ic-transfer-normal-equations` (Lean `transfer_minimizer_iff`, `transfer_normal_unique`) is
-//! tagged on [`Transfer::to_input`]; `ic-transfer-mass-identity` on [`Transfer::new`]. Not in
-//! Lean or `CITED.md` yet and so not tagged: `ic-transfer-mass-integral`.
+//! tagged on [`Transfer::to_input`]; `ic-transfer-mass-identity` and `ic-transfer-mass-integral`
+//! (Lean `integral_piece_mass`, `transfer_mass_tiling`) on [`Transfer::new`]; the area of a fan
+//! triangle, `|det β| · Area(T)` (Lean `area_piece`), on `triangle_areas`.
 
 use std::time::{Duration, Instant};
 
@@ -192,6 +193,8 @@ fn det3(m: &[[f64; 3]; 3]) -> f64 {
 
 /// The areas of the fan triangles of the pieces, from the barycentric coordinates of their
 /// corners in the input face and the area of that face.
+///
+/// [formula: ic-transfer-mass-integral]
 fn triangle_areas(
     tri: &IntegerTriangulation,
     overlay: &Overlay,
@@ -273,6 +276,7 @@ impl Transfer {
     /// `M₀` is formed from the pieces, not from the input mesh; that it equals the input mesh's
     /// Galerkin mass matrix is `ic-transfer-mass-identity`, checked by the tests.
     /// [formula: ic-transfer-mass-identity]
+    /// [formula: ic-transfer-mass-integral]
     ///
     /// # Errors
     /// [`IntegerError::Intrinsic`] (`InvalidOptions`) if `subdivision` is not the subdivision

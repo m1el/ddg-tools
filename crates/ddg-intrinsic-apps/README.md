@@ -612,12 +612,13 @@ solution difference of 0 at the input vertices.
   `app-vector-fd-connection-laplacian`, `app-amr-map-distortion`
   (`lean/proofs/DdgProofs/Intrinsic/AppsAmrVector.lean`); `app-steiner-fermat-point`,
   `app-vector-transport`, `app-vector-fem-connection-laplacian`, `app-vector-singularity-index`,
-  `app-vector-maximum-principle`, `app-amr-edge-flux`, `app-amr-residual-estimator`,
+  `app-vector-maximum-principle`, `app-amr-residual-estimator`,
   `app-amr-bulk-marking` are cited (`lean/proofs/CITED.md`); the stiffness matrix is
   `cotan-fem-stiffness`, the Laplacian `cotan-laplacian`. As Lebesgue integrals over a triangle
   (`lean/proofs/DdgProofs/TriangleIntegral/`): the Galerkin mass entries, the stiffness entries,
   the area-coordinate rule and slice formula of `knoeppel.rs` (`fem-area-coordinate-rule`) and
-  the element norms of `amr::estimate` (`app-amr-element-norms`) are machine-checked.
+  the element norms of `amr::estimate` (`app-amr-element-norms`) and its side fluxes
+  (`app-amr-edge-flux`) are machine-checked.
 
 ## Reproducing the tables
 

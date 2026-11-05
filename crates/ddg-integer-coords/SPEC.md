@@ -770,8 +770,9 @@ Given `f` on `V¹` (piecewise linear on `T¹`), `f̂` on `V⁰` minimizing
 (Eq. 14), `M_S` the Galerkin mass matrix of the common subdivision (`ddg_intrinsic_apps::fem`
 conventions). The paper writes `M₀ f̂ = P₀ᵀ M_S P₁ f`; `P₀ᵀ M_S P₀ = M₀` holds exactly because the
 pieces of an input triangle are linear on it (`ic-transfer-mass-identity`: the finite identity
-for the pieces of Alg. 9, proved; `ic-transfer-mass-integral`: the tiling and the P1 integral,
-cited, Ciarlet 1978), and is checked numerically. Also the reverse direction (`T⁰ → T¹`) and plain copying, for the comparison of
+for the pieces of Alg. 9, proved; `ic-transfer-mass-integral`: the per-piece assembly is the
+integral of `λ_a λ_b` over the piece and sums to the P1 integral over pieces that tile the input
+triangle, proved with the tiling as a hypothesis), and is checked numerically. Also the reverse direction (`T⁰ → T¹`) and plain copying, for the comparison of
 Fig. 14. The factorization of `M₀` is kept for repeated transfers. Report: residual, the size of
 `S`.
 
@@ -861,7 +862,7 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-recover-barycentric` | Eq. 15–16 reproduce `q⁰` exactly for any solution `ξ`, when the corner positions are exact (affine combination) | A |
 | `ic-tangent-length` | Eq. 5 (law of cosines in barycentric form) | A (proved equal to `it-point-distances`, which the code evaluates; I25) |
 | `ic-transfer-mass-identity`, `ic-transfer-normal-equations` | the finite identity behind `P₀ᵀ M_S P₀ = M₀`; Eq. 14 is the minimizer of Eq. 13 | A |
-| `ic-transfer-mass-integral` | the pieces tile the input triangle and the P1 mass integral | CITED (Ciarlet 1978) |
+| `ic-transfer-mass-integral` | the per-piece mass is `∫_piece λ_aλ_b`; over pieces that tile the input triangle it sums to the P1 mass integral | B (proved, `TriangleIntegral/Tiling.lean`; the tiling is a hypothesis) |
 | `ic-vertex-removal` | Thm. D.1: a simplicial star of angle sum `2π` and degree `> 3` has a spoke whose quadrilateral has all angles `≤ π` (strictly convex when no inner corner is `π`; the strict version is false in general) | B′ |
 | `ic-vertex-removal-delta` | the Δ-complex case (paper: conjecture) | attempt, bounded; else CITED as open with I8's runtime refusal |
 | `ic-normal-isotopy` | complex models ↔ normal isotopy classes of curves on the surface (Kneser 1929, Haken 1961; Schaefer, Sedgwick, Štefankovič 2002; Erickson, Nayyeri 2013) | D, CITED |
