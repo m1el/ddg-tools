@@ -42,6 +42,10 @@ import DdgProofs.Cuts.VertexLimit
 import DdgProofs.Cuts.Stop
 import DdgProofs.Intrinsic.Diamond
 import DdgProofs.Intrinsic.Delaunay
+import DdgProofs.Delaunay.Local
+import DdgProofs.Delaunay.Rippa
+import DdgProofs.Delaunay.Potential
+import DdgProofs.Delaunay.Encroachment
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric

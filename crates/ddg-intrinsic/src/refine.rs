@@ -521,6 +521,11 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
         }
     }
 
+    /// A boundary edge is encroached when the angle opposite it, computed from the lengths of its
+    /// triangle, exceeds `π/2` (by more than the tolerance): in the triangle's layout the opposite
+    /// vertex then lies strictly inside the circle with the edge as diameter.
+    ///
+    /// [formula: it-encroachment-angle]
     fn is_encroached(&self, e: usize) -> bool {
         let c = self.tri.complex();
         let h = c.edge_halfedge[e] as usize;

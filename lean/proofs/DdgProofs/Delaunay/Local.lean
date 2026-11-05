@@ -161,7 +161,9 @@ theorem flipLength_sq_law_of_cosines (hk : IsTriangle a b c) (hl : IsTriangle a 
 
 /-- **Locally Delaunay ⟺ nonnegative cotan weight** (B–S Lemma 9): `θ_k + θ_l ≤ π ⟺
 cot θ_k + cot θ_l ≥ 0`, with the cotangents computed from the lengths
-(`cornerCot_eq_cot`). -/
+(`cornerCot_eq_cot`).
+
+[formula: it-delaunay-condition] -/
 theorem isLocallyDelaunay_iff_cot_nonneg (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
     IsLocallyDelaunay a b c d e ↔ 0 ≤ cornerCot a b c + cornerCot a d e := by
   rw [IsLocallyDelaunay, Intrinsic.angle_sum_le_pi_iff_cotanWeight_nonneg hk hl,
@@ -332,7 +334,9 @@ private theorem dist2_eq_iff (p q r : ℝ × ℝ) :
   rfl
 
 /-- **Not locally Delaunay ⟺ `l` lies strictly inside the circumcircle of `i, j, k`** in the
-planar layout of the diamond (B–S Lemma 9; Sibson 1978 in the plane). -/
+planar layout of the diamond (B–S Lemma 9; Sibson 1978 in the plane).
+
+[formula: it-delaunay-condition] -/
 theorem inside_circumcircle_iff (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
     dist2 (circumcenterAbove a b c) (apexBelow a d e) < dist2 (circumcenterAbove a b c) (0, 0) ↔
       ¬ IsLocallyDelaunay a b c d e := by
@@ -447,7 +451,9 @@ theorem flip_area (hk : IsTriangle a b c) (hl : IsTriangle a d e)
   (opposite `b`).
 
 Hence the sum of the corner angles at each of `i, j, k, l` (its cone angle, if all its corners
-are counted) is the same before and after the flip. -/
+are counted) is the same before and after the flip.
+
+[formula: it-angle-normalization] -/
 theorem flip_corner_angles (hk : IsTriangle a b c) (hl : IsTriangle a d e)
     (hconv : IsConvexDiamond a b c d e) :
     cornerAngle (flipLength a b c d e) b d = cornerAngle c a b + cornerAngle e a d ∧
@@ -458,19 +464,6 @@ theorem flip_corner_angles (hk : IsTriangle a b c) (hl : IsTriangle a d e)
         cornerAngle a d e := by
   rw [flipLength_eq_flippedLengthFromLengths hk hl]
   exact Intrinsic.flip_angle_sums hk hl ((isConvexDiamond_iff_diamondConvex hk hl).mp hconv)
-
-/-- **The cone angles at the four vertices are kept**, in the form of sums: the six corner
-angles at `i, j, k, l` before and after the flip, grouped by vertex, have the same sums. (The
-corners outside the diamond do not change.) -/
-theorem flip_angle_sum_at_vertices (hk : IsTriangle a b c) (hl : IsTriangle a d e)
-    (hconv : IsConvexDiamond a b c d e) :
-    cornerAngle (flipLength a b c d e) b d = cornerAngle c a b + cornerAngle e a d ∧
-      cornerAngle (flipLength a b c d e) c e = cornerAngle b c a + cornerAngle d e a ∧
-      cornerAngle e (flipLength a b c d e) c + cornerAngle d (flipLength a b c d e) b =
-        cornerAngle a b c ∧
-      cornerAngle c e (flipLength a b c d e) + cornerAngle b d (flipLength a b c d e) =
-        cornerAngle a d e :=
-  flip_corner_angles hk hl hconv
 
 /-- **The opposite angles of the new edge sum to `2π − (θ_k + θ_l)`.** -/
 theorem flip_opposite_angles (hk : IsTriangle a b c) (hl : IsTriangle a d e)
@@ -509,7 +502,9 @@ uses). For a diamond `(a, b, c, d, e)` of two nondegenerate triangles with `θ_k
 3. the new edge is locally Delaunay, strictly;
 4. flipping the new edge gives back the length `a`;
 5. the corner angles at `i, j, k, l` add up as in `flip_corner_angles`;
-6. the total area is unchanged. -/
+6. the total area is unchanged.
+
+[formula: it-delaunay-condition] -/
 theorem flip_of_not_isLocallyDelaunay (hk : IsTriangle a b c) (hl : IsTriangle a d e)
     (h : ¬ IsLocallyDelaunay a b c d e) :
     IsConvexDiamond a b c d e ∧
