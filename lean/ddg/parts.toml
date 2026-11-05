@@ -1,0 +1,46 @@
+# Parts of the library `DDG` and their DIRECT dependencies (LIBRARY-PLAN.md section 1).
+# Checked by scripts/check-lean-dag.py: a file of part P may import DDG.Q only if Q is in the
+# transitive closure of P's deps. `dir` is the path below DDG/ (the longest matching dir wins).
+
+[parts.Geometry]
+deps = []
+
+[parts.Optimization]
+deps = []
+
+[parts.Mesh]
+deps = ["Geometry"]
+
+[parts.Laplace]
+deps = ["Mesh"]
+
+[parts.Intrinsic]
+deps = ["Geometry"]
+
+[parts.VectorFields]
+deps = ["Mesh"]
+
+[parts.FEM]
+deps = ["Laplace"]
+
+[parts.NormalCoords]
+deps = ["Intrinsic"]
+
+[parts.DelaunayPlanar]
+dir = "Delaunay/Planar"
+deps = ["Geometry", "FEM"]
+
+[parts.Delaunay]
+deps = ["DelaunayPlanar", "Intrinsic", "FEM", "Laplace", "Mesh"]
+
+[parts.Conformal]
+deps = ["FEM", "Laplace", "Mesh"]
+
+[parts.OptimalCones]
+deps = ["Optimization", "Conformal"]
+
+[parts.Repulsive]
+deps = ["Geometry"]
+
+[parts.SDF]
+deps = ["Geometry"]

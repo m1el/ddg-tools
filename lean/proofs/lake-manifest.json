@@ -3,6 +3,13 @@
  "packages":
  [{"type": "path",
    "scope": "",
+   "name": "ddg",
+   "manifestFile": "lake-manifest.json",
+   "inherited": false,
+   "dir": "../ddg",
+   "configFile": "lakefile.toml"},
+  {"type": "path",
+   "scope": "",
    "name": "ddgOracle",
    "manifestFile": "lake-manifest.json",
    "inherited": false,

@@ -20,3 +20,8 @@ name = "DdgProofs"
 [[require]]
 name = "ddgOracle"
 path = "../oracle"
+
+# The library `DDG` (Mathlib only): the reusable theory. `DdgProofs` is the application layer on top.
+[[require]]
+name = "ddg"
+path = "../ddg"

@@ -1,0 +1,90 @@
+name = "ddg"
+version = "0.1.0"
+defaultTargets = ["DDG"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+pp.unicode.fun = true
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.34.1"          # same rev as lean/proofs; bump both together
+
+# Umbrella: DDG.lean imports the part roots.
+[[lean_lib]]
+name = "DDG"
+
+# One library per part (the module DDG.<Part> imports every module of the part). Lake does not
+# enforce the part DAG: scripts/check-lean-dag.py does, against parts.toml.
+[[lean_lib]]
+name = "DDGGeometry"
+roots = ["DDG.Geometry"]
+globs = ["DDG.Geometry.+"]
+
+[[lean_lib]]
+name = "DDGOptimization"
+roots = ["DDG.Optimization"]
+globs = ["DDG.Optimization.+"]
+
+[[lean_lib]]
+name = "DDGMesh"
+roots = ["DDG.Mesh"]
+globs = ["DDG.Mesh.+"]
+
+[[lean_lib]]
+name = "DDGLaplace"
+roots = ["DDG.Laplace"]
+globs = ["DDG.Laplace.+"]
+
+[[lean_lib]]
+name = "DDGIntrinsic"
+roots = ["DDG.Intrinsic"]
+globs = ["DDG.Intrinsic.+"]
+
+[[lean_lib]]
+name = "DDGVectorFields"
+roots = ["DDG.VectorFields"]
+globs = ["DDG.VectorFields.+"]
+
+[[lean_lib]]
+name = "DDGFEM"
+roots = ["DDG.FEM"]
+globs = ["DDG.FEM.+"]
+
+[[lean_lib]]
+name = "DDGNormalCoords"
+roots = ["DDG.NormalCoords"]
+globs = ["DDG.NormalCoords.+"]
+
+[[lean_lib]]
+name = "DDGDelaunayPlanar"
+roots = ["DDG.Delaunay.Planar"]
+globs = ["DDG.Delaunay.Planar.+"]
+
+# DDG.Delaunay imports DDG.Delaunay.Planar and every other module below DDG/Delaunay/.
+[[lean_lib]]
+name = "DDGDelaunay"
+roots = ["DDG.Delaunay"]
+globs = ["DDG.Delaunay.+"]
+
+[[lean_lib]]
+name = "DDGConformal"
+roots = ["DDG.Conformal"]
+globs = ["DDG.Conformal.+"]
+
+[[lean_lib]]
+name = "DDGOptimalCones"
+roots = ["DDG.OptimalCones"]
+globs = ["DDG.OptimalCones.+"]
+
+[[lean_lib]]
+name = "DDGRepulsive"
+roots = ["DDG.Repulsive"]
+globs = ["DDG.Repulsive.+"]
+
+[[lean_lib]]
+name = "DDGSDF"
+roots = ["DDG.SDF"]
+globs = ["DDG.SDF.+"]

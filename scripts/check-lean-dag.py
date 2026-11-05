@@ -6,7 +6,8 @@ usage: check-lean-dag.py [--repo DIR] [--parts FILE] [--self-test]
 Reads lean/ddg/parts.toml:
 
     # one table per part; the part's modules are DDG.<name>[.*], files lean/ddg/DDG/<name>/**.lean
-    # (and lean/ddg/DDG/<name>.lean); `dir` overrides <name> when the directory differs.
+    # (and lean/ddg/DDG/<name>.lean); `dir` overrides <name> when the directory differs and may be a
+    # nested path such as "Delaunay/Planar" (the longest matching dir wins).
     # `deps` lists the DIRECT dependencies; the allowed set is their transitive closure.
     [parts.Geometry]
     deps = []
@@ -109,15 +110,23 @@ def closure(parts):
     return clo, errors
 
 
+def match_part(segs, parts):
+    """Part whose `dir` (a path like `Delaunay/Planar`, or one name) is the longest prefix of segs
+    (the segments after `DDG`), or None."""
+    best, blen = None, 0
+    for p, c in parts.items():
+        d = c['dir'].split('/')
+        if segs[:len(d)] == d and len(d) > blen:
+            best, blen = p, len(d)
+    return best
+
+
 def module_part(mod, parts):
     """The part of module `DDG.X.Y...`, or None."""
     segs = mod.split('.')
     if len(segs) < 2 or segs[0] != 'DDG':
         return None
-    for p, c in parts.items():
-        if segs[1] == c['dir']:
-            return p
-    return None
+    return match_part(segs[1:], parts)
 
 
 def check(ddg_dir, parts_file):
@@ -141,7 +150,7 @@ def check(ddg_dir, parts_file):
             segs = rel[:-5].split(os.sep)
             if segs[0] != 'DDG' or len(segs) == 1:
                 continue  # umbrella / other roots: only the forbidden-import rule applies
-            me = next((p for p, c in parts.items() if segs[1] == c['dir']), None)
+            me = match_part(segs[1:], parts)
             if me is None:
                 errors.append(f'{rel}: not in any declared part')
                 continue
