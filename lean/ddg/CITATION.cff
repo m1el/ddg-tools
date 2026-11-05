@@ -1,10 +1,7 @@
-# TODO(author check): the author entry below is taken from the git commit history
-# (git log --format='%an <%ae>'); the repository's LICENSE only says "ddg-tools contributors".
-# Please confirm name, affiliation and ORCID before publishing.
 cff-version: 1.2.0
 message: "If you use this library, please cite it as below, and cite the papers whose formulas you use (see README.md, section References)."
 title: "DDG: a formally verified library of discrete differential geometry"
-abstract: "A Lean 4 / Mathlib library of machine-checked theorems of discrete differential geometry (triangle meshes, the cotan Laplacian, intrinsic triangulations, Delaunay triangulations, discrete conformal geometry, normal coordinates, repulsive energies, signed distance functions), organised in 14 separately buildable parts."
+abstract: "A Lean 4 / Mathlib library of machine-checked theorems of discrete differential geometry. Developed for the purpose of formally verifying DDG algorithms."
 type: software
 version: 0.1.0
 license: MIT
@@ -12,6 +9,7 @@ authors:
   - family-names: "Malovitsa"
     given-names: "Igor"
     email: "igor.malovitsa@gmail.com"
+    orcid: https://orcid.org/0009-0003-7675-7659
 keywords:
   - "discrete differential geometry"
   - "Lean 4"
