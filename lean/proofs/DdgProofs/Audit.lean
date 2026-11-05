@@ -1007,6 +1007,35 @@ open DdgProofs
 #print axioms Delaunay.Planar.exists_delaunay_of_triangulation
 #print axioms Delaunay.Planar.isDelaunay_triangle
 #print axioms Delaunay.Planar.isLocallyDelaunay_dist2_iff
+-- The boundary fan on gluing data (DdgProofs/Delaunay/BoundaryFan.lean)
+#print axioms Delaunay.Gluing.eq_of_isBoundary_of_vertexOf_eq
+#print axioms Delaunay.Gluing.eq_of_isBoundary_of_vertexOf_next_eq
+#print axioms Delaunay.Gluing.boundaryCount_le_one
+#print axioms Delaunay.Gluing.boundaryInCount_le_one
+#print axioms Delaunay.Gluing.boundaryInCount_eq_boundaryCount
+#print axioms Delaunay.Gluing.boundaryCount_eq_one_iff
+#print axioms Delaunay.Gluing.boundaryCount_eq_zero_iff
+#print axioms Delaunay.Gluing.IsMetric.gauss_bonnet_boundary
+-- Planar Delaunay: uniqueness and the flip count (DdgProofs/Delaunay/Planar{Uniqueness,FlipCount}.lean)
+#print axioms Delaunay.Planar.liftPlane_bary
+#print axioms Delaunay.Planar.liftPlane_eq_of_eq
+#print axioms Delaunay.Planar.circleLift_eq_liftPlane_sub
+#print axioms Delaunay.Planar.inCircle_eq_zero_of_mem
+#print axioms Delaunay.Planar.exists_cocircular_of_not_mem
+#print axioms Delaunay.Planar.subset_of_isDelaunay
+#print axioms Delaunay.Planar.delaunay_unique
+#print axioms Delaunay.Planar.eq_of_isLocallyDelaunay
+#print axioms Delaunay.Planar.existsUnique_delaunay
+#print axioms Delaunay.Planar.liftPlane_sub_mul
+#print axioms Delaunay.Planar.liftPlane_le_of_mem
+#print axioms Delaunay.Planar.liftPlane_segment
+#print axioms Delaunay.Planar.exists_crossing
+#print axioms Delaunay.Planar.liftBelow_flip
+#print axioms Delaunay.Planar.liftBelow_of_reach
+#print axioms Delaunay.Planar.liftPlane_eq_of_mem_edge
+#print axioms Delaunay.Planar.not_mem_of_flipped
+#print axioms Delaunay.Planar.flipped_edge_not_mem
+#print axioms Delaunay.Planar.flip_count_le
 #print axioms Intrinsic.sum_normalized_interior
 #print axioms Intrinsic.sum_normalized_boundary
 #print axioms Intrinsic.angleScale_flat
