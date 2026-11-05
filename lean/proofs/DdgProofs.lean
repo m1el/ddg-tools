@@ -52,6 +52,11 @@ import DdgProofs.Delaunay.Metric
 import DdgProofs.Delaunay.FromTriMesh
 import DdgProofs.Delaunay.Termination
 import DdgProofs.Delaunay.FlipQueue
+import DdgProofs.Delaunay.PlanarBasic
+import DdgProofs.Delaunay.PlanarFlip
+import DdgProofs.Delaunay.PlanarTermination
+import DdgProofs.Delaunay.PlanarLemma
+import DdgProofs.Delaunay.PlanarBridge
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric

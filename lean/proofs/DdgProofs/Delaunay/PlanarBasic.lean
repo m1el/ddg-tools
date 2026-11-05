@@ -31,14 +31,14 @@ lengths are `sqDist2`. Nothing here uses the sup metric of the type `ℝ × ℝ`
   inside the circumcircle of `a b c`, then `a` and `b` lie on opposite sides of `cd`
   (`crossing_of_inCircumcircle`) — the planar form of `isConvexDiamond_of_not_isLocallyDelaunay`
   in `DdgProofs/Delaunay/Local.lean`; it rests on the identity `inCircle_mul_sda_eq`.
-* **Monotonicity of the power across an edge** (`circlePower_le_of_not_inCircumcircle`): if the
+* **Monotonicity of the power across an edge** (`circleLift_le_of_not_inCircumcircle`): if the
   edge `ab` of `a b c` and `a b d` is locally Delaunay, then every point `p` strictly on `d`'s side
   of `ab` has a smaller power with respect to the circle of `a b d` than to that of `a b c`. This is
   the step of the walk in the proof of Delaunay's lemma; it rests on the three-term identity
   `inCircle_pluecker`.
-* **The lifted volume of a diamond.** For a strictly convex quadrilateral the change of
-  `Σ area(t) · Σ_{v ∈ t} |v|²` when the diagonal `ab` is replaced by `cd` is
-  `sda(a,b,c) · inCircle a b c d / (2 |sda(a,b,c)|)` (`liftQuad_flip`); positive exactly when `d` is
+* **The lifted volume of a diamond.** For a strictly convex quadrilateral,
+  `Σ area(t) · Σ_{v ∈ t} |v|²` decreases by `sda(a,b,c) · inCircle a b c d / (2 |sda(a,b,c)|)` when
+  the diagonal `ab` is replaced by `cd` (`liftQuad_flip`); this is positive exactly when `d` is
   inside the circumcircle of `a b c`.
 
 ## References

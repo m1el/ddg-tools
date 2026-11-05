@@ -776,6 +776,15 @@ an earlier version with another title, were read).
   cite them). Corrected: the existence is no longer attributed to Indermitte et al. as a separate
   theorem, uniqueness to B–S only, Rivin as the first to state it; the boundary case
   (caps) is B–S's, not the Signpost paper's (the Signpost paper was not checked for it).
+- **Proved, planar case (2026-11-05), existence only.** For a finite point set `S ⊂ ℝ²`:
+  Delaunay's lemma, the planar form of B–S Proposition 10 (a triangulation of `S` that is locally
+  Delaunay at every interior edge has empty circumcircles, `delaunay_lemma`; Delaunay ⟺ locally
+  Delaunay, `isDelaunay_iff_isLocallyDelaunay`; empty circumdisk with the explicit circumcenter,
+  `isDelaunay_iff_empty_circumdisk`), and existence of a Delaunay triangulation of `S` **given some
+  triangulation of `S`** (`exists_delaunay_of_triangulation`; the existence of a first
+  triangulation, e.g. by a sweep, is a hypothesis), `DdgProofs/Delaunay/PlanarLemma.lean`
+  (`delaunay-lemma`). The planar local test equals layer 1's `θ_k + θ_l ≤ π` on the Euclidean
+  lengths (`isLocallyDelaunay_dist2_iff`). Not proved: uniqueness up to ties, and the surface case.
 - **Why not formalized.** It is a global statement about all geodesic triangulations of a
   surface; neither piecewise flat surfaces nor immersed disks are in Mathlib.
 - **What depends on it.** That the result of Delaunay flipping is *the* Delaunay triangulation up
@@ -820,6 +829,19 @@ an earlier version with another title, were read).
   (arXiv:1007.3350; termination through a well-founded relation on a finite set, the decreasing
   quantity being the volume under the triangles lifted to the paraboloid). It is not a proof of the
   surface statement above (survey of 2026-10-31; the development's source could not be fetched).
+- **Proved, planar case (2026-11-05).** For a finite point set `S ⊂ ℝ²` and triangulations of `S`
+  in the point-set model (triangles with corners in `S` covering `conv S` with disjoint interiors,
+  every point of `S` in a triangle a corner of it), `DdgProofs/Delaunay/Planar*.lean`: the Lawson
+  flip of a strictly convex quadrilateral is again a triangulation of `S` (`lawson_flip`,
+  `planar-lawson-flip`), an edge with the fourth corner strictly inside the circumcircle always
+  has a strictly convex quadrilateral (`crossing_of_inCircumcircle`), the lifted volume
+  `Σ area(t) Σ_{v∈t} |v|²` drops by exactly `sda·inCircle/(2|sda|) > 0` at every such flip
+  (`liftPotential_flip`, `planar-flip-potential`), there are at most `2^(|S| choose 3)`
+  triangulations, so the flip relation is well founded and every flip sequence has at most that
+  many steps (`wellFounded_flipStep`, `flip_sequence_length_le`, `planar-flip-termination`), and it
+  ends in a locally Delaunay — by Delaunay's lemma (`delaunay_lemma`, `delaunay-lemma`) a
+  Delaunay — triangulation (`exists_flips_to_delaunay`). Not proved: the `O(n²)` bound. Planar
+  only; the surface statement and its finiteness hypothesis below are unchanged.
 - **Proved (trimmed, 2026-11-05, layer 3).** Everything but the finiteness, on the gluing data of
   `DdgProofs/Delaunay/Complex.lean` (self-loops, multiple edges, faces glued to themselves):
   `DdgProofs/Delaunay/Termination.lean` (`it-delaunay-self-glued`, `it-delaunay-potential`,

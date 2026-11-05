@@ -736,6 +736,24 @@ theorem exists_delaunay_of_triangulation {S : Finset (ℝ × ℝ)}
   obtain ⟨T', -, hT', hD⟩ := exists_flips_to_delaunay hT
   exact ⟨T', hT', hD⟩
 
+/-- A single nondegenerate triangle is a triangulation of its three corners (so the hypotheses
+are satisfiable), and it is Delaunay. -/
+theorem isTriangulation_triangle {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) :
+    IsTriangulation {a, b, c} {{a, b, c}} := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · intro t ht; rw [Finset.mem_singleton.1 ht]; exact ⟨a, b, c, h, rfl⟩
+  · intro t ht; rw [Finset.mem_singleton.1 ht]
+  · simp [hull]
+  · simp
+  · intro t ht s hs _; rwa [Finset.mem_singleton.1 ht]
+
+theorem isDelaunay_triangle {a b c : ℝ × ℝ} (h : sda a b c ≠ 0) :
+    IsDelaunay {a, b, c} {{a, b, c}} := by
+  have hT := isTriangulation_triangle h
+  refine delaunay_lemma hT fun i j k l h1 h2 hkl => ?_
+  exact absurd ((Finset.mem_singleton.1 h1).trans (Finset.mem_singleton.1 h2).symm)
+    (IsTriangulation.triple_ne hkl (hT.sda_ne_zero h2))
+
 end Planar
 
 end Delaunay
